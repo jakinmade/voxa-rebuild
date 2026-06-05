@@ -5,9 +5,15 @@ build-backend = "hatchling.build"
 [project]
 name = "voxa-calibration"
 version = "1.0.0"
-description = "Voxa — voxa-calibration"
+description = "Voxa Layer 4 — Calibration Engine"
 requires-python = ">=3.12"
-dependencies = ["voxa-core", "pydantic>=2.0", "structlog>=24.0"]
+dependencies = [
+    "voxa-core",
+    "voxa-profile",
+    "voxa-rendering",
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/voxa_calibration"]
