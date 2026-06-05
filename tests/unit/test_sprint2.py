@@ -350,13 +350,10 @@ class TestLLMEscalation:
 
     @pytest.mark.asyncio
     async def test_llm_escalation_returns_tuple(self):
-        from voxa_calibration.sprint2 import llm_classify_edit
+        from voxa_rendering.llm_boundary import classify_edit_via_llm as llm_classify_edit
         # No API key in test environment — should return gracefully
-        edit_class, confidence = await llm_classify_edit(
-            original="This might be worth exploring.",
-            edited="Explore this.",
-            user_instruction="",
-        )
+        prompt = "Classify: original=\'This might be worth exploring.\' edited=\'Explore this.\'"
+        edit_class, confidence = await llm_classify_edit(prompt)
         # Without API key, returns AMBIGUOUS and 0.0 — that's the correct fallback
         assert edit_class in list(EditClass)
         assert 0.0 <= confidence <= 1.0

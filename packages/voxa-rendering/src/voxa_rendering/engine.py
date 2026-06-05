@@ -23,7 +23,6 @@ from __future__ import annotations
 import os
 from uuid import UUID, uuid4
 
-import httpx
 import structlog
 
 from voxa_core.bootstrap import check_bootstrap
@@ -40,11 +39,6 @@ from voxa_core.enums import LifecycleStage
 logger = structlog.get_logger(__name__)
 
 RENDER_ENGINE_VERSION = "v9.1.0-sprint1"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-
-# LLM is called only from this module — boundary contract enforced structurally
-_ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------
@@ -179,34 +173,13 @@ RULES:
 
 async def _call_llm(system_prompt: str, input_text: str) -> str:
     """
-    Calls the Claude API within the rendering boundary.
-    Returns the rewritten text only.
+    Calls the Claude API via the LLM boundary module.
+    All Anthropic API calls route through voxa_rendering.llm_boundary.
     LLM boundary contract: this function may not be called from any layer
     other than voxa-rendering.
     """
-    if not _ANTHROPIC_API_KEY:
-        logger.warning("llm_api_key_missing_using_passthrough")
-        return input_text  # Passthrough if no key — for Sprint 1 local testing
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            ANTHROPIC_API_URL,
-            headers={
-                "x-api-key": _ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": CLAUDE_MODEL,
-                "max_tokens": 1024,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": input_text}],
-            },
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["content"][0]["text"]
+    from voxa_rendering.llm_boundary import rewrite_with_constraints
+    return await rewrite_with_constraints(system_prompt, input_text)
 
 
 # ---------------------------------------------------------------------------

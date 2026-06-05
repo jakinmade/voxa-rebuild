@@ -16,7 +16,6 @@ import os
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-import httpx
 import structlog
 
 from voxa_core.entities import (
@@ -42,12 +41,11 @@ from voxa_profile.lifecycle import (
 
 logger = structlog.get_logger(__name__)
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
-_ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
 # LLM escalation threshold — if rules-based confidence below this, escalate
 LLM_ESCALATION_CONFIDENCE_THRESHOLD = 0.55
+
+# LLM calls are delegated to the rendering layer — boundary contract enforced
+# The calibration layer never calls the Anthropic API directly
 
 # Self-report conflict: N contrary edits before onboarding preference is challenged
 SELF_REPORT_CONFLICT_THRESHOLD = 3
@@ -171,47 +169,11 @@ Respond with JSON only. No preamble. Format:
 {{"classification": "voice|content|intent|factual|format", "confidence": 0.0-1.0, "reasoning": "one sentence"}}"""
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                ANTHROPIC_API_URL,
-                headers={
-                    "x-api-key": _ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": CLAUDE_MODEL,
-                    "max_tokens": 150,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=15.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-            text = data["content"][0]["text"].strip()
-
-            import json
-            parsed = json.loads(text)
-            classification = parsed.get("classification", "ambiguous")
-            confidence = float(parsed.get("confidence", 0.0))
-
-            logger.info(
-                "llm_escalation_result",
-                classification=classification,
-                confidence=confidence,
-                reasoning=parsed.get("reasoning", ""),
-            )
-
-            # Map string to enum
-            class_map = {
-                "voice": EditClass.VOICE,
-                "content": EditClass.CONTENT,
-                "intent": EditClass.INTENT,
-                "factual": EditClass.FACTUAL,
-                "format": EditClass.FORMAT,
-            }
-            return class_map.get(classification, EditClass.AMBIGUOUS), confidence
-
+        # Delegate to the rendering layer — boundary contract requires LLM calls
+        # to originate only from voxa-rendering. Calibration passes the prompt;
+        # rendering executes the call and returns the raw text.
+        from voxa_rendering.llm_boundary import classify_edit_via_llm
+        return await classify_edit_via_llm(prompt)
     except Exception as e:
         logger.warning("llm_escalation_failed", error=str(e))
         return EditClass.AMBIGUOUS, 0.0

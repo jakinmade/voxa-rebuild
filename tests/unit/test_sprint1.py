@@ -425,8 +425,8 @@ class TestLLMBoundaryContract:
             )
 
     def test_llm_api_url_only_in_rendering_layer(self):
-        import voxa_rendering.engine as rendering_module
-        source = open(rendering_module.__file__).read()
+        import voxa_rendering.llm_boundary as boundary_module
+        source = open(boundary_module.__file__).read()
         assert "ANTHROPIC_API_URL" in source
 
 
