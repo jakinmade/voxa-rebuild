@@ -51,6 +51,7 @@ _calibration_events: list[CalibrationEvent] = []
 _session_counts: dict[UUID, int] = {}
 _candidates: dict[UUID, list] = {}
 _rule_traces: dict[UUID, object] = {}
+_org_policies: dict[str, object] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +289,17 @@ async def get_voice_history(user_id: UUID) -> list[dict]:
         }
         for v in history
     ]
+
+
+# Sprint 3 routes
+from voxa_api.sprint3_routes import create_sprint3_router as _s3r
+_sprint3_router = _s3r(
+    profiles=_profiles,
+    version_history=_version_history,
+    session_counts=_session_counts,
+    org_policies=_org_policies,
+)
+app.include_router(_sprint3_router)
 
 
 # Sprint 2 routes
