@@ -49,6 +49,8 @@ _observations: dict[UUID, list[RuleObservation]] = {}
 _rendered_outputs: dict[UUID, RenderedOutput] = {}
 _calibration_events: list[CalibrationEvent] = []
 _session_counts: dict[UUID, int] = {}
+_candidates: dict[UUID, list] = {}
+_rule_traces: dict[UUID, object] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +288,19 @@ async def get_voice_history(user_id: UUID) -> list[dict]:
         }
         for v in history
     ]
+
+
+# Sprint 2 routes
+from voxa_api.sprint2_routes import create_sprint2_router as _s2r
+_sprint2_router = _s2r(
+    profiles=_profiles,
+    candidates_store=_candidates,
+    rendered_outputs=_rendered_outputs,
+    version_history=_version_history,
+    rule_traces=_rule_traces,
+    session_counts=_session_counts,
+)
+app.include_router(_sprint2_router)
 
 
 @app.get("/health")
