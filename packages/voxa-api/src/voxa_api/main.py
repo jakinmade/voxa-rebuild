@@ -25,7 +25,6 @@ from voxa_core.entities import (
 )
 from voxa_core.enums import SourceType
 from voxa_api.repositories import get_repositories
-from voxa_api.middleware import check_rate_limit, check_api_key
 
 logger = structlog.get_logger(__name__)
 
