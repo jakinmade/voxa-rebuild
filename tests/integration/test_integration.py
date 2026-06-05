@@ -706,7 +706,7 @@ class TestAPIIntegration:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
-        assert "9.2.0" in data["version"]
+        assert "9.5.0" in data["version"]
 
     @pytest.mark.asyncio
     async def test_api_humanise_endpoint(self):

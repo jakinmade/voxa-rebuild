@@ -1,6 +1,6 @@
 """
 Voxa — FastAPI Application
-Architecture Spec v9.2.0 | Build Sprints v1.0
+Architecture Spec v9.2.0 | Build v9.5.0
 
 All state is behind repository interfaces.
 Swap VOXA_REPOSITORY=supabase for production persistence.
@@ -35,8 +35,8 @@ from voxa_api.middleware import check_rate_limit, check_api_key
 
 app = FastAPI(
     title="Voxa",
-    description="Governed Communication Identity System — v9.2.0",
-    version="9.2.0",
+    description="Governed Communication Identity System — v9.5.0",
+    version="9.5.0",
 )
 
 @app.middleware("http")
@@ -259,7 +259,7 @@ async def health() -> dict:
     import os
     return {
         "status": "ok",
-        "version": "9.2.0",
+        "version": "9.5.0",
         "repository": os.environ.get("VOXA_REPOSITORY", "memory"),
     }
 

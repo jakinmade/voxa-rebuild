@@ -38,7 +38,7 @@ from voxa_core.enums import LifecycleStage
 
 logger = structlog.get_logger(__name__)
 
-RENDER_ENGINE_VERSION = "v9.1.0-sprint1"
+RENDER_ENGINE_VERSION = "v9.5.0"
 
 
 # ---------------------------------------------------------------------------
