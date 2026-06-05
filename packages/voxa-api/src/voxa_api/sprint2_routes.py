@@ -139,7 +139,7 @@ def create_sprint2_router(
             raise HTTPException(status_code=404, detail="Profile not found.")
 
         profile: VoiceProfile = profile_repo.get(request.user_id)
-        user_candidates = candidates_store.get(request.user_id, [])
+        user_candidates = calibration_repo.list_candidates(request.user_id)
         approved = [c for c in user_candidates if c.candidate_id in request.approved_candidate_ids]
 
         if not approved:

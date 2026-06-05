@@ -175,13 +175,13 @@ class SupabaseCalibrationRepository(CalibrationRepository):
         client = _get_client()
         client.table("rule_candidates").insert({
             "candidate_id": str(candidate.candidate_id),
-            "user_id": str(candidate.user_id),
+            "user_id": str(candidate.user_id),  # candidate is defined in save_candidate
             "candidate_json": candidate.model_dump_json(),
         }).execute()
 
     def list_candidates(self, user_id: UUID) -> list[RuleCandidate]:
         client = _get_client()
-        result = client.table("rule_candidates").select("*").eq("user_id", str(candidate.user_id)).execute()
+        result = client.table("rule_candidates").select("*").eq("user_id", str(user_id)).execute()
         return [RuleCandidate.model_validate_json(r["candidate_json"]) for r in result.data]
 
     def get_rendered_output(self, output_id: UUID) -> object | None:
