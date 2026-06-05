@@ -31,6 +31,7 @@ logger = structlog.get_logger(__name__)
 from fastapi import Depends
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
+from voxa_api.middleware import check_rate_limit, check_api_key
 
 app = FastAPI(
     title="Voxa",
@@ -40,7 +41,6 @@ app = FastAPI(
 
 @app.middleware("http")
 async def voxa_middleware(request: StarletteRequest, call_next):
-    from voxa_api.middleware import check_rate_limit, check_api_key
     try:
         check_rate_limit(request)
         check_api_key(request)

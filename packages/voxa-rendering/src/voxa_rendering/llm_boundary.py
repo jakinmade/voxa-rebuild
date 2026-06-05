@@ -118,8 +118,13 @@ async def classify_edit_via_llm(prompt: str) -> tuple[EditClass, float]:
     Edit classification scoring — called by the calibration layer via delegation.
     The calibration layer builds the prompt; this function executes the API call.
     The LLM returns a confidence score only. Rules-based layer makes the final decision.
+    Returns AMBIGUOUS with 0.0 confidence on any failure — never raises.
     """
-    text = await _call_anthropic(prompt, max_tokens=150)
+    try:
+        text = await _call_anthropic(prompt, max_tokens=150)
+    except Exception as e:
+        logger.warning("llm_classify_edit_failed", error=str(e))
+        return EditClass.AMBIGUOUS, 0.0
     if not text:
         return EditClass.AMBIGUOUS, 0.0
 

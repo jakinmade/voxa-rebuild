@@ -1,7 +1,12 @@
 """
-Installs all seven Voxa packages in editable mode.
-Run: python3 setup.py
-Then: pytest
+Installs all Voxa packages in editable mode.
+
+Usage:
+    pip install -r requirements.txt     # Recommended — works in all environments
+    python3 setup.py                    # Alternative
+    make install                        # Via Makefile
+
+After install: pytest
 """
 import subprocess
 import sys
@@ -24,7 +29,7 @@ if __name__ == "__main__":
         for flags in [[], ["--break-system-packages"]]:
             try:
                 subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "-e"] + flags + [path],
+                    [sys.executable, "-m", "pip", "install"] + flags + [path],
                     stderr=subprocess.PIPE,
                 )
                 break

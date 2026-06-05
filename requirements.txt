@@ -1,8 +1,13 @@
-fastapi>=0.111.0
-uvicorn>=0.30.0
-pydantic>=2.0
-httpx>=0.27.0
-structlog>=24.0
+# Voxa — install all packages in editable mode
+# Usage from repo root: pip install -r requirements.txt
+./packages/voxa-core
+./packages/voxa-humanisation
+./packages/voxa-profile
+./packages/voxa-rendering
+./packages/voxa-calibration
+./packages/voxa-governance
+./packages/voxa-api
+# Test dependencies
 pytest>=8.0
 pytest-asyncio>=0.23.0
-hatchling>=1.24.0
+httpx>=0.27.0
