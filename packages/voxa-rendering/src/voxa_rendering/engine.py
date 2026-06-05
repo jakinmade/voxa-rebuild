@@ -42,34 +42,12 @@ RENDER_ENGINE_VERSION = "v9.1.0-sprint1"
 
 
 # ---------------------------------------------------------------------------
-# Boundary Validation
-# Failed boundary check returns NO output — not a degraded output
+# Boundary Validation — delegates to semantic boundary engine
 # ---------------------------------------------------------------------------
 
 def _check_boundaries(text: str, profile: VoiceProfile) -> tuple[bool, str | None]:
-    """
-    Validates rendered text against profile boundaries.
-    Returns (passed, violation_reason).
-    A failed boundary check returns no output.
-    """
-    violations: list[str] = []
-
-    if profile.boundaries.tone_boundaries:
-        forbidden_tones: list[str] = profile.boundaries.tone_boundaries.value or []
-        for tone in forbidden_tones:
-            if tone.lower() in text.lower():
-                violations.append(f"tone boundary violated: '{tone}'")
-
-    if profile.boundaries.content_boundaries:
-        forbidden_content: list[str] = profile.boundaries.content_boundaries.value or []
-        for phrase in forbidden_content:
-            if phrase.lower() in text.lower():
-                violations.append(f"content boundary violated: '{phrase}'")
-
-    if violations:
-        return False, "; ".join(violations)
-    return True, None
-
+    from voxa_rendering.boundary import check_boundaries
+    return check_boundaries(text, profile)
 
 # ---------------------------------------------------------------------------
 # Rule extraction helpers

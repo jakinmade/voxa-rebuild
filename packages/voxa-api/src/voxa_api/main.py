@@ -119,7 +119,7 @@ async def humanise(request: HumaniseRequest) -> HumaniseResponse:
         source_type=request.source_type,
     )
 
-    # Build or update profile
+    # Build or merge — never overwrite
     if request.user_id not in _profiles:
         profile = build_profile(humanised)
         _profiles[request.user_id] = profile
@@ -132,9 +132,14 @@ async def humanise(request: HumaniseRequest) -> HumaniseResponse:
         _version_history.setdefault(request.user_id, []).append(snapshot)
         record_profile_version(snapshot)
     else:
-        # Re-build from new input and merge (Sprint 1: rebuild; Sprint 2: merge logic)
-        profile = build_profile(humanised)
-        _profiles[request.user_id] = profile
+        # Accumulate evidence into existing profile — never rebuild
+        from voxa_profile.builder import merge_profile
+        profile = _profiles[request.user_id]
+        changes = merge_profile(profile, humanised)
+        if changes:
+            snapshot = increment_version(profile, changes=changes)
+            _version_history.setdefault(request.user_id, []).append(snapshot)
+            record_profile_version(snapshot)
 
     logger.info(
         "humanise_endpoint_complete",
