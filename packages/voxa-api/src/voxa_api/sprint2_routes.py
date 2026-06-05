@@ -72,12 +72,9 @@ class BootstrapStatusResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def create_sprint2_router(
-    profiles: dict,
-    candidates_store: dict,
-    rendered_outputs: dict,
-    version_history: dict,
-    rule_traces: dict,
-    session_counts: dict,
+    profile_repo,
+    calibration_repo,
+    governance_repo,
 ) -> APIRouter:
 
     @router.post("/validate-calibration", response_model=ValidateCalibrateResponse)
@@ -89,7 +86,7 @@ def create_sprint2_router(
         """
         from voxa_calibration.sprint2 import run_validation_gate
 
-        user_candidates: list[RuleCandidate] = candidates_store.get(request.user_id, [])
+        user_candidates: list[RuleCandidate] = calibration_repo.list_candidates(request.user_id)
 
         requested = [c for c in user_candidates if c.candidate_id in request.candidate_ids]
         if not requested:
@@ -138,10 +135,10 @@ def create_sprint2_router(
         from voxa_profile.builder import increment_version
         from voxa_governance.engine import record_profile_version
 
-        if request.user_id not in profiles:
+        if not profile_repo.exists(request.user_id):
             raise HTTPException(status_code=404, detail="Profile not found.")
 
-        profile: VoiceProfile = profiles[request.user_id]
+        profile: VoiceProfile = profile_repo.get(request.user_id)
         user_candidates = candidates_store.get(request.user_id, [])
         approved = [c for c in user_candidates if c.candidate_id in request.approved_candidate_ids]
 
@@ -203,7 +200,8 @@ def create_sprint2_router(
             changes.append(f"promoted_to_provisional:{dim}")
 
         snapshot = increment_version(profile, changes=changes)
-        version_history.setdefault(request.user_id, []).append(snapshot)
+        profile_repo.save_version(snapshot)
+        profile_repo.save(profile)
         record_profile_version(snapshot)
 
         return ApplyCalibrateResponse(
@@ -219,11 +217,11 @@ def create_sprint2_router(
         provisional rules flagged, profile version, engine version.
         The trust interface.
         """
-        if output_id not in rule_traces:
-            if output_id not in rendered_outputs:
+        if governance_repo.get_rule_trace(output_id) is None:
+            if calibration_repo.get_rendered_output(output_id) is None:
                 raise HTTPException(status_code=404, detail="Output not found.")
             # No trace stored — return basic reproducibility metadata
-            output = rendered_outputs[output_id]
+            output = calibration_repo.get_rendered_output(output_id)
             return {
                 "output_id": str(output_id),
                 "reproducibility": output.reproducibility.model_dump(),
@@ -231,7 +229,7 @@ def create_sprint2_router(
                 "note": "Full rule trace available after Sprint 2 rendering pipeline upgrade.",
             }
 
-        trace = rule_traces[output_id]
+        trace = governance_repo.get_rule_trace(output_id)
         return {
             "output_id": str(output_id),
             "profile_version": trace.profile_version,
@@ -255,11 +253,11 @@ def create_sprint2_router(
         """
         from voxa_core.bootstrap import check_bootstrap
 
-        if user_id not in profiles:
+        if not profile_repo.exists(user_id):
             raise HTTPException(status_code=404, detail="Profile not found.")
 
-        profile = profiles[user_id]
-        session_count = session_counts.get(user_id, 0)
+        profile = profile_repo.get(user_id)
+        session_count = profile_repo.get_session_count(user_id)
         status_result = check_bootstrap(profile, calibration_session_count=session_count)
 
         return BootstrapStatusResponse(

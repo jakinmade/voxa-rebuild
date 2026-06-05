@@ -1,0 +1,189 @@
+# Voxa — Change Vector Pattern Configuration
+# Version: 1.0
+#
+# Edit this file to tune classification patterns.
+# No code deployment required — patterns loaded at startup.
+# Version field must be incremented on every change.
+# Changes are logged with the version for instrumentation.
+#
+# Format per axis:
+#   - pattern: regex string
+#     weight: float (0.0 - 1.0)
+#     note: human-readable explanation
+
+version: "1.0"
+
+certainty_increasing:
+  - pattern: "\\b(will|must|is|are|clearly|definitely|certainly|always|never)\\b"
+    weight: 0.30
+    note: "Modal certainty words"
+  - pattern: "\\b(this (is|isn.t|works|doesn.t))\\b"
+    weight: 0.35
+    note: "Declarative present tense"
+  - pattern: "\\b(the (right|wrong|correct|incorrect))\\b"
+    weight: 0.40
+    note: "Evaluative certainty"
+  - pattern: "\\b(not the right|wrong direction|wrong approach)\\b"
+    weight: 0.50
+    note: "Strong rejection — high certainty signal"
+
+certainty_decreasing:
+  - pattern: "\\b(might|could|perhaps|possibly|maybe|somewhat|consider|explore)\\b"
+    weight: 0.25
+    note: "Hedge words"
+  - pattern: "\\b(we should (consider|think about|look at|explore))\\b"
+    weight: 0.35
+    note: "Tentative recommendation"
+  - pattern: "\\b(it (may|might|could) be)\\b"
+    weight: 0.30
+    note: "Conditional framing"
+
+directness_increasing:
+  - pattern: "\\bthis (is|isn.t|works|doesn.t|needs)\\b"
+    weight: 0.40
+    note: "Subject-first declarative"
+  - pattern: "\\b(stop|don.t|never|always|must)\\b"
+    weight: 0.30
+    note: "Imperative/absolute"
+  - pattern: "^(no\\.|yes\\.|done\\.|clear\\.)"
+    weight: 0.50
+    note: "Ultra-short declarative"
+  - pattern: "\\b(the answer is|the problem is|the issue is)\\b"
+    weight: 0.35
+    note: "Direct diagnosis"
+  - pattern: "^[A-Z][a-z]+ (it|this|them|now|today)\\."
+    weight: 0.45
+    note: "Imperative verb opening"
+  - pattern: "\\b(do|take|make|send|call|fix|build|close|launch|ship) (it|this|that|action|the)\\b"
+    weight: 0.35
+    note: "Action verb + object — imperative register"
+
+directness_decreasing:
+  - pattern: "\\b(we (should|could|might)|let.s (consider|think|explore))\\b"
+    weight: 0.30
+    note: "Collaborative softening"
+  - pattern: "\\b(one (option|approach|possibility) (is|would be))\\b"
+    weight: 0.25
+    note: "Optionality framing"
+  - pattern: "\\b(it (might|may|could) be worth)\\b"
+    weight: 0.30
+    note: "Tentative suggestion"
+
+formality_increasing:
+  - pattern: "\\b(pursuant|accordingly|therefore|furthermore|henceforth)\\b"
+    weight: 0.50
+    note: "Formal connectives"
+  - pattern: "\\b(I would (suggest|recommend|propose))\\b"
+    weight: 0.30
+    note: "Formal first-person"
+  - pattern: "\\b(with respect to|in relation to|with regard to)\\b"
+    weight: 0.40
+    note: "Formal prepositional phrases"
+
+formality_decreasing:
+  - pattern: "\\b(basically|honestly|look|listen|here.s the thing)\\b"
+    weight: 0.35
+    note: "Informal discourse markers"
+  - pattern: "\\b(you know|right\\?|fair enough|fair point)\\b"
+    weight: 0.30
+    note: "Conversational fillers"
+  - pattern: "\\b(yeah|nope|yep|ok|okay)\\b"
+    weight: 0.25
+    note: "Informal affirmatives"
+  - pattern: "\\b(hey|just wanted to|checking in|just checking)\\b"
+    weight: 0.40
+    note: "Casual openers"
+  - pattern: "\\b(wanted to (reach out|check|let you know))\\b"
+    weight: 0.35
+    note: "Soft informal phrases"
+
+warmth_increasing:
+  - pattern: "\\b(appreciate|thank|grateful|glad|happy to)\\b"
+    weight: 0.35
+    note: "Appreciation language"
+  - pattern: "\\b(great (point|question|idea|work))\\b"
+    weight: 0.30
+    note: "Affirmative acknowledgement"
+  - pattern: "\\b(I understand|I see|that makes sense)\\b"
+    weight: 0.25
+    note: "Empathic acknowledgement"
+
+warmth_decreasing:
+  - pattern: "\\b(incorrect|wrong|unacceptable|not good enough)\\b"
+    weight: 0.40
+    note: "Critical evaluation"
+  - pattern: "\\b(this (fails|misses|doesn.t work))\\b"
+    weight: 0.35
+    note: "Direct failure attribution"
+  - pattern: "\\b(as I (said|mentioned|noted))\\b"
+    weight: 0.20
+    note: "Impatient reference back"
+
+intensity_increasing:
+  - pattern: "\\b(critical|urgent|essential|vital|crucial|must)\\b"
+    weight: 0.35
+    note: "High-stakes language"
+  - pattern: "\\b(immediately|now|today|asap)\\b"
+    weight: 0.30
+    note: "Urgency markers"
+  - pattern: "\\b(serious(ly)?|significant(ly)?|major)\\b"
+    weight: 0.25
+    note: "Magnitude words"
+
+intensity_decreasing:
+  - pattern: "\\b(minor|small|slight|gradual|eventual(ly)?)\\b"
+    weight: 0.25
+    note: "Low-stakes language"
+  - pattern: "\\b(when (possible|convenient|ready))\\b"
+    weight: 0.20
+    note: "Low-urgency framing"
+
+content_shift:
+  - pattern: "\\b(add|include|mention|also|additionally|furthermore)\\b"
+    weight: 0.30
+    note: "Addition signal"
+  - pattern: "\\b(remove|delete|omit|leave out|skip)\\b"
+    weight: 0.35
+    note: "Removal signal"
+  - pattern: "\\b(instead|rather than|not .+ but)\\b"
+    weight: 0.25
+    note: "Substitution signal"
+  - pattern: "\\b(add (the|a|an)|include (the|a|an)|mention (the|a|an))\\b"
+    weight: 0.50
+    note: "Explicit content addition instruction"
+  - pattern: "\\b(leave out|take out|cut|drop) the\\b"
+    weight: 0.45
+    note: "Explicit content removal instruction"
+
+factual_correction:
+  - pattern: "\\b(wrong|incorrect|should be|not \\d+|actually \\d+)\\b"
+    weight: 0.60
+    note: "Explicit correction"
+  - pattern: "\\b\\d{1,2}(:\\d{2})?\\s*(am|pm)\\b"
+    weight: 0.70
+    note: "Time value — almost always factual"
+  - pattern: "\\b(the (date|time|number|figure|name|price) (is|should be|was))\\b"
+    weight: 0.65
+    note: "Factual field reference"
+  - pattern: "\\b(correct(ion)?|fix|update) the (fact|number|date|stat)\\b"
+    weight: 0.60
+    note: "Explicit factual correction instruction"
+
+intent_shift:
+  - pattern: "\\b(actually|instead|change the (purpose|goal|aim|angle))\\b"
+    weight: 0.45
+    note: "Intent redirection"
+  - pattern: "\\b(make (it|this) a (request|proposal|apology|complaint))\\b"
+    weight: 0.60
+    note: "Explicit speech act change"
+  - pattern: "\\b(this should (be|ask|propose|suggest))\\b"
+    weight: 0.50
+    note: "Intent correction"
+
+format_change:
+  - pattern: "\\b(bullet(s)?|numbered|list|header|table|indent|paragraph|section)\\b"
+    weight: 0.70
+    note: "Layout element reference"
+  - pattern: "\\b(format(ting)?|layout|structure|spacing)\\b"
+    weight: 0.60
+    note: "Format instruction"

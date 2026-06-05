@@ -40,6 +40,33 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
+
+def _load_pattern_config() -> dict | None:
+    """
+    Loads pattern config from YAML if available.
+    Returns None if PyYAML not installed or config not found.
+    Patterns from config override hardcoded defaults when present.
+    """
+    import os
+    config_path = os.environ.get(
+        "VOXA_PATTERN_CONFIG",
+        os.path.join(os.path.dirname(__file__), "../../../../config/change_vector_patterns_v1.yaml")
+    )
+    try:
+        import yaml
+        with open(os.path.abspath(config_path)) as f:
+            cfg = yaml.safe_load(f)
+        logger.info("pattern_config_loaded", version=cfg.get("version"), path=config_path)
+        return cfg
+    except FileNotFoundError:
+        return None  # Silently fall back to hardcoded patterns
+    except ImportError:
+        return None  # PyYAML not installed — use hardcoded patterns
+
+
+_PATTERN_CONFIG = _load_pattern_config()
+
+
 # ---------------------------------------------------------------------------
 # Lexical maps for each voice axis
 # Each entry: (pattern, direction, weight)

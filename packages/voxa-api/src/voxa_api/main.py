@@ -1,15 +1,9 @@
 """
 Voxa — FastAPI Application
-Mounts all layers. Exposes Sprint 1 endpoints.
+Architecture Spec v9.2.0 | Build Sprints v1.0
 
-Sprint 1 endpoints:
-  POST /humanise
-  POST /render
-  POST /calibrate
-  GET  /voice-profile
-  GET  /voice-history
-
-Architecture Spec v9.2.0, Section 12.
+All state is behind repository interfaces.
+Swap VOXA_REPOSITORY=supabase for production persistence.
 """
 
 from __future__ import annotations
@@ -30,27 +24,38 @@ from voxa_core.entities import (
     VoiceProfileVersion,
 )
 from voxa_core.enums import SourceType
+from voxa_api.repositories import get_repositories
+from voxa_api.middleware import check_rate_limit, check_api_key
 
 logger = structlog.get_logger(__name__)
+
+from fastapi import Depends
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 
 app = FastAPI(
     title="Voxa",
     description="Governed Communication Identity System — v9.2.0",
-    version="9.2.0-sprint1",
+    version="9.2.0",
 )
 
+@app.middleware("http")
+async def voxa_middleware(request: StarletteRequest, call_next):
+    from voxa_api.middleware import check_rate_limit, check_api_key
+    try:
+        check_rate_limit(request)
+        check_api_key(request)
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+    return await call_next(request)
+
 # ---------------------------------------------------------------------------
-# In-memory stores (Sprint 1)
-# Sprint 2/3: Supabase persistence
+# Repository initialisation — swap backend via VOXA_REPOSITORY env var
 # ---------------------------------------------------------------------------
-_profiles: dict[UUID, VoiceProfile] = {}
-_version_history: dict[UUID, list[VoiceProfileVersion]] = {}
-_observations: dict[UUID, list[RuleObservation]] = {}
-_rendered_outputs: dict[UUID, RenderedOutput] = {}
-_calibration_events: list[CalibrationEvent] = []
-_session_counts: dict[UUID, int] = {}
-_candidates: dict[UUID, list] = {}
-_rule_traces: dict[UUID, object] = {}
+profile_repo, calibration_repo, governance_repo = get_repositories()
+
+# Org policies (lightweight — kept in memory, set by admin at startup)
 _org_policies: dict[str, object] = {}
 
 
@@ -104,13 +109,8 @@ class CalibrateResponse(BaseModel):
 
 @app.post("/humanise", response_model=HumaniseResponse, status_code=status.HTTP_200_OK)
 async def humanise(request: HumaniseRequest) -> HumaniseResponse:
-    """
-    Raw input → HumanisedProfile → VoiceProfile.
-    Full four-step humanisation pipeline.
-    Builds profile on first call for a user.
-    """
     from voxa_humanisation.engine import humanise as run_humanise
-    from voxa_profile.builder import build_profile, increment_version
+    from voxa_profile.builder import build_profile, merge_profile, increment_version
     from voxa_governance.engine import record_profile_version
 
     humanised = run_humanise(
@@ -119,33 +119,25 @@ async def humanise(request: HumaniseRequest) -> HumaniseResponse:
         source_type=request.source_type,
     )
 
-    # Build or merge — never overwrite
-    if request.user_id not in _profiles:
+    if not profile_repo.exists(request.user_id):
         profile = build_profile(humanised)
-        _profiles[request.user_id] = profile
+        profile_repo.save(profile)
         snapshot = VoiceProfileVersion(
             user_id=request.user_id,
             version=profile.version,
             snapshot=profile.model_copy(deep=True),
             changes=["initial_profile_build"],
         )
-        _version_history.setdefault(request.user_id, []).append(snapshot)
+        profile_repo.save_version(snapshot)
         record_profile_version(snapshot)
     else:
-        # Accumulate evidence into existing profile — never rebuild
-        from voxa_profile.builder import merge_profile
-        profile = _profiles[request.user_id]
+        profile = profile_repo.get(request.user_id)
         changes = merge_profile(profile, humanised)
         if changes:
             snapshot = increment_version(profile, changes=changes)
-            _version_history.setdefault(request.user_id, []).append(snapshot)
+            profile_repo.save(profile)
+            profile_repo.save_version(snapshot)
             record_profile_version(snapshot)
-
-    logger.info(
-        "humanise_endpoint_complete",
-        user_id=str(request.user_id),
-        fact_count=len(humanised.facts),
-    )
 
     return HumaniseResponse(
         humanised_profile=humanised,
@@ -156,22 +148,14 @@ async def humanise(request: HumaniseRequest) -> HumaniseResponse:
 
 @app.post("/render", response_model=RenderResponse, status_code=status.HTTP_200_OK)
 async def render(request: RenderRequest) -> RenderResponse:
-    """
-    VoiceProfile + input → RenderedOutput.
-    Checks bootstrap state first.
-    Returns boundary_blocked=True with null output if boundary check fails.
-    """
     from voxa_rendering.engine import render as run_render
 
-    if request.user_id not in _profiles:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No voice profile found. Call /humanise first.",
-        )
+    if not profile_repo.exists(request.user_id):
+        raise HTTPException(status_code=404, detail="No voice profile found. Call /humanise first.")
 
-    profile = _profiles[request.user_id]
+    profile = profile_repo.get(request.user_id)
     session_id = uuid4()
-    session_count = _session_counts.get(request.user_id, 0)
+    session_count = profile_repo.get_session_count(request.user_id)
 
     output = await run_render(
         input_text=request.input_text,
@@ -182,7 +166,7 @@ async def render(request: RenderRequest) -> RenderResponse:
     )
 
     if output is not None:
-        _rendered_outputs[output.output_id] = output
+        calibration_repo.save_rendered_output(output)
 
     return RenderResponse(
         output=output,
@@ -193,29 +177,19 @@ async def render(request: RenderRequest) -> RenderResponse:
 
 @app.post("/calibrate", response_model=CalibrateResponse, status_code=status.HTTP_200_OK)
 async def calibrate(request: CalibrateRequest) -> CalibrateResponse:
-    """
-    RenderedOutput + user edit → CalibrationEvent + RuleObservation or RuleCandidate.
-    Voice edits proceed. All others discarded.
-    """
     from voxa_calibration.engine import calibrate as run_calibrate
     from voxa_governance.engine import record_calibration_event, record_profile_version
     from voxa_profile.builder import increment_version
 
-    if request.user_id not in _profiles:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No voice profile found.",
-        )
+    if not profile_repo.exists(request.user_id):
+        raise HTTPException(status_code=404, detail="No voice profile found.")
 
-    if request.rendered_output_id not in _rendered_outputs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Rendered output not found.",
-        )
+    rendered_output = calibration_repo.get_rendered_output(request.rendered_output_id)
+    if rendered_output is None:
+        raise HTTPException(status_code=404, detail="Rendered output not found.")
 
-    profile = _profiles[request.user_id]
-    rendered_output = _rendered_outputs[request.rendered_output_id]
-    existing_observations = _observations.get(request.user_id, [])
+    profile = profile_repo.get(request.user_id)
+    existing_observations = calibration_repo.list_observations(request.user_id)
 
     event, observations, candidates = run_calibrate(
         rendered_output=rendered_output,
@@ -227,40 +201,34 @@ async def calibrate(request: CalibrateRequest) -> CalibrateResponse:
     )
 
     if event is None:
-        # Non-voice edit — discarded
         from voxa_calibration.engine import classify_edit
         edit_class = classify_edit(
-            request.original_text,
-            request.edited_text,
-            request.user_instruction,
+            request.original_text, request.edited_text, request.user_instruction
         )
         return CalibrateResponse(
-            accepted=False,
-            edit_class=edit_class.value,
-            observations_created=0,
-            candidates_promoted=0,
+            accepted=False, edit_class=edit_class.value,
+            observations_created=0, candidates_promoted=0,
             profile_version=profile.version,
         )
 
-    # Store observations
-    _observations.setdefault(request.user_id, []).extend(observations)
+    for obs in observations:
+        calibration_repo.save_observation(obs)
 
-    # Record calibration event
     event.profile_version_after = profile.version
-    _calibration_events.append(event)
+    calibration_repo.save_event(event)
     record_calibration_event(event)
 
-    # Increment profile version if candidates were promoted
     if candidates:
+        for c in candidates:
+            calibration_repo.save_candidate(c)
         snapshot = increment_version(
-            profile=profile,
-            changes=[f"candidate_promoted:{c.rule_dimension}" for c in candidates],
+            profile, changes=[f"candidate_promoted:{c.rule_dimension}" for c in candidates]
         )
-        _version_history.setdefault(request.user_id, []).append(snapshot)
+        profile_repo.save(profile)
+        profile_repo.save_version(snapshot)
         record_profile_version(snapshot)
 
-    # Increment session count
-    _session_counts[request.user_id] = _session_counts.get(request.user_id, 0) + 1
+    profile_repo.increment_session_count(request.user_id)
 
     return CalibrateResponse(
         accepted=True,
@@ -273,53 +241,50 @@ async def calibrate(request: CalibrateRequest) -> CalibrateResponse:
 
 @app.get("/voice-profile", status_code=status.HTTP_200_OK)
 async def get_voice_profile(user_id: UUID) -> VoiceProfile:
-    """Current voice profile with all rules, metadata, and lifecycle stages."""
-    if user_id not in _profiles:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No voice profile found.",
-        )
-    return _profiles[user_id]
+    if not profile_repo.exists(user_id):
+        raise HTTPException(status_code=404, detail="No voice profile found.")
+    return profile_repo.get(user_id)
 
 
 @app.get("/voice-history", status_code=status.HTTP_200_OK)
 async def get_voice_history(user_id: UUID) -> list[dict]:
-    """Version history — list of versions with change summaries."""
-    history = _version_history.get(user_id, [])
+    history = profile_repo.list_versions(user_id)
     return [
-        {
-            "version": v.version,
-            "timestamp": v.timestamp.isoformat(),
-            "changes": v.changes,
-        }
+        {"version": v.version, "timestamp": v.timestamp.isoformat(), "changes": v.changes}
         for v in history
     ]
 
 
-# Sprint 3 routes
-from voxa_api.sprint3_routes import create_sprint3_router as _s3r
-_sprint3_router = _s3r(
-    profiles=_profiles,
-    version_history=_version_history,
-    session_counts=_session_counts,
-    org_policies=_org_policies,
-)
-app.include_router(_sprint3_router)
+@app.get("/health")
+async def health() -> dict:
+    import os
+    return {
+        "status": "ok",
+        "version": "9.2.0",
+        "repository": os.environ.get("VOXA_REPOSITORY", "memory"),
+    }
 
 
+# ---------------------------------------------------------------------------
 # Sprint 2 routes
+# ---------------------------------------------------------------------------
 from voxa_api.sprint2_routes import create_sprint2_router as _s2r
+
 _sprint2_router = _s2r(
-    profiles=_profiles,
-    candidates_store=_candidates,
-    rendered_outputs=_rendered_outputs,
-    version_history=_version_history,
-    rule_traces=_rule_traces,
-    session_counts=_session_counts,
+    profile_repo=profile_repo,
+    calibration_repo=calibration_repo,
+    governance_repo=governance_repo,
 )
 app.include_router(_sprint2_router)
 
 
-@app.get("/health")
-async def health() -> dict:
-    return {"status": "ok", "version": "9.2.0-sprint1"}
+# ---------------------------------------------------------------------------
+# Sprint 3 routes
+# ---------------------------------------------------------------------------
+from voxa_api.sprint3_routes import create_sprint3_router as _s3r
+
+_sprint3_router = _s3r(
+    profile_repo=profile_repo,
+    org_policies=_org_policies,
+)
+app.include_router(_sprint3_router)

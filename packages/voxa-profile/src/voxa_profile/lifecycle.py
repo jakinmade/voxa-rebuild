@@ -182,7 +182,7 @@ def attempt_promotion(
     if current_stage == LifecycleStage.OBSERVED:
         can, reason = can_promote_to_candidate(
             observation_count=rule.evidence_count,
-            session_count=additional_sessions + 1,
+            session_count=additional_sessions,  # Pass real count — do not synthesise
         )
         if can:
             rule.lifecycle_stage = LifecycleStage.CANDIDATE
@@ -361,11 +361,13 @@ def run_decay_batch(profile: VoiceProfile) -> dict[str, float]:
         rule.confidence = new_confidence
         decay_log[dimension] = new_confidence
 
-        # Revert to unknown if below minimum threshold
+        # Below minimum threshold — demote to OBSERVED, preserve historical evidence
+        # Never delete: historical evidence survives for future recovery
         if should_revert_to_unknown(new_confidence):
-            setattr(category, field, None)
+            rule.lifecycle_stage = LifecycleStage.OBSERVED
+            rule.confidence = MINIMUM_CONFIDENCE_THRESHOLD  # Floor, not zero
             logger.info(
-                "rule_reverted_to_unknown",
+                "rule_demoted_to_observed_on_decay",
                 dimension=dimension,
                 final_confidence=new_confidence,
             )

@@ -40,9 +40,7 @@ class DriftConfirmRequest(BaseModel):
 
 
 def create_sprint3_router(
-    profiles: dict,
-    version_history: dict,
-    session_counts: dict,
+    profile_repo,
     org_policies: dict,
 ) -> APIRouter:
 
@@ -62,11 +60,15 @@ def create_sprint3_router(
                 detail=f"No snapshot found for version {version}.",
             )
 
+        current_profile = profile_repo.get(user_id)
+        profiles_tmp = {user_id: current_profile}
         restored, success = restore_from_snapshot(
             user_id=user_id,
             version=version,
-            current_profiles=profiles,
+            current_profiles=profiles_tmp,
         )
+        if success:
+            profile_repo.save(profiles_tmp[user_id])
 
         if not success:
             raise HTTPException(
@@ -113,10 +115,10 @@ def create_sprint3_router(
         """
         from voxa_governance.drift_monitor import get_drift_status
 
-        if user_id not in profiles:
+        if not profile_repo.exists(user_id):
             raise HTTPException(status_code=404, detail="Profile not found.")
 
-        profile = profiles[user_id]
+        profile = profile_repo.get(user_id)
         return get_drift_status(user_id, profile)
 
     @router.post("/context-override")
@@ -128,7 +130,7 @@ def create_sprint3_router(
         """
         from voxa_profile.context_overrides import set_context_override
 
-        if request.user_id not in profiles:
+        if not profile_repo.exists(request.user_id):
             raise HTTPException(status_code=404, detail="Profile not found.")
 
         override = set_context_override(
