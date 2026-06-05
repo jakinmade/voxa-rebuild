@@ -16,6 +16,8 @@ Sprint 1 scope:
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import timezone as _tz
+_UTC = _tz.utc
 from uuid import UUID, uuid4
 
 import structlog
@@ -56,7 +58,7 @@ def _make_rule(value: object, source_label: str, source_type: SourceType) -> Rul
         value=value,
         confidence=confidence,
         evidence_count=1,
-        last_updated=datetime.utcnow(),
+        last_updated=datetime.now(_UTC),
         source=[source_label],
         stability=stability,
         decay_rate=0.02,
@@ -218,7 +220,7 @@ def increment_version(profile: VoiceProfile, changes: list[str]) -> VoiceProfile
     Sprint 1: basic versioning. Sprint 3: immutable snapshots with restore.
     """
     profile.version += 1
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = datetime.now(_UTC)
 
     snapshot = VoiceProfileVersion(
         user_id=profile.user_id,

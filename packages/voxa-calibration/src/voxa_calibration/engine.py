@@ -71,6 +71,7 @@ CONTENT_CHANGE_PATTERNS = [
 FACTUAL_CHANGE_PATTERNS = [
     re.compile(r"\b(wrong|incorrect|that.s not right|should be|it.s actually)\b", re.I),
     re.compile(r"\b\d+\b.*\b(should be|not)\b.*\b\d+\b", re.I),
+    re.compile(r"\b(change the|update the|correct the)\b.*(time|date|number|figure|stat|name|price|amount)\b", re.I),
 ]
 
 # Format change signals

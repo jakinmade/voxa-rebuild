@@ -8,6 +8,8 @@ No bare rule values — every rule carries full metadata.
 from __future__ import annotations
 
 from datetime import datetime, date
+from datetime import timezone as _tz
+_UTC = _tz.utc
 from typing import Any
 from uuid import UUID, uuid4
 
