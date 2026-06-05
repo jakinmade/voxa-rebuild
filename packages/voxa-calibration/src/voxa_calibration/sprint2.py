@@ -192,34 +192,31 @@ def record_negative_evidence(
 ) -> tuple[RuleMetadata, bool]:
     """
     Records a reversal as negative evidence against a rule.
-    Reduces confidence. Triggers demotion if sufficient negative evidence.
+    Uses the coherent confidence model — stability reduced first, confidence second.
     Returns (updated_rule, demoted).
     """
-    # Reduce confidence
-    old_confidence = rule.confidence
-    rule.confidence = max(0.0, rule.confidence - 0.08)
-    rule.stability = max(0.0, rule.stability - 0.05)
+    from voxa_profile.confidence import apply_negative_evidence
+    stage_name = rule.lifecycle_stage.value
+    new_conf, new_stab, should_demote = apply_negative_evidence(
+        confidence=rule.confidence,
+        stability=rule.stability,
+        lifecycle_stage=stage_name,
+    )
+    rule.confidence = new_conf
+    rule.stability = new_stab
 
     logger.info(
         "negative_evidence_recorded",
         dimension=dimension,
         event_id=str(event_id),
         pattern_reversed=pattern_reversed,
-        old_confidence=old_confidence,
-        new_confidence=rule.confidence,
+        new_confidence=new_conf,
+        new_stability=new_stab,
+        should_demote=should_demote,
     )
 
-    # Demotion trigger — if confidence drops significantly below stage threshold
-    stage_thresholds = {
-        LifecycleStage.CORE: 0.85,
-        LifecycleStage.STABLE: 0.60,
-        LifecycleStage.PROVISIONAL: 0.35,
-        LifecycleStage.CANDIDATE: 0.20,
-    }
-
-    threshold = stage_thresholds.get(rule.lifecycle_stage)
-    if threshold and rule.confidence < threshold:
-        rule = demote_rule(rule, dimension, reason=f"negative_evidence_below_threshold_{pattern_reversed}")
+    if should_demote:
+        rule = demote_rule(rule, dimension, reason=f"negative_evidence_{pattern_reversed}")
         return rule, True
 
     return rule, False

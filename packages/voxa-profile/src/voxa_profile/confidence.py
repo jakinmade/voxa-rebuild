@@ -1,109 +1,136 @@
 """
-Voxa — Confidence Derivation Formula
-Layer 2 addition — Sprint 2.
+Voxa — Confidence Model
+A single coherent model for confidence, stability, consistency, recency, decay,
+and negative evidence. These are not separate concepts — they compose.
 
 Architecture Spec v9.2.0, Section 5.2.
 
-Formula:
+Model:
+
   raw_confidence = (
-      consistency_score * 0.40
-    + recency_score      * 0.30
-    + source_weight      * 0.20
-    + min(evidence_count / saturation_point, 1.0) * 0.10
+      consistency  * 0.40   # How reliably this value appears across contexts
+    + recency      * 0.30   # How recent the evidence is (exponential, not linear)
+    + source       * 0.20   # How strong the source (behavioural > onboarding)
+    + saturation   * 0.10   # Diminishing returns beyond saturation point
   )
-  confidence = raw_confidence * (1 - decay_adjustment)
 
-Coefficients (0.40 / 0.30 / 0.20 / 0.10) are starting architecture.
-Must be validated against real user data. Instrumented for adjustment.
+  effective_confidence = raw_confidence * stability_weight * (1 - decay_adjustment)
 
-Boundary rules: confidence = 1.0 always. Formula does not apply.
+Key relationships:
+  - High consistency slows decay (consistent behaviour is more stable)
+  - High recency weights more at low evidence counts (early evidence is fragile)
+  - Negative evidence reduces stability first, confidence second
+  - Stability tracks long-term reliability; confidence tracks current evidence strength
+  - A rule can have high confidence but low stability (many recent edits, volatile)
+  - A rule can have low confidence but high stability (sparse but consistent)
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import NamedTuple
 
 import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Starting architecture coefficients — instrumented, not hardcoded as fixed
+# Starting coefficients — instrumented, adjustable from empirical data
 COEFF_CONSISTENCY = 0.40
-COEFF_RECENCY = 0.30
-COEFF_SOURCE = 0.20
-COEFF_EVIDENCE = 0.10
+COEFF_RECENCY     = 0.30
+COEFF_SOURCE      = 0.20
+COEFF_SATURATION  = 0.10
 
-# Saturation point hypothesis — TBD from empirical data
-# Beyond this, additional evidence increases stability, not confidence
-EVIDENCE_SATURATION_POINT = 20
+EVIDENCE_SATURATION_POINT = 20   # Beyond this, more evidence doesn't increase confidence
+RECENCY_WINDOW_DAYS = 30          # Evidence older than this scores 0.0 on recency
+RECENCY_HALF_LIFE_DAYS = 10       # Exponential decay half-life for recency scoring
 
-# Recency decay — evidence older than this scores 0.0
-RECENCY_WINDOW_DAYS = 30
+# Stability weight applied to raw confidence
+# High stability = confidence is more reliable = small discount
+# Low stability = confidence is more uncertain = larger discount
+STABILITY_CONFIDENCE_WEIGHT_MIN = 0.75  # Minimum weight even at stability=0
+STABILITY_CONFIDENCE_WEIGHT_MAX = 1.00  # Maximum weight at stability=1
+
+# Negative evidence
+NEGATIVE_CONFIDENCE_PENALTY = 0.08   # Per negative event
+NEGATIVE_STABILITY_PENALTY  = 0.05   # Per negative event (stability is harder to rebuild)
+
+# Stage-specific demotion confidence thresholds
+STAGE_DEMOTION_THRESHOLDS = {
+    "core":        0.85,
+    "stable":      0.60,
+    "provisional": 0.35,
+    "candidate":   0.20,
+}
 
 
 class ConfidenceInputs(NamedTuple):
-    evidence_count: int
-    consistency_score: float      # 0.0 to 1.0 — proportion of agreeing edits across contexts
-    recency_score: float          # 0.0 to 1.0 — time-weighted mean of evidence recency
-    source_weight: float          # 1.0 behavioural | 0.4 implied onboarding | 0.2 explicit onboarding
-    decay_adjustment: float = 0.0 # applied after raw confidence computed
+    evidence_count:    int
+    consistency_score: float   # 0.0–1.0
+    recency_score:     float   # 0.0–1.0
+    source_weight:     float   # 0.0–1.0
+    decay_adjustment:  float = 0.0
+    stability:         float = 0.5
 
 
 class ConfidenceResult(NamedTuple):
-    confidence: float
-    raw_confidence: float
-    inputs: ConfidenceInputs
-    coefficients: dict[str, float]
-    capped_at_boundary: bool = False
+    confidence:        float
+    raw_confidence:    float
+    effective_confidence: float
+    inputs:            ConfidenceInputs
+    coefficients:      dict[str, float]
+    stability_weight:  float
 
 
 def compute_confidence(inputs: ConfidenceInputs) -> ConfidenceResult:
     """
-    Computes rule confidence from four inputs.
-    Called on every calibration event.
-    All inputs and coefficients are logged for empirical validation.
+    Computes effective confidence from the full model.
+    All inputs and results are logged for empirical validation.
     """
-    evidence_contribution = min(
-        inputs.evidence_count / EVIDENCE_SATURATION_POINT, 1.0
-    )
+    saturation = min(inputs.evidence_count / EVIDENCE_SATURATION_POINT, 1.0)
 
     raw_confidence = (
-        inputs.consistency_score  * COEFF_CONSISTENCY
-        + inputs.recency_score    * COEFF_RECENCY
-        + inputs.source_weight    * COEFF_SOURCE
-        + evidence_contribution   * COEFF_EVIDENCE
+        inputs.consistency_score * COEFF_CONSISTENCY
+        + inputs.recency_score   * COEFF_RECENCY
+        + inputs.source_weight   * COEFF_SOURCE
+        + saturation             * COEFF_SATURATION
     )
-
-    # Clamp to [0.0, 1.0] before decay
     raw_confidence = max(0.0, min(1.0, raw_confidence))
 
-    confidence = raw_confidence * (1.0 - inputs.decay_adjustment)
-    confidence = max(0.0, min(1.0, confidence))
+    # Stability modulates confidence — high stability = full confidence trusted
+    stability_weight = (
+        STABILITY_CONFIDENCE_WEIGHT_MIN
+        + (STABILITY_CONFIDENCE_WEIGHT_MAX - STABILITY_CONFIDENCE_WEIGHT_MIN) * inputs.stability
+    )
+
+    effective = raw_confidence * stability_weight * (1.0 - inputs.decay_adjustment)
+    effective = max(0.0, min(1.0, effective))
 
     result = ConfidenceResult(
-        confidence=round(confidence, 4),
+        confidence=round(effective, 4),
         raw_confidence=round(raw_confidence, 4),
+        effective_confidence=round(effective, 4),
         inputs=inputs,
         coefficients={
             "consistency": COEFF_CONSISTENCY,
-            "recency": COEFF_RECENCY,
-            "source": COEFF_SOURCE,
-            "evidence": COEFF_EVIDENCE,
+            "recency":     COEFF_RECENCY,
+            "source":      COEFF_SOURCE,
+            "saturation":  COEFF_SATURATION,
             "saturation_point": EVIDENCE_SATURATION_POINT,
         },
+        stability_weight=round(stability_weight, 4),
     )
 
-    # Instrument everything — these measurements validate the open questions
     logger.info(
         "confidence_computed",
         evidence_count=inputs.evidence_count,
-        consistency_score=inputs.consistency_score,
-        recency_score=inputs.recency_score,
-        source_weight=inputs.source_weight,
-        decay_adjustment=inputs.decay_adjustment,
-        raw_confidence=result.raw_confidence,
-        confidence=result.confidence,
+        consistency=inputs.consistency_score,
+        recency=inputs.recency_score,
+        source=inputs.source_weight,
+        stability=inputs.stability,
+        decay=inputs.decay_adjustment,
+        raw=result.raw_confidence,
+        effective=result.confidence,
+        stability_weight=result.stability_weight,
     )
 
     return result
@@ -111,8 +138,12 @@ def compute_confidence(inputs: ConfidenceInputs) -> ConfidenceResult:
 
 def compute_recency_score(evidence_timestamps: list[datetime]) -> float:
     """
-    Time-weighted mean of evidence recency.
-    Recent evidence scores higher. Evidence older than RECENCY_WINDOW_DAYS scores 0.0.
+    Exponential recency scoring.
+    Recent evidence decays slowly; old evidence drops faster than linear.
+    Half-life: RECENCY_HALF_LIFE_DAYS days.
+
+    Relationship: at low evidence counts, recency matters more —
+    a single very recent observation is more meaningful than a single old one.
     """
     if not evidence_timestamps:
         return 0.0
@@ -121,12 +152,17 @@ def compute_recency_score(evidence_timestamps: list[datetime]) -> float:
     scores = []
 
     for ts in evidence_timestamps:
-        # Make timezone-aware if naive
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        age_days = (now - ts).days
-        score = max(0.0, 1.0 - (age_days / RECENCY_WINDOW_DAYS))
-        scores.append(score)
+        age_days = (now - ts).total_seconds() / 86400
+
+        if age_days > RECENCY_WINDOW_DAYS:
+            scores.append(0.0)
+        else:
+            # Exponential decay: score = 0.5 ^ (age / half_life)
+            import math
+            score = 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
+            scores.append(score)
 
     return round(sum(scores) / len(scores), 4)
 
@@ -136,9 +172,10 @@ def compute_consistency_score(
     target_value: str,
 ) -> float:
     """
-    Proportion of edits agreeing with the rule value across different contexts.
-    Consistency carries the highest weight (0.40) because a rule observed
-    across multiple contexts is more reliable than one observed in one context many times.
+    Consistency = proportion of observations agreeing with the rule value.
+
+    High consistency slows decay — a rule observed reliably across contexts
+    is more stable than one observed many times in one context.
     """
     if not values_observed:
         return 0.0
@@ -146,19 +183,59 @@ def compute_consistency_score(
     return round(agreeing / len(values_observed), 4)
 
 
-def apply_decay(current_confidence: float, decay_rate: float) -> float:
+def apply_decay(
+    current_confidence: float,
+    decay_rate: float,
+    consistency_score: float = 0.5,
+) -> float:
     """
-    new_confidence = current_confidence * (1 - decay_rate)
-    If confidence falls below minimum threshold, rule reverts to unknown.
-    Boundary rules exempt — never passed to this function.
+    Applies decay with consistency modulation.
+    High consistency reduces the effective decay rate.
+    A rule observed reliably across contexts decays more slowly.
+
+    effective_decay = decay_rate * (1 - consistency_score * 0.5)
+    At consistency=1.0: effective decay is halved
+    At consistency=0.0: full decay rate applied
     """
-    new_confidence = current_confidence * (1.0 - decay_rate)
+    effective_decay = decay_rate * (1.0 - consistency_score * 0.5)
+    new_confidence = current_confidence * (1.0 - effective_decay)
     return round(max(0.0, new_confidence), 4)
 
 
-# Minimum confidence threshold — below this, rule reverts to unknown
-MINIMUM_CONFIDENCE_THRESHOLD = 0.10
+def apply_negative_evidence(
+    confidence: float,
+    stability: float,
+    lifecycle_stage: str,
+) -> tuple[float, float, bool]:
+    """
+    Applies a negative evidence event.
+    Reduces stability first, then confidence.
+    Returns (new_confidence, new_stability, should_demote).
 
+    Stability is harder to rebuild than confidence.
+    A single negative event should not collapse a stable rule —
+    it takes sustained negative evidence.
+    """
+    new_stability = max(0.0, stability - NEGATIVE_STABILITY_PENALTY)
+    new_confidence = max(0.0, confidence - NEGATIVE_CONFIDENCE_PENALTY)
+
+    threshold = STAGE_DEMOTION_THRESHOLDS.get(lifecycle_stage, 0.0)
+    should_demote = new_confidence < threshold
+
+    logger.info(
+        "negative_evidence_applied",
+        old_confidence=confidence,
+        new_confidence=new_confidence,
+        old_stability=stability,
+        new_stability=new_stability,
+        lifecycle_stage=lifecycle_stage,
+        should_demote=should_demote,
+    )
+
+    return new_confidence, new_stability, should_demote
+
+
+MINIMUM_CONFIDENCE_THRESHOLD = 0.10
 
 def should_revert_to_unknown(confidence: float) -> bool:
     return confidence < MINIMUM_CONFIDENCE_THRESHOLD

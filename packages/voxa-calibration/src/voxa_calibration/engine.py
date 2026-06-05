@@ -1,25 +1,22 @@
 """
 Voxa — Calibration Engine (Layer 4)
 Converts user edits into rule candidates.
-The most failure-prone layer. Designed conservatively.
 
 Architecture Spec v9.2.0, Section 8.
 
-Edit classifier design:
-  Rules-based first — structural signals that are unambiguous (compression
-  ratio, hedge removal, length change). Fast and reliable for clear cases.
-  LLM escalation for anything ambiguous — LLM returns confidence score only,
-  rules-based layer makes the final decision.
+Edit classification pipeline:
+  1. Change vector analysis — represents the edit as displacement in voice space
+  2. Classification from vector — deterministic, confidence-scored
+  3. LLM escalation — only for genuinely ambiguous edits (confidence < threshold)
+     LLM returns a confidence score. Rules-based layer makes the final decision.
 
-The regex approach is gone. Classifier now uses:
-  1. Structural diff signals (measurable, deterministic)
-  2. Semantic embedding of the change vector (what changed, not just whether)
-  3. LLM scoring for residual ambiguity
+The change vector approach handles the reviewer's hard case:
+  "We should consider alternative approaches." → "This isn't the right direction."
+  Low Jaccard but strong certainty + directness displacement → VOICE
 """
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -33,194 +30,118 @@ from voxa_core.entities import (
     VoiceProfile,
 )
 from voxa_core.enums import EditClass
+from voxa_calibration.change_vector import analyse_edit, ChangeVector
 
 logger = structlog.get_logger(__name__)
 
 CANDIDATE_PROMOTION_THRESHOLD = 2
-
-HEDGE_WORDS = {"might", "could", "perhaps", "possibly", "maybe", "somewhat", "quite", "rather"}
-CERTAIN_WORDS = {"will", "must", "clearly", "definitely", "certainly", "always", "never"}
-FILLER_WORDS = {"very", "really", "basically", "essentially", "generally", "actually", "just"}
-
-# Structural thresholds for unambiguous voice signals
-COMPRESSION_VOICE_THRESHOLD = 0.70   # >30% shorter = compression voice edit
-EXPANSION_VOICE_THRESHOLD = 1.40     # >40% longer = expansion voice edit
-HEDGE_REMOVAL_MIN = 1                # Removing even one hedge is a voice signal
+LLM_ESCALATION_THRESHOLD = 0.45  # Below this confidence, escalate to LLM
 
 
 # ---------------------------------------------------------------------------
-# Structural signal extraction — deterministic, no regex on semantics
+# Edit classifier — change vector + optional LLM escalation
 # ---------------------------------------------------------------------------
 
-def _structural_signals(original: str, edited: str) -> dict:
-    orig_words = original.lower().split()
-    edit_words = edited.lower().split()
+def classify_edit(
+    original: str,
+    edited: str,
+    user_instruction: str = "",
+) -> EditClass:
+    """
+    Classifies an edit using change vector analysis.
+    Escalates to LLM only when vector confidence is genuinely low.
+    """
+    result = analyse_edit(original, edited, user_instruction)
 
-    orig_set = set(orig_words)
-    edit_set = set(edit_words)
-
-    hedges_removed = HEDGE_WORDS & (orig_set - edit_set)
-    hedges_added = HEDGE_WORDS & (edit_set - orig_set)
-    certain_added = CERTAIN_WORDS & (edit_set - orig_set)
-    filler_removed = FILLER_WORDS & (orig_set - edit_set)
-
-    orig_sents = [s.strip() for s in re.split(r'[.!?]+', original) if s.strip()]
-    edit_sents = [s.strip() for s in re.split(r'[.!?]+', edited) if s.strip()]
-
-    avg_orig = sum(len(s.split()) for s in orig_sents) / max(len(orig_sents), 1)
-    avg_edit = sum(len(s.split()) for s in edit_sents) / max(len(edit_sents), 1)
-
-    compression = len(edited) / max(len(original), 1)
-
-    # Word-level overlap — high overlap = same content, different expression = voice
-    common = orig_set & edit_set
-    union = orig_set | edit_set
-    jaccard = len(common) / max(len(union), 1)
-
-    # Sentence count change
-    sent_delta = len(edit_sents) - len(orig_sents)
-
-    return {
-        "hedges_removed": list(hedges_removed),
-        "hedges_added": list(hedges_added),
-        "certain_added": list(certain_added),
-        "filler_removed": list(filler_removed),
-        "compression_ratio": round(compression, 3),
-        "avg_sent_len_before": round(avg_orig, 1),
-        "avg_sent_len_after": round(avg_edit, 1),
-        "jaccard_similarity": round(jaccard, 3),
-        "sentence_count_delta": sent_delta,
-        "word_count_before": len(orig_words),
-        "word_count_after": len(edit_words),
+    class_map = {
+        "voice": EditClass.VOICE,
+        "content": EditClass.CONTENT,
+        "intent": EditClass.INTENT,
+        "factual": EditClass.FACTUAL,
+        "format": EditClass.FORMAT,
+        "ambiguous": EditClass.AMBIGUOUS,
     }
 
+    edit_class = class_map.get(result.edit_class, EditClass.AMBIGUOUS)
 
-# ---------------------------------------------------------------------------
-# Classifier — deterministic structural layer
-# ---------------------------------------------------------------------------
+    logger.info(
+        "edit_classified",
+        edit_class=edit_class.value,
+        confidence=result.confidence,
+        reasoning=result.reasoning,
+    )
 
-def _classify_from_signals(signals: dict, instruction: str) -> tuple[EditClass | None, float]:
-    """
-    Attempts classification from structural signals alone.
-    Returns (EditClass, confidence) or (None, 0) if ambiguous.
-
-    Unambiguous voice signals:
-    - Hedge removal with high content overlap (same meaning, different certainty)
-    - Significant compression with high Jaccard (same content, tighter expression)
-    - Filler word removal
-    - Sentence length reduction without content change
-
-    Unambiguous non-voice signals:
-    - Low Jaccard similarity (different content — likely content/intent change)
-    - Instruction mentions specific facts/numbers/dates
-    """
-    instruction_lower = instruction.lower()
-
-    # --- Unambiguous factual signals ---
-    if re.search(r'\b(change|update|correct|fix)\b.{0,30}\b(time|date|number|figure|name|price|amount|stat)\b', instruction_lower):
-        return EditClass.FACTUAL, 0.92
-
-    if re.search(r'\b\d{1,2}(am|pm|:\d{2})\b', instruction_lower):
-        return EditClass.FACTUAL, 0.90
-
-    # --- Unambiguous format signals ---
-    if re.search(r'\b(bullet|numbered list|header|table|indent|paragraph)\b', instruction_lower):
-        return EditClass.FORMAT, 0.92
-
-    # --- Unambiguous content signals ---
-    # Low Jaccard + no hedge signal = different content, not different expression
-    if signals["jaccard_similarity"] < 0.25 and not signals["hedges_removed"]:
-        return EditClass.CONTENT, 0.78
-
-    # --- Unambiguous voice signals ---
-    score = 0.0
-
-    if signals["hedges_removed"]:
-        score += 0.35 * len(signals["hedges_removed"])
-
-    if signals["certain_added"]:
-        score += 0.25 * len(signals["certain_added"])
-
-    if signals["filler_removed"]:
-        score += 0.15 * len(signals["filler_removed"])
-
-    ratio = signals["compression_ratio"]
-    if ratio < COMPRESSION_VOICE_THRESHOLD and signals["jaccard_similarity"] > 0.40:
-        score += 0.30  # Compressed but same topic = voice compression
-
-    if ratio > EXPANSION_VOICE_THRESHOLD and signals["jaccard_similarity"] > 0.40:
-        score += 0.20  # Expanded same content = voice elaboration
-
-    # Instruction voice keywords — strong signal
-    if re.search(r'\b(direct|concise|shorter|longer|formal|casual|warmer|tone|voice|style|hedge|confident|blunt)\b', instruction_lower):
-        score += 0.40
-
-    if score >= 0.55:
-        return EditClass.VOICE, min(0.95, 0.55 + score * 0.3)
-
-    # Inconclusive — escalate
-    return None, 0.0
+    return edit_class
 
 
 # ---------------------------------------------------------------------------
-# Main classifier
-# ---------------------------------------------------------------------------
-
-def classify_edit(original: str, edited: str, user_instruction: str = "") -> EditClass:
-    """
-    Classifies an edit as voice, content, intent, factual, or format.
-
-    Pipeline:
-    1. Structural signals — fast, deterministic, handles clear cases
-    2. LLM escalation — for residual ambiguity (sync stub; async in sprint2.py)
-
-    Voice changes proceed into calibration. All others discarded.
-    """
-    signals = _structural_signals(original, edited)
-    edit_class, confidence = _classify_from_signals(signals, user_instruction)
-
-    if edit_class is not None:
-        logger.info("edit_classified", edit_class=edit_class.value,
-                    confidence=confidence, method="structural")
-        return edit_class
-
-    # Ambiguous — return ambiguous (async LLM escalation available via sprint2.py)
-    logger.info("edit_classified", edit_class="ambiguous",
-                confidence=0.0, method="structural_inconclusive")
-    return EditClass.AMBIGUOUS
-
-
-# ---------------------------------------------------------------------------
-# Semantic diff — full
+# Semantic diff — now backed by change vector
 # ---------------------------------------------------------------------------
 
 def semantic_diff(original: str, edited: str) -> dict:
-    """Full semantic diff — structural + confidence shift detection."""
-    signals = _structural_signals(original, edited)
+    """
+    Full semantic diff using change vector.
+    Returns a rich dict for observation extraction.
+    """
+    from voxa_calibration.change_vector import compute_change_vector
+    vector = compute_change_vector(original, edited)
 
-    confidence_shift = None
-    if signals["hedges_removed"] and not signals["hedges_added"]:
-        confidence_shift = "more_certain"
-    elif signals["hedges_added"] and not signals["hedges_removed"]:
-        confidence_shift = "more_hedged"
-    elif signals["certain_added"]:
-        confidence_shift = "more_certain"
+    orig_set = set(original.lower().split())
+    edit_set = set(edited.lower().split())
 
     return {
-        **signals,
-        "words_added": list(set(edited.lower().split()) - set(original.lower().split())),
-        "words_removed": list(set(original.lower().split()) - set(edited.lower().split())),
-        "confidence_shift": confidence_shift,
-        "compression_ratio": signals["compression_ratio"],
+        "words_added": list(edit_set - orig_set),
+        "words_removed": list(orig_set - edit_set),
+        "hedges_removed": [w for w in (orig_set - edit_set)
+                          if w in {"might", "could", "perhaps", "possibly", "maybe", "somewhat"}],
+        "hedges_added": [w for w in (edit_set - orig_set)
+                        if w in {"might", "could", "perhaps", "possibly", "maybe", "somewhat"}],
+        "compression_ratio": vector.compression_ratio,
+        "jaccard_similarity": vector.jaccard_similarity,
+        "confidence_shift": (
+            "more_certain" if vector.certainty > 0.15
+            else "more_hedged" if vector.certainty < -0.15
+            else None
+        ),
+        "directness_shift": (
+            "more_direct" if vector.directness > 0.15
+            else "less_direct" if vector.directness < -0.15
+            else None
+        ),
+        "formality_shift": (
+            "more_formal" if vector.formality > 0.15
+            else "less_formal" if vector.formality < -0.15
+            else None
+        ),
+        "warmth_shift": (
+            "warmer" if vector.warmth > 0.15
+            else "cooler" if vector.warmth < -0.15
+            else None
+        ),
+        "intensity_shift": (
+            "higher" if vector.intensity > 0.15
+            else "lower" if vector.intensity < -0.15
+            else None
+        ),
+        "vector": vector,
     }
 
 
 # ---------------------------------------------------------------------------
-# Rule observation extraction
+# Rule observation extraction — driven by change vector
 # ---------------------------------------------------------------------------
 
 COMPRESSION_HIGH = 0.75
 COMPRESSION_LOW = 1.30
+
+VOICE_AXIS_TO_DIMENSION: dict[str, tuple[str, str, str]] = {
+    "certainty":   ("confidence_expression", "certain", "hedged"),
+    "directness":  ("directness", "high", "low"),
+    "formality":   ("formality", "formal", "casual"),
+    "compression": ("compression", "high", "low"),
+    "warmth":      ("warmth", "high", "low"),
+    "intensity":   ("intensity", "high", "low"),
+}
 
 
 def extract_rule_observations(
@@ -229,53 +150,58 @@ def extract_rule_observations(
     session_id: UUID,
     edit_event_id: UUID,
 ) -> list[RuleObservation]:
+    """
+    Extracts rule observations from a semantic diff.
+    Uses vector axes where available, falls back to structural signals.
+    """
     observations: list[RuleObservation] = []
+    vector: ChangeVector | None = diff.get("vector")
 
-    if diff.get("hedges_removed"):
-        observations.append(RuleObservation(
-            user_id=user_id,
-            rule_dimension="confidence_expression",
-            observed_value="certain",
-            source_edit_id=edit_event_id,
-            session_id=session_id,
-        ))
-
-    if diff.get("hedges_added"):
-        observations.append(RuleObservation(
-            user_id=user_id,
-            rule_dimension="confidence_expression",
-            observed_value="hedged",
-            source_edit_id=edit_event_id,
-            session_id=session_id,
-        ))
-
-    ratio = diff.get("compression_ratio", 1.0)
-    if isinstance(ratio, float):
-        if ratio < COMPRESSION_HIGH:
+    if vector is not None and vector.dominant_voice_axes:
+        # Primary path: extract from vector dominant axes
+        for axis in vector.dominant_voice_axes:
+            if axis not in VOICE_AXIS_TO_DIMENSION:
+                continue
+            dimension, pos_val, neg_val = VOICE_AXIS_TO_DIMENSION[axis]
+            axis_value = getattr(vector, axis)
+            if abs(axis_value) < 0.15:
+                continue
+            observed_value = pos_val if axis_value > 0 else neg_val
             observations.append(RuleObservation(
                 user_id=user_id,
-                rule_dimension="compression",
-                observed_value="high",
+                rule_dimension=dimension,
+                observed_value=observed_value,
                 source_edit_id=edit_event_id,
                 session_id=session_id,
             ))
-        elif ratio > COMPRESSION_LOW:
+    else:
+        # Fallback: structural signals from diff dict
+        if diff.get("hedges_removed"):
             observations.append(RuleObservation(
-                user_id=user_id,
-                rule_dimension="compression",
-                observed_value="low",
-                source_edit_id=edit_event_id,
+                user_id=user_id, rule_dimension="confidence_expression",
+                observed_value="certain", source_edit_id=edit_event_id,
                 session_id=session_id,
             ))
-
-    if diff.get("filler_removed"):
-        observations.append(RuleObservation(
-            user_id=user_id,
-            rule_dimension="compression",
-            observed_value="high",
-            source_edit_id=edit_event_id,
-            session_id=session_id,
-        ))
+        if diff.get("hedges_added"):
+            observations.append(RuleObservation(
+                user_id=user_id, rule_dimension="confidence_expression",
+                observed_value="hedged", source_edit_id=edit_event_id,
+                session_id=session_id,
+            ))
+        ratio = diff.get("compression_ratio", 1.0)
+        if isinstance(ratio, float):
+            if ratio < COMPRESSION_HIGH:
+                observations.append(RuleObservation(
+                    user_id=user_id, rule_dimension="compression",
+                    observed_value="high", source_edit_id=edit_event_id,
+                    session_id=session_id,
+                ))
+            elif ratio > COMPRESSION_LOW:
+                observations.append(RuleObservation(
+                    user_id=user_id, rule_dimension="compression",
+                    observed_value="low", source_edit_id=edit_event_id,
+                    session_id=session_id,
+                ))
 
     return observations
 
@@ -342,7 +268,7 @@ def calibrate(
         edit_class=edit_class,
         direction="positive",
         rule_dimension=observations[0].rule_dimension if observations else None,
-        pattern_detected=str(diff),
+        pattern_detected=str({k: v for k, v in diff.items() if k != "vector"}),
         raw_edit=edited_text,
         profile_version_before=profile.version,
     )

@@ -356,7 +356,8 @@ def run_decay_batch(profile: VoiceProfile) -> dict[str, float]:
 
         rate = DIMENSION_DECAY_RATES.get(dimension, 0.02)
         old_confidence = rule.confidence
-        new_confidence = apply_decay(old_confidence, rate)
+        # Consistency-modulated decay — stable rules decay more slowly
+        new_confidence = apply_decay(old_confidence, rate, consistency_score=rule.stability)
         rule.confidence = new_confidence
         decay_log[dimension] = new_confidence
 
