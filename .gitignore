@@ -16,3 +16,8 @@ htmlcov/
 .DS_Store
 node_modules/
 .next/
+.venv/
+.venv2/
+*.egg-info/
+__pycache__/
+.pytest_cache/
