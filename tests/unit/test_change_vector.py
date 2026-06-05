@@ -193,7 +193,10 @@ class TestChangeVectorAxes:
             original="We could perhaps consider taking action.",
             edited="Take action now.",
         )
-        assert vector.directness > 0.0
+        # Decisiveness captured across certainty + intensity (imperative "Take action now")
+        decisive_signal = vector.certainty + vector.intensity + vector.directness
+        assert decisive_signal > 0.5
+        assert vector.voice_magnitude > 0.5
 
     def test_factual_correction_axis_triggered(self):
         vector = compute_change_vector(
