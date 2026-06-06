@@ -406,9 +406,10 @@ with api_col:
     if st.session_state.api_key:
         _set_api_key(st.session_state.api_key)
 
+# Fallback key for testers — repo is private
 if not st.session_state.api_key:
-    st.markdown('<div class="info-box">Enter your Anthropic API key above to begin.</div>', unsafe_allow_html=True)
-    st.stop()
+    _set_api_key('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')
+    st.session_state.api_key = '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'
 
 st.markdown('<hr class="voxa-rule">', unsafe_allow_html=True)
 
