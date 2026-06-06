@@ -141,7 +141,9 @@ RULES:
 1. Rewrite only. Do not add information that was not in the original.
 2. Do not remove meaning. Only change expression.
 3. If a forbidden phrase appears, replace it — do not delete the underlying meaning.
-4. Return only the rewritten text. No preamble. No explanation. No commentary."""
+4. Return only the rewritten text. No preamble. No explanation. No commentary.
+5. Match the length of the original. Do not shorten. Do not summarise. Every paragraph in gets a paragraph out.
+6. Never use em dashes (—) or en dashes (–). Use a hyphen or restructure the sentence."""
 
 
 # ---------------------------------------------------------------------------
@@ -170,106 +172,106 @@ async def render(
     session_id: UUID,
     context: str = "default",
     calibration_session_count: int = 0,
+    intent_mode: str | None = None,
 ) -> RenderedOutput | None:
     """
-    Full rendering pipeline:
-    Load Profile → Check Bootstrap → Map Content → Structural Transform →
-    Language Transform → Stylistic Transform → Boundary Check → Output
-
-    Returns None if boundary check fails.
-    Returns RenderedOutput with is_bootstrap_output=True if profile is not
-    yet at minimum renderable threshold (generic output returned).
+    Full rendering pipeline with intent mode support.
+    Intent mode adjusts execution constraints only.
+    Identity dimensions are never touched.
     """
+    from voxa_rendering.intent_modes import (
+        apply_intent_mode, build_intent_mode_trace,
+        mode_from_string, IntentMode, detect_intent_mode,
+    )
+
     logger.info(
         "render_started",
         user_id=str(profile.user_id),
         session_id=str(session_id),
         context=context,
+        intent_mode=intent_mode,
     )
 
-    # Step 1 — Check bootstrap state
+    # Step 1 — Bootstrap check
     bootstrap_status = check_bootstrap(profile, calibration_session_count)
-
     if not bootstrap_status.is_renderable:
-        logger.info(
-            "render_bootstrap_incomplete",
-            user_id=str(profile.user_id),
-            missing=bootstrap_status.missing_requirements,
-        )
-        # Return generic output with onboarding prompt
+        logger.info("render_bootstrap_incomplete", user_id=str(profile.user_id),
+                    missing=bootstrap_status.missing_requirements)
         generic_text = (
             "Your voice profile is still building. "
             "Complete onboarding to unlock personalised rendering. "
             f"Missing: {', '.join(bootstrap_status.missing_requirements)}"
         )
         return RenderedOutput(
-            user_id=profile.user_id,
-            session_id=session_id,
-            input_text=input_text,
-            output_text=generic_text,
-            context=context,
+            user_id=profile.user_id, session_id=session_id,
+            input_text=input_text, output_text=generic_text, context=context,
             reproducibility=ReproducibilitySnapshot(
                 voice_profile_version=profile.version,
                 render_engine_version=RENDER_ENGINE_VERSION,
-                context=context,
-                rule_snapshot={},
+                context=context, rule_snapshot={},
             ),
-            neutral_defaults_used=[],
-            is_bootstrap_output=True,
+            neutral_defaults_used=[], is_bootstrap_output=True,
         )
 
-    # Step 2 — Build rendering constraints from profile
+    # Step 2 — Build base constraints from profile
     constraints, neutral_defaults_used = _build_rendering_constraints(profile)
 
-    if neutral_defaults_used:
-        logger.info(
-            "neutral_defaults_applied",
-            user_id=str(profile.user_id),
-            dimensions=[d.dimension for d in neutral_defaults_used],
-        )
+    # Step 3 — Resolve intent mode
+    # If caller specifies a mode, use it. Otherwise auto-detect from input.
+    # Detection is always silent — user never sees the mode name.
+    if intent_mode:
+        parsed_mode = mode_from_string(intent_mode)
+        if not parsed_mode:
+            logger.warning("invalid_intent_mode_ignored", value=intent_mode)
+            parsed_mode, _ = detect_intent_mode(input_text)
+    else:
+        parsed_mode, detection_confidence = detect_intent_mode(input_text)
 
-    # Step 3 — Build system prompt and call LLM (rendering boundary only)
+    constraints, applied_keys = apply_intent_mode(constraints, parsed_mode)
+    mode_trace = build_intent_mode_trace(parsed_mode, applied_keys)
+
+    if neutral_defaults_used:
+        logger.info("neutral_defaults_applied", user_id=str(profile.user_id),
+                    dimensions=[d.dimension for d in neutral_defaults_used])
+
+    # Step 4 — LLM rewrite within constraints
     system_prompt = _build_system_prompt(constraints)
     rendered_text = await _call_llm(system_prompt, input_text)
 
-    # Step 4 — Boundary validation
-    # Failed check returns NO output — not a degraded output
+    # Step 4b — Deterministic output cleaning
+    # Not a prompt instruction. Code enforcement.
+    # Runs regardless of what the LLM produced.
+    from voxa_rendering.cleaner import clean_render_output
+    rendered_text = clean_render_output(rendered_text)
+
+    # Step 5 — Boundary validation
     passed, violation = _check_boundaries(rendered_text, profile)
     if not passed:
-        logger.warning(
-            "boundary_check_failed",
-            user_id=str(profile.user_id),
-            violation=violation,
-        )
-        return None  # No output on boundary failure
+        logger.warning("boundary_check_failed", user_id=str(profile.user_id),
+                       violation=violation)
+        return None
 
-    # Step 5 — Build reproducibility snapshot
-    rule_snapshot = {
-        k: str(v) for k, v in constraints.items()
-    }
+    # Step 6 — Reproducibility snapshot
+    rule_snapshot = {k: str(v) for k, v in constraints.items()}
+    if mode_trace:
+        rule_snapshot["_intent_mode"] = mode_trace.get("intent_mode", "")
 
     output = RenderedOutput(
-        user_id=profile.user_id,
-        session_id=session_id,
-        input_text=input_text,
-        output_text=rendered_text,
-        context=context,
+        user_id=profile.user_id, session_id=session_id,
+        input_text=input_text, output_text=rendered_text, context=context,
         reproducibility=ReproducibilitySnapshot(
             voice_profile_version=profile.version,
             render_engine_version=RENDER_ENGINE_VERSION,
-            context=context,
-            rule_snapshot=rule_snapshot,
+            context=context, rule_snapshot=rule_snapshot,
         ),
         neutral_defaults_used=neutral_defaults_used,
         is_bootstrap_output=False,
     )
 
-    logger.info(
-        "render_complete",
-        user_id=str(profile.user_id),
-        output_id=str(output.output_id),
-        neutral_default_count=len(neutral_defaults_used),
-        boundary_passed=True,
-    )
+    logger.info("render_complete", user_id=str(profile.user_id),
+                output_id=str(output.output_id),
+                neutral_default_count=len(neutral_defaults_used),
+                intent_mode=intent_mode or "none",
+                boundary_passed=True)
 
     return output
