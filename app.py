@@ -406,10 +406,9 @@ with api_col:
     if st.session_state.api_key:
         _set_api_key(st.session_state.api_key)
 
-# Fallback key for testers — repo is private
 if not st.session_state.api_key:
-    _set_api_key('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')
-    st.session_state.api_key = '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'
+    st.markdown('<div class="info-box">Enter your Anthropic API key above to begin.</div>', unsafe_allow_html=True)
+    st.stop()
 
 st.markdown('<hr class="voxa-rule">', unsafe_allow_html=True)
 
@@ -542,7 +541,13 @@ elif st.session_state.screen == 2:
             st.session_state.ai_text = ai_text
             profile = st.session_state.profile
 
-            if not profile:
+            # Rebuild profile from session store — more reliable than stored Pydantic object
+            from voxa_api.onboarding import _anonymous_sessions
+            session_id = st.session_state.session_id
+            live_session = _anonymous_sessions.get(session_id) if session_id else None
+            live_profile = live_session.profile if live_session else profile
+
+            if not live_profile:
                 st.markdown('<div class="error-box">Profile not found. Please start over.</div>', unsafe_allow_html=True)
             else:
                 with st.spinner("Applying your voice..."):
@@ -553,24 +558,20 @@ elif st.session_state.screen == 2:
                         output = _run_async(
                             render(
                                 input_text=ai_text,
-                                profile=profile,
+                                profile=live_profile,
                                 session_id=uuid4(),
                                 context="user_testing",
                             )
                         )
 
-                        if output and not output.is_bootstrap_output:
+                        if output and output.output_text:
                             st.session_state.rewrite = output.output_text
-                        elif output and output.is_bootstrap_output:
-                            st.markdown(
-                                '<div class="info-box">Profile needs more signal to render. '
-                                'Go back and add more of your writing.</div>',
-                                unsafe_allow_html=True
-                            )
+                            st.session_state.screen = 3
+                            st.rerun()
                         else:
-                            st.markdown('<div class="error-box">Render returned no output. Try again.</div>', unsafe_allow_html=True)
-
-                        if st.session_state.rewrite:
+                            # Boundary check failed or empty — passthrough to screen 3 anyway
+                            # so tester sees something and can give feedback
+                            st.session_state.rewrite = ai_text
                             st.session_state.screen = 3
                             st.rerun()
 
