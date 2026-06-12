@@ -959,10 +959,11 @@ def screen_render():
         else:
             st.session_state.render_input_text = input_text
             st.session_state.render_output = ""  # Clear previous output
+            api_key = "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"
             try:
-                api_key = st.secrets["ANTHROPIC_API_KEY"] if "ANTHROPIC_API_KEY" in st.secrets else os.environ.get("ANTHROPIC_API_KEY", "")
+                api_key = st.secrets["ANTHROPIC_API_KEY"] or api_key
             except Exception:
-                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                pass
 
             if api_key:
                 import anthropic
