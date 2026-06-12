@@ -960,9 +960,9 @@ def screen_render():
             st.session_state.render_input_text = input_text
             st.session_state.render_output = ""  # Clear previous output
             try:
-                api_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "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")
+                api_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
             except Exception:
-                api_key = os.environ.get("ANTHROPIC_API_KEY", "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")
+                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
             if api_key:
                 import anthropic
