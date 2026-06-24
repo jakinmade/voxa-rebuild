@@ -814,6 +814,163 @@ def progress_dots(current: int, total: int = 4):
 # Screen 1 — Paste
 # ============================================================
 
+def _score_sample_fitness(text: str) -> dict:
+    """
+    Scores a writing sample for fingerprint fitness.
+    Three research-validated dimensions:
+    1. SPONTANEITY — unguarded, natural writing (idiolect lives here)
+    2. SPECIFICITY — concrete, named, real details (what AI cannot fake)
+    3. OWNERSHIP — first-person, accountable, self-authored
+    """
+    import re, math
+    from collections import Counter
+
+    words = text.split()
+    total_words = max(len(words), 1)
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip() and len(s.split()) >= 2]
+    total_sents = max(len(sentences), 1)
+
+    # SPONTANEITY (0-35)
+    spontaneity = 0
+    if len(sentences) >= 3:
+        lengths = [len(s.split()) for s in sentences]
+        avg = sum(lengths) / len(lengths)
+        sd = math.sqrt(sum((l - avg) ** 2 for l in lengths) / len(lengths))
+        if sd >= 8:   spontaneity += 12
+        elif sd >= 5: spontaneity += 8
+        elif sd >= 3: spontaneity += 4
+
+    subject_drop = re.compile(
+        r'^(Will|Can|Could|Would|Pls|Please|Am|Have|Had|Apologies|Thanks|Noted|Confirmed)\b',
+        re.IGNORECASE
+    )
+    drop_count = sum(1 for s in sentences if subject_drop.match(s.strip()))
+    if drop_count >= 2:   spontaneity += 8
+    elif drop_count >= 1: spontaneity += 4
+
+    shorthand = re.compile(r'\b(pls|btw|fyi|asap|tbc|tbd|re:|etc|vs)\b', re.IGNORECASE)
+    sc = len(shorthand.findall(text))
+    if sc >= 2:   spontaneity += 8
+    elif sc >= 1: spontaneity += 4
+
+    if re.search(r'(\.\.|  |\.\s+[a-z])', text):
+        spontaneity += 4
+
+    if re.search(r'\b(hopefully|pls let|let me know|happy to|regards,|cheers,|best,|thanks,)\b', text, re.IGNORECASE):
+        spontaneity += 3
+
+    spontaneity = min(spontaneity, 35)
+
+    # SPECIFICITY (0-35)
+    specificity = 0
+    non_proper = {'The','This','That','These','Those','They','Their','There','When',
+                  'What','Which','Where','Who','How','And','But','For','With','From',
+                  'Also','Some','Have','Been','Will','Would','Could','Should','Just',
+                  'Still','Even','Here','Very','More','Most','Into','Over','After',
+                  'About','Such','Each','Both','Only','Then','Than','Same','Another'}
+    proper_nouns = [w for w in re.findall(r'(?<=[.!? ])[A-Z][a-z]{2,}', text) if w not in non_proper]
+    unique_proper = len(set(proper_nouns))
+    if unique_proper >= 5:   specificity += 15
+    elif unique_proper >= 3: specificity += 10
+    elif unique_proper >= 1: specificity += 5
+
+    number_count = len(re.findall(r'\b\d+[\d,.]*\b', text))
+    if number_count >= 3:   specificity += 10
+    elif number_count >= 1: specificity += 5
+
+    shared = len(re.findall(
+        r'\b(the (meeting|call|proposal|project|report|issue|deal|team|client|product|platform|system))\b',
+        text, re.IGNORECASE
+    ))
+    if shared >= 2:   specificity += 10
+    elif shared >= 1: specificity += 5
+
+    specificity = min(specificity, 35)
+
+    # OWNERSHIP (0-30)
+    ownership = 0
+    fp = re.compile(r'\b(I|me|my|mine|myself)\b', re.IGNORECASE)
+    fp_sents = sum(1 for s in sentences if fp.search(s))
+    fp_ratio = fp_sents / total_sents
+    if fp_ratio >= 0.5:    ownership += 12
+    elif fp_ratio >= 0.3:  ownership += 8
+    elif fp_ratio >= 0.15: ownership += 4
+
+    denial = re.compile(
+        r'\b(I do not|I am not|I don\'t|I\'m not|That is not|This is not|We do not)\b',
+        re.IGNORECASE
+    )
+    dc = len(denial.findall(text))
+    if dc >= 2:   ownership += 10
+    elif dc >= 1: ownership += 6
+
+    if re.search(
+        r'\b(I have (just|been|become|realised|decided)|I was|I became|I struggle|to be honest)\b',
+        text, re.IGNORECASE
+    ):
+        ownership += 8
+
+    ownership = min(ownership, 30)
+
+    # TOTAL + word count modifier
+    total = spontaneity + specificity + ownership
+    wc = len(words)
+    if wc < 100:
+        total = int(total * 0.5); wc_note = "very short"
+    elif wc < 200:
+        total = int(total * 0.75); wc_note = "short"
+    elif wc < 400:
+        total = int(total * 0.9); wc_note = "good length"
+    else:
+        wc_note = "strong length"
+
+    if total >= 75:   tier = "gold"
+    elif total >= 55: tier = "strong"
+    elif total >= 35: tier = "thin"
+    else:             tier = "weak"
+
+    nudge = None
+    if tier in ("thin", "weak"):
+        if specificity < 10 and ownership < 10:
+            nudge = "Paste an email you sent to someone you know. Something with names, real context, not a formal document."
+        elif specificity < 10:
+            nudge = "Paste something with real names and specific context — an email to a colleague about an actual project."
+        elif ownership < 10:
+            nudge = "Paste something written in your own voice — where you say what you think, not what sounds professional."
+        elif spontaneity < 10:
+            nudge = "Paste something you wrote quickly without re-reading — a message or email dashed off on your phone."
+        else:
+            nudge = "Paste one more piece of your own writing to sharpen the fingerprint."
+
+    return {
+        "score": total, "tier": tier,
+        "spontaneity": spontaneity, "specificity": specificity, "ownership": ownership,
+        "word_count": wc, "wc_note": wc_note, "nudge": nudge,
+    }
+
+
+def _fitness_gate(fitness: dict, cumulative_words: int, cumulative_docs: int) -> dict:
+    """Decides whether to fire fingerprint, nudge, or accumulate."""
+    tier = fitness["tier"]
+    wc = fitness["word_count"]
+    nudge = fitness["nudge"]
+
+    if tier == "gold" and wc >= 200:
+        return {"action": "fire", "confidence": "high", "message": None}
+    if tier == "strong" and wc >= 250:
+        return {"action": "fire", "confidence": "medium", "message": None}
+    if tier == "strong" and cumulative_words >= 400:
+        return {"action": "fire", "confidence": "medium", "message": None}
+    if tier in ("thin", "weak") and nudge:
+        return {"action": "nudge", "confidence": "provisional", "message": nudge}
+    if cumulative_words >= 400:
+        return {"action": "fire", "confidence": "provisional", "message": None}
+    return {
+        "action": "accumulate", "confidence": "provisional",
+        "message": "Paste one more piece of your writing to complete your fingerprint.",
+    }
+
+
 def screen_paste():
     progress_dots(1)
 
@@ -851,44 +1008,50 @@ def screen_paste():
                     st.session_state.get("baseline_fingerprint"), new_metrics
                 )
 
-                WORD_GATE = 500
-                DOC_GATE = 2
+                fitness = _score_sample_fitness(text)
+                st.session_state.sample_fitness = fitness
                 words_so_far = st.session_state.cumulative_words
-                docs_so_far = st.session_state.cumulative_docs
-                gate_open = words_so_far >= WORD_GATE and docs_so_far >= DOC_GATE
+                gate = _fitness_gate(fitness, words_so_far, st.session_state.cumulative_docs)
 
-                if gate_open:
+                if gate["action"] == "fire":
                     with st.spinner("Reading your writing..."):
-                        st.session_state.observations = analyse_writing(
-                            st.session_state.raw_text
-                        )
+                        st.session_state.observations = analyse_writing(st.session_state.raw_text)
+                    st.session_state.fingerprint_confidence = gate["confidence"]
+                    st.session_state.fitness_nudge = None
                     go_to(2)
                     st.rerun()
+                elif gate["action"] == "nudge":
+                    st.session_state.fitness_nudge = gate["message"]
+                    st.rerun()
                 else:
-                    # Gate not yet open — stay on screen 1, show progress
+                    st.session_state.fitness_nudge = gate.get("message")
                     st.rerun()
 
-    # Corpus progress — shows after first paste, until gate opens
+    # Fitness-aware progress messaging
+    fitness = st.session_state.get("sample_fitness")
+    nudge = st.session_state.get("fitness_nudge")
     words_so_far = st.session_state.get("cumulative_words", 0)
-    docs_so_far = st.session_state.get("cumulative_docs", 0)
-    WORD_GATE = 500
-    DOC_GATE = 2
 
-    if words_so_far > 0:
-        words_needed = max(0, WORD_GATE - words_so_far)
-        docs_needed = max(0, DOC_GATE - docs_so_far)
-        gate_open = words_so_far >= WORD_GATE and docs_so_far >= DOC_GATE
-
-        if not gate_open:
-            parts = []
-            if words_needed > 0:
-                parts.append(f"{words_needed} more words")
-            if docs_needed > 0:
-                noun = "paste" if docs_needed == 1 else "pastes"
-                parts.append(f"{docs_needed} more {noun}")
-            hint = " and ".join(parts)
+    if words_so_far > 0 and fitness:
+        tier = fitness.get("tier", "thin")
+        if nudge:
             st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;">'                f'{words_so_far} words submitted. Paste more to build your fingerprint '                f'({hint} needed).</div>',
+                f'<div class="microcopy" style="margin-top:0.5rem;color:#C8962E;">{nudge}</div>',
+                unsafe_allow_html=True
+            )
+        elif tier == "gold":
+            st.markdown(
+                '<div class="microcopy" style="margin-top:0.5rem;color:#2e8b57;">Strong sample. Your fingerprint is ready.</div>',
+                unsafe_allow_html=True
+            )
+        elif tier == "strong":
+            st.markdown(
+                f'<div class="microcopy" style="margin-top:0.5rem;">{words_so_far} words submitted. Paste one more to sharpen it.</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f'<div class="microcopy" style="margin-top:0.5rem;">{words_so_far} words submitted. Paste more of your own writing.</div>',
                 unsafe_allow_html=True
             )
 
