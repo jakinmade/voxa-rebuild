@@ -1892,7 +1892,10 @@ def _regex_sweep(text: str) -> str:
                 r'more than it|who they|what they|blueprint|the gap|the distance|'
                 r'the difference|the question|promises more|delivers on|'
                 r'comes with time|does not\.?$|perhaps not|time will tell|'
-                r'only time|remains to be seen|that clarity)\b', re.IGNORECASE
+                r'only time|remains to be seen|that clarity|'
+                r'could take (longer|time|months)|might take|takes time|'
+                r'than people expect|than expected|some way off|'
+                r'whether.*genuinely|still some way|coming or not)\b', re.IGNORECASE
             )
             # Also catch "Perhaps X. Perhaps Y." couplet — Claude philosophical closer
             perhaps_couplet = re.compile(r'Perhaps [^.]+\. Perhaps [^.]+\.?', re.IGNORECASE)
@@ -1954,7 +1957,10 @@ def _regex_sweep(text: str) -> str:
         no_article = {'clear', 'enough', 'simple', 'wrong', 'right', 'new',
                       'good', 'bad', 'free', 'ready', 'done', 'finished',
                       'certain', 'sure', 'possible', 'necessary', 'perfect',
-                      'disaster', 'statement', 'mistake', 'accident'}
+                      'disaster', 'statement', 'mistake', 'accident',
+                      'talent', 'quality', 'cohesion', 'progress', 'clarity',
+                      'identity', 'momentum', 'confidence', 'rhythm', 'intent',
+                      'pressure', 'direction', 'purpose', 'structure', 'balance'}
         if noun.lower() in no_article:
             return m.group(0)
         return f"{verb_phrase} a {noun}"
