@@ -2138,7 +2138,33 @@ def screen_render():
                 pass
 
             if api_key:
-                import anthropic
+                import anthropic, re as _re_clean
+
+                # Sanitise input — strip stray citation lines AI tools inject
+                def _sanitise_input(txt: str) -> str:
+                    import re as _r
+                    clean_lines = []
+                    for ln in txt.split("\n"):
+                        s = ln.strip()
+                        # Stray news source names
+                        if _r.search(r"(Mathrubhumi|BBC News|Sky News|Daily Mail|The Times|"
+                                     r"Telegraph|Reuters|AP News|Evening Standard|City A\.M\.)", s, _r.I):
+                            continue
+                        # Bare URLs
+                        if _r.match(r"https?://\S+$", s):
+                            continue
+                        # Source/credit tags
+                        if _r.match(r"^(Source|Via|Credit|Image|Photo|From):\s*\S", s, _r.I):
+                            continue
+                        # Repeated text artefacts (e.g. "Mathrubhumi EnglishMathrubhumi English")
+                        if len(s) > 10 and len(set(s.split())) < len(s.split()) * 0.5:
+                            words = s.split()
+                            if len(words) >= 4 and words[:len(words)//2] == words[len(words)//2:]:
+                                continue
+                        clean_lines.append(ln)
+                    return "\n".join(clean_lines).strip()
+
+                input_text = _sanitise_input(input_text)
 
                 detected_mode = _detect_mode(input_text)
                 st.session_state.intent_mode = detected_mode
