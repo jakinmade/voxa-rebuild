@@ -1700,7 +1700,13 @@ def _build_system_prompt(
             "Match the register of the source writing exactly. Do not elevate, polish, or formalise.\n"
             "If the source writing is direct and slightly rough, the output must be direct and slightly rough.\n"
             "The goal is not better writing. The goal is their writing.\n"
-            "The unpolished edge is part of the voice. Preserve it.\n\n"
+            "The unpolished edge is part of the voice. Preserve it.\n"
+            "\n"
+            "COMPLETENESS — non-negotiable:\n"
+            "Short sentences are correct. But every sentence must be a complete thought.\n"
+            "Do not fragment assertions. 'It was not a disaster.' not 'Not a disaster.'\n"
+            "The subject stays unless it is an action statement (Will, Can, Pls, Have).\n"
+            "Curtness is a style choice. Truncation is an error. Know the difference.\n\n"
         )
 
         prompt = (
