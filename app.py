@@ -2007,6 +2007,12 @@ def _regex_sweep(text: str) -> str:
                 text = '\n\n'.join(paragraphs)
 
     # 4. Claude default constructions
+    # Strip opening hedges sentence by sentence
+    opener_hedge = re.compile(r'(?m)^I think (that )?', re.IGNORECASE)
+    text = opener_hedge.sub('', text)
+    opener_hedge2 = re.compile(r'(?m)^I believe (that )?', re.IGNORECASE)
+    text = opener_hedge2.sub('', text)
+
     claude_constructions = [
         (r'\bWhat stood out most was\b', 'What stood out'),
         (r'\bWhat stood out was\b', 'What stood out'),
