@@ -1827,7 +1827,8 @@ def _build_system_prompt(
             "- Match the directness. If they own their statements, do not hedge.\n"
             "- Match the register. If they write peer-to-peer, do not write down to the reader.\n"
             "- Do not add warmth, polish, or formality that isn't already in the voice profile.\n"
-            "- Do not smooth rough edges. The rough edges may be part of their voice.\n\n"
+            "- Do not smooth rough edges. The rough edges may be part of their voice.\n"
+            "- STOP WHEN THE CONTENT IS DONE. No closing sentence. No summary. No landing. When the last point is made, stop.\n\n"
             f"{base_rules}"
         )
 
