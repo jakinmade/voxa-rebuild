@@ -1828,7 +1828,9 @@ def _build_system_prompt(
             "- Match the register. If they write peer-to-peer, do not write down to the reader.\n"
             "- Do not add warmth, polish, or formality that isn't already in the voice profile.\n"
             "- Do not smooth rough edges. The rough edges may be part of their voice.\n"
-            "- STOP WHEN THE CONTENT IS DONE. No closing sentence. No summary. No landing. When the last point is made, stop.\n\n"
+            "- CRITICAL: STOP WHEN THE CONTENT IS DONE. The final paragraph of the input is the final paragraph of the output. "
+            "Do not add sentences after it. Do not summarise. Do not close. Do not reflect. "
+            "When the last substantive point from the input is restated, your job is finished. Stop there.\n\n"
             f"{base_rules}"
         )
 
@@ -2012,11 +2014,16 @@ def _regex_sweep(text: str) -> str:
                 text = '\n\n'.join(paragraphs)
 
     # 4. Claude default constructions
-    # Strip opening hedges sentence by sentence
+    # Strip opening hedges — sentence start only, preserve mid-sentence ownership
     opener_hedge = re.compile(r'(?m)^I think (that )?', re.IGNORECASE)
     text = opener_hedge.sub('', text)
     opener_hedge2 = re.compile(r'(?m)^I believe (that )?', re.IGNORECASE)
     text = opener_hedge2.sub('', text)
+    opener_hedge3 = re.compile(r'(?m)^I would argue (that )?', re.IGNORECASE)
+    text = opener_hedge3.sub('', text)
+    # "I am genuinely uncertain about" -> "I am not sure"
+    text = re.sub(r'I am genuinely uncertain (about|whether)', 'I am not sure', text, flags=re.IGNORECASE)
+    text = re.sub(r'I remain (genuinely |deeply )?uncertain', 'I am not sure', text, flags=re.IGNORECASE)
 
     claude_constructions = [
         (r'\bWhat stood out most was\b', 'What stood out'),
