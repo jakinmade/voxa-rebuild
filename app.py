@@ -1522,6 +1522,11 @@ def _pick_anchor_sentences(sentences: list[str]) -> list[str]:
     if len(selected) < 2:
         selected = [s for _, s in scored[:3]]
 
+    # Quality gate — only sentences that scored above 0 are peak sentences
+    peak = [s for s in selected if any(sc > 0 and sent == s for sc, sent in scored)]
+    if len(peak) >= 2:
+        selected = peak
+
     return selected[:3]
 
 
@@ -1718,7 +1723,10 @@ def _build_system_prompt(
             "- After rewriting, read back through and ask: does this sound like a human "
             "who matches the voice profile? If not, rewrite again.\n"
             "- Do not add warmth, polish, or formality not already in the voice profile.\n"
-            "- The rough edges in their writing are not mistakes. They are the voice.\n\n"
+            "- The rough edges in their writing are not mistakes. They are the voice.\n"
+            "- Before you finish: re-read THE STANDARD sentences in the voice profile. "
+            "Ask yourself: does this output feel like it came from the same person? "
+            "If not, rewrite until it does.\n\n"
             f"{base_rules}"
         )
     else:
