@@ -1600,6 +1600,129 @@ def _score_thought_density(text: str) -> dict:
     }
 
 
+def _extract_vocabulary_fingerprint(text: str) -> dict:
+    """
+    Extracts the user's actual vocabulary — the words they reach for without thinking.
+    Not the most polished words. The most frequent content words.
+    These are what the renderer should use rather than elevated synonyms.
+
+    Also identifies AI-default substitutions — words the user never writes
+    that AI reaches for instead.
+    """
+    import re
+    from collections import Counter
+
+    # Strip punctuation and lowercase
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
+
+    # Function words and stopwords to exclude
+    stopwords = {
+        'the','and','for','are','was','were','has','have','had','not','but',
+        'with','from','this','that','they','their','there','what','when','who',
+        'which','been','will','would','could','should','can','may','might',
+        'its','our','your','his','her','also','just','even','only','more',
+        'some','such','than','then','into','out','about','all','any','each',
+        'said','does','did','him','her','she','per','how','now','new','one',
+        'two','very','too','yet','both','over','after','before','since','while',
+        'though','although','because','however','therefore','thus','hence',
+        'furthermore','moreover','additionally','nevertheless','nonetheless',
+        'subsequently','consequently','accordingly','meanwhile'
+    }
+
+    content_words = [w for w in words if w not in stopwords and len(w) >= 4]
+    word_freq = Counter(content_words)
+
+    # Top 40 most frequent content words — these are their vocabulary fingerprint
+    top_words = [word for word, count in word_freq.most_common(40) if count >= 1]
+
+    # AI-default substitutions — words AI reaches for that this user avoids
+    # Detected by absence from corpus + being common AI vocabulary
+    ai_substitutions = {
+        'narrative': 'story or impression',
+        'landscape': 'situation or environment',
+        'transition': 'change',
+        'underscores': 'shows',
+        'highlights': 'shows',
+        'showcases': 'shows',
+        'illustrates': 'shows',
+        'demonstrates': 'shows',
+        'reflects': 'shows',
+        'signifies': 'means',
+        'trajectory': 'direction or path',
+        'paradigm': 'approach',
+        'ecosystem': 'environment',
+        'leverage': 'use',
+        'robust': 'strong',
+        'pivotal': 'important',
+        'crucial': 'important',
+        'significant': 'important',
+        'substantial': 'large',
+        'comprehensive': 'full',
+        'nuanced': 'detailed',
+        'multifaceted': 'complex',
+        'holistic': 'full',
+        'synergy': 'benefit',
+        'operationalise': 'put into practice',
+        'contextualise': 'put in context',
+        'characterised': 'marked',
+        'underpinned': 'supported',
+        'encapsulates': 'captures',
+        'epitomises': 'represents',
+    }
+
+    # Which AI words does this user actually avoid?
+    avoided = {ai_word: replacement
+               for ai_word, replacement in ai_substitutions.items()
+               if ai_word not in word_freq}
+
+    # Average word length — proxy for register level
+    avg_word_length = sum(len(w) for w in content_words) / max(len(content_words), 1)
+
+    return {
+        'top_words': top_words[:30],
+        'avoided_ai_words': avoided,
+        'avg_word_length': round(avg_word_length, 1),
+        'word_count': len(words),
+    }
+
+
+def _format_vocabulary_fingerprint(vocab: dict, input_genre: str = "article") -> str:
+    """
+    Formats vocabulary fingerprint as renderer instruction.
+    Plain English. Specific. Not a description — actual words to use.
+    """
+    if not vocab:
+        return ""
+
+    lines = ["\nVOCABULARY FINGERPRINT — their actual words, not polished synonyms:"]
+
+    if vocab.get('top_words'):
+        # Show most frequent words — these are their natural vocabulary
+        words_str = ', '.join(f"'{w}'" for w in vocab['top_words'][:20])
+        lines.append(f"  Words they actually reach for: {words_str}")
+        lines.append(f"  Use these where they fit. Do not substitute elevated synonyms.")
+
+    if vocab.get('avoided_ai_words'):
+        # Show specific substitutions
+        lines.append(f"  SUBSTITUTIONS — words they never write and what to use instead:")
+        for ai_word, replacement in list(vocab['avoided_ai_words'].items())[:8]:
+            lines.append(f"    '{ai_word}' → '{replacement}'")
+
+    avg_len = vocab.get('avg_word_length', 0)
+    if avg_len > 0:
+        if avg_len < 5.5:
+            lines.append(f"  REGISTER: short words, plain register (avg {avg_len:.1f} chars). "
+                        f"Do not reach for longer alternatives.")
+        elif avg_len < 6.5:
+            lines.append(f"  REGISTER: moderate word length (avg {avg_len:.1f} chars). "
+                        f"Match this level.")
+
+    lines.append(f"  KEY PRINCIPLE: write about the thing, not the description of the thing. "
+                f"Not 'a narrative that X was Y' — just 'X was Y'.")
+
+    return "\n".join(lines)
+
+
 def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | None = None, ai_score: float = 0.0) -> str:
     """
     Builds a rich, structured voice DNA string for the render prompt.
@@ -1670,6 +1793,13 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
         lines.append("\nANCHOR SENTENCES — their most distinctive sentences (calibrate against these, do not copy):")
         for s in samples:
             lines.append(f'  "{s}"')
+
+    # Vocabulary fingerprint — actual words, not polished synonyms
+    if raw_text and len(raw_text.split()) >= 80:
+        vocab = _extract_vocabulary_fingerprint(raw_text)
+        vocab_block = _format_vocabulary_fingerprint(vocab)
+        if vocab_block:
+            lines.append(vocab_block)
 
     # Function patterns — connective tissue AI strips first
     # Detect input genre to suppress email closers in non-email renders
