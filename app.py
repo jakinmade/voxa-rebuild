@@ -955,16 +955,18 @@ def _fitness_gate(fitness: dict, cumulative_words: int, cumulative_docs: int) ->
     wc = fitness["word_count"]
     nudge = fitness["nudge"]
 
-    if tier == "gold" and wc >= 200:
-        return {"action": "fire", "confidence": "high", "message": None}
-    if tier == "strong" and wc >= 250:
-        return {"action": "fire", "confidence": "medium", "message": None}
-    if tier == "strong" and cumulative_words >= 400:
-        return {"action": "fire", "confidence": "medium", "message": None}
-    if tier in ("thin", "weak") and nudge:
-        return {"action": "nudge", "confidence": "provisional", "message": nudge}
-    if cumulative_words >= 400:
+    # Gold or strong — fire immediately regardless of word count
+    if tier in ("gold", "strong"):
+        return {"action": "fire", "confidence": "high" if tier == "gold" else "medium", "message": None}
+    # Thin but enough words — fire provisionally
+    if tier == "thin" and wc >= 150:
         return {"action": "fire", "confidence": "provisional", "message": None}
+    # Accumulated enough across pastes — fire
+    if cumulative_words >= 250:
+        return {"action": "fire", "confidence": "provisional", "message": None}
+    # Weak and short — nudge with specific instruction
+    if nudge:
+        return {"action": "nudge", "confidence": "provisional", "message": nudge}
     return {
         "action": "accumulate", "confidence": "provisional",
         "message": "Paste one more piece of your writing to complete your fingerprint.",
