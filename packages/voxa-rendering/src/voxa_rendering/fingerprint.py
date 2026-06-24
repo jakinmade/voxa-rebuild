@@ -553,40 +553,69 @@ def _deterministic_fallback(observations: list[Observation]) -> list[dict]:
         elif obs.id == "hedging_signature":
             owns = obs.data.get("owns_statements", True)
             density = obs.data.get("hedge_density", 0)
+            denial_count = obs.data.get("denial_count", 0)
             quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
             headline = "You own your statements" if owns else "You soften before you land"
-            body = (
-                f"Hedge words appear {obs.data.get('hedge_count', 0)} times in your writing. "
-                f"That is a density of {density:.1%}. "
-                f"When you're uncertain, you say so directly — you don't blur it."
-            ) if owns else (
-                f"Your writing uses cushioning language before conclusions. "
-                f'"{quote}" — the softening comes before the point.'
-            )
+            if owns and denial_count > 0 and quote:
+                body = (
+                    f"You correct the record without apology. "
+                    f'"{quote}" '
+                    f"No preamble. Someone had it wrong and you put it right."
+                )
+            elif owns and quote:
+                body = (
+                    f"You say what you do not know. "
+                    f'"{quote}" '
+                    f"No inflation. That takes more confidence than pretending."
+                )
+            elif owns:
+                body = (
+                    f"You state things directly. No cushioning before the point. "
+                    f"When you are uncertain, you say so plainly."
+                )
+            else:
+                body = (
+                    f"Your writing uses cushioning language before conclusions. "
+                    f'"{quote}" — the softening comes before the point.'
+                )
 
         elif obs.id == "reader_assumption":
             peer = obs.data.get("assumes_peer", True)
             quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
             headline = "You write to an equal" if peer else "You write to inform"
-            body = (
-                f"No explanatory scaffolding. No 'as you know' or 'let me explain'. "
-                f"You assume the reader is already in the room. "
-                f'"{quote}"'
-            ) if peer else (
-                f"You build context before the point. "
-                f"The reader is assumed to need grounding before the conclusion."
-            )
+            if peer and quote:
+                body = (
+                    f"No explanatory scaffolding. No 'as you know' or 'let me explain'. "
+                    f"You assume the reader is already in the room. "
+                    f'"{quote}" They usually are.'
+                )
+            elif peer:
+                body = (
+                    f"No explanatory scaffolding. You assume the reader is already in the room."
+                )
+            else:
+                body = (
+                    f"You build context before the point. "
+                    f"The reader is assumed to need grounding before the conclusion."
+                )
 
         elif obs.id == "compression_philosophy":
             structural = obs.data.get("structural", True)
             avg = obs.data.get("avg_sentence_length", 8)
             quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
-            headline = "You stop when the idea is complete"
-            body = (
-                f"Average sentence: {avg:.0f} words. "
-                f"You don't finish at a line count — you finish at the point of completeness. "
-                f'"{quote}"'
-            )
+            headline = "You close and move"
+            if quote:
+                body = (
+                    f"Short sentences. No padding. "
+                    f"You finish when the point is made. "
+                    f'"{quote}" Flagged it. Done.'
+                )
+            else:
+                body = (
+                    f"Short sentences. No padding. "
+                    f"Average sentence: {avg:.0f} words. "
+                    f"You finish when the point is made, not when the line looks long enough."
+                )
 
         elif obs.id == "energy_signature":
             verb_dom = obs.data.get("verb_dominant", True)
