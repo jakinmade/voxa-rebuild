@@ -2062,6 +2062,15 @@ def _apply_uk_english(text: str) -> str:
     for pattern, replacement in replacements:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
+    # "like" as a list introducer is American — UK English uses "such as" or "including"
+    import re as _re_like
+    text = _re_like.sub(
+        r"\blike\s+(cost of living|NHS|housing|inflation|unemployment|\w+(?:,\s*\w+)+)",
+        lambda m: "such as " + m.group(1), text
+    )
+    # Broader: "issues like X" -> "issues such as X"
+    text = _re_like.sub(r"\b(issues|problems|areas|things|factors|topics)\s+like\b",
+                        lambda m: m.group(1) + " such as", text)
     return text
 
 def _regex_sweep(text: str) -> str:
@@ -2205,6 +2214,30 @@ def _regex_sweep(text: str) -> str:
             return m.group(0)
         return f"{verb_phrase} a {noun}"
     text = article_needed.sub(_insert_article, text)
+
+    # 8. Tricolon fragment lists — three consecutive fragments starting with A/An/The
+    # AI uses these as rhetorical closers. Deterministic strip.
+    import re as _re_tri
+    # Detect and collapse "A X Ying. A X Ying. A X Ying." into one sentence
+    tricolon = _re_tri.compile(
+        r"(A|An|The) ([\w\s]+?ing[^.!?]{0,60})\.\s+"
+        r"(A|An|The) ([\w\s]+?ing[^.!?]{0,60})\.\s+"
+        r"(A|An|The) ([\w\s]+?ing[^.!?]{0,60})\."
+    )
+    def _collapse_tricolon(m):
+        # Return just the first fragment as a complete sentence
+        return f"{m.group(1)} {m.group(2)}."
+    text = tricolon.sub(_collapse_tricolon, text)
+
+    # 9. Editorial additions — renderer adding judgments not in source
+    editorial = [
+        (r"That framing might be too simple[^.]*\.", ""),
+        (r"That (observation|framing|assessment|reading) (might|may|could) be[^.]*\.", ""),
+        (r"Whether that (is|was) (fair|accurate|right|correct)[^.]*\.", ""),
+    ]
+    for pattern, replacement in editorial:
+        text = _re_tri.sub(pattern, replacement, text, flags=_re_tri.IGNORECASE)
+    text = _re_tri.sub(r"  +", " ", text).strip()
 
     return text
 
