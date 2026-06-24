@@ -1420,20 +1420,31 @@ def _extract_function_patterns(text: str) -> dict:
     }
 
 
-def _format_function_patterns(patterns: dict) -> str:
+def _format_function_patterns(patterns: dict, input_genre: str = "email") -> str:
     """
     Formats function patterns as a renderer instruction block.
-    Precise. Actual data from their writing, not a description.
+    Context-aware: email closers are suppressed for article/piece genres.
+
+    input_genre: 'email' | 'article' | 'message' | 'unknown'
+    Email closers ('Hopefully', 'Pls let me know') only make sense in emails.
+    Applying them to articles produces rogue endings.
     """
     if not patterns:
         return ""
 
+    is_email = input_genre in ("email", "message", "unknown")
     lines = ["\nFUNCTION PATTERNS — their unconscious connective tissue:"]
 
     if patterns.get('preferred_function_words'):
-        words = ', '.join(f"'{w}'" for w in patterns['preferred_function_words'])
-        lines.append(f"  Words they actually use: {words}")
-        lines.append(f"  Use these naturally where they fit — they are part of their voice.")
+        # Filter email-specific words when rendering non-email content
+        words_list = patterns['preferred_function_words']
+        if not is_email:
+            email_only = {'pls', 'please', 'regards', 'cheers', 'thanks'}
+            words_list = [w for w in words_list if w.lower() not in email_only]
+        if words_list:
+            words = ', '.join(f"'{w}'" for w in words_list)
+            lines.append(f"  Words they actually use: {words}")
+            lines.append(f"  Use these naturally where they fit — they are part of their voice.")
 
     if patterns.get('avoided_ai_connectors'):
         avoided = ', '.join(f"'{w}'" for w in patterns['avoided_ai_connectors'][:4])
@@ -1452,8 +1463,11 @@ def _format_function_patterns(patterns: dict) -> str:
     if patterns.get('colon_rate', 0) > 0.1:
         lines.append(f"  They use colons to introduce context — match this pattern.")
 
-    if patterns.get('soft_ender_count', 0) > 0:
-        lines.append(f"  They close sections with soft acknowledgements ('Hopefully this clarifies', 'Pls let me know').")
+    # Only include email closers when rendering email-genre content
+    if is_email and patterns.get('soft_ender_count', 0) > 0:
+        lines.append(f"  In emails they close with soft acknowledgements ('Hopefully this clarifies', 'Pls let me know').")
+    elif not is_email:
+        lines.append(f"  NOTE: this person's email closers ('Hopefully', 'Pls let me know') are email-specific. Do NOT use them to end articles or pieces.")
 
     return "\n".join(lines)
 
@@ -1573,9 +1587,20 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
             lines.append(f'  "{s}"')
 
     # Function patterns — connective tissue AI strips first
+    # Detect input genre to suppress email closers in non-email renders
     if raw_text and len(raw_text.split()) >= 100:
         patterns = _extract_function_patterns(raw_text)
-        pattern_block = _format_function_patterns(patterns)
+        # Detect genre of the INPUT being rendered (not the corpus)
+        # Use a simple heuristic: email signals in the input text being restored
+        import re as _re
+        _email_signals = _re.compile(
+            r'\b(Dear|Hi |Hello |Regards,|Best,|Cheers,|Thanks,|Sent from|Subject:|From:|To:)\b',
+            _re.IGNORECASE
+        )
+        # raw_text is the corpus (user's own writing) — check its genre
+        _corpus_is_email = bool(_email_signals.search(raw_text))
+        _input_genre = "email" if _corpus_is_email else "article"
+        pattern_block = _format_function_patterns(patterns, input_genre=_input_genre)
         if pattern_block:
             lines.append(pattern_block)
 
@@ -1662,6 +1687,17 @@ def _build_system_prompt(
             f"\n\n{_build_restoration_targets(baseline)}"
             if baseline else ""
         )
+        # Register instruction — match the source register, not an elevated version
+        # Research basis: the user's best version is the unpolished authentic version
+        # Source register detected from fitness tier stored in voice_dna context
+        register_instruction = (
+            "REGISTER — this is critical:\n"
+            "Match the register of the source writing exactly. Do not elevate, polish, or formalise.\n"
+            "If the source writing is direct and slightly rough, the output must be direct and slightly rough.\n"
+            "The goal is not better writing. The goal is their writing.\n"
+            "The unpolished edge is part of the voice. Preserve it.\n\n"
+        )
+
         prompt = (
             "You are a voice rendering engine with one job: strip AI-generated language and rewrite "
             "in this person's authentic voice.\n\n"
@@ -1672,6 +1708,7 @@ def _build_system_prompt(
             f"VOICE PROFILE:\n{voice_dna}"
             f"{restoration_block}\n\n"
             f"TASK:\n{mode_instruction}\n\n"
+            f"{register_instruction}"
             "STRIPPING INSTRUCTIONS:\n"
             "- Identify every AI tell in the input. Rewrite those sentences from scratch.\n"
             "- Do not preserve the AI's sentence structure. Break it up. Shorten it.\n"
@@ -1679,7 +1716,9 @@ def _build_system_prompt(
             "- The content and ideas are the writer's. The words and structure are the AI's. "
             "Keep the ideas. Destroy the words.\n"
             "- After rewriting, read back through and ask: does this sound like a human "
-            "who matches the voice profile? If not, rewrite again.\n\n"
+            "who matches the voice profile? If not, rewrite again.\n"
+            "- Do not add warmth, polish, or formality not already in the voice profile.\n"
+            "- The rough edges in their writing are not mistakes. They are the voice.\n\n"
             f"{base_rules}"
         )
     else:
@@ -1851,8 +1890,20 @@ def _regex_sweep(text: str) -> str:
                 r'\b(exists|remains|persists|continues|endures|defines|determines|'
                 r'until they|until it|between wanting|between knowing|between having|'
                 r'more than it|who they|what they|blueprint|the gap|the distance|'
-                r'the difference|the question|promises more|delivers on)\b', re.IGNORECASE
+                r'the difference|the question|promises more|delivers on|'
+                r'comes with time|does not\.?$|perhaps not|time will tell|'
+                r'only time|remains to be seen|that clarity)\b', re.IGNORECASE
             )
+            # Also catch "Perhaps X. Perhaps Y." couplet — Claude philosophical closer
+            perhaps_couplet = re.compile(r'Perhaps [^.]+\. Perhaps [^.]+\.?', re.IGNORECASE)
+            if perhaps_couplet.search(last_para):
+                # Strip from first "Perhaps" in the couplet
+                m = perhaps_couplet.search(last_para)
+                if m:
+                    stripped_para = last_para[:m.start()].strip()
+                    if stripped_para:
+                        paragraphs[-1] = stripped_para
+                        text = '\n\n'.join(paragraphs)
             stripped = list(last_sents)
             while len(stripped) > 1 and abstract_signals.search(stripped[-1]) and len(stripped[-1].split()) <= 18:
                 stripped.pop()
