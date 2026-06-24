@@ -1530,6 +1530,74 @@ def _pick_anchor_sentences(sentences: list[str]) -> list[str]:
     return selected[:3]
 
 
+def _score_thought_density(text: str) -> dict:
+    """
+    Measures thought density — how many distinct ideas per sentence.
+    Your writing says two or three things in the same space.
+    AI writing says one thing per sentence. Evenly paced. Thin.
+
+    Signals for multiple ideas in one sentence:
+    - Conjunctions joining distinct facts: "but", "yet", "whilst", "though"
+    - Comma-separated independent clauses
+    - Embedded qualifications: "as", "where", "which", "when" mid-sentence
+    - Concession + position in same sentence: "Whilst X, I Y"
+    - Multiple named entities in one sentence
+
+    Returns:
+        avg_ideas_per_sentence: float
+        peak_density_sentences: list of highest-density sentences
+        density_instruction: what to tell the renderer
+    """
+    import re
+
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip() and len(s.split()) >= 4]
+    if not sentences:
+        return {"avg_ideas_per_sentence": 1.0, "peak_density_sentences": [], "density_instruction": ""}
+
+    def _count_ideas(sentence: str) -> int:
+        ideas = 1
+        # Coordinating conjunctions joining distinct clauses
+        coord = re.compile(r'\b(but|yet|whilst|although|though|however|so|and)\b', re.IGNORECASE)
+        ideas += min(len(coord.findall(sentence)), 2)
+        # Embedded subordinate clauses
+        subord = re.compile(r'\b(as|where|which|when|because|since|if|whether)\b', re.IGNORECASE)
+        ideas += min(len(subord.findall(sentence)), 1)
+        # Comma-separated elements (suggests multiple facts)
+        comma_count = sentence.count(',')
+        if comma_count >= 2:
+            ideas += 1
+        return ideas
+
+    scored = [(s, _count_ideas(s)) for s in sentences]
+    avg = sum(score for _, score in scored) / max(len(scored), 1)
+
+    # Peak density sentences — the ones carrying the most
+    peak = sorted(scored, key=lambda x: x[1], reverse=True)
+    peak_sentences = [s for s, sc in peak[:2] if sc >= 2]
+
+    # Instruction for renderer
+    if avg >= 2.5:
+        instruction = (
+            f"THOUGHT DENSITY: this writer averages {avg:.1f} distinct ideas per sentence. "
+            "They compress multiple thoughts into single sentences. "
+            "Do not write one-idea sentences where two or three belong. "
+            "Pack the meaning in. The reader is assumed to keep up."
+        )
+    elif avg >= 1.8:
+        instruction = (
+            f"THOUGHT DENSITY: this writer typically carries {avg:.1f} ideas per sentence. "
+            "Avoid thin single-idea sentences. Each sentence should do more than one thing where natural."
+        )
+    else:
+        instruction = ""
+
+    return {
+        "avg_ideas_per_sentence": round(avg, 1),
+        "peak_density_sentences": peak_sentences,
+        "density_instruction": instruction,
+    }
+
+
 def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | None = None, ai_score: float = 0.0) -> str:
     """
     Builds a rich, structured voice DNA string for the render prompt.
@@ -1562,6 +1630,16 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
         lines.append("HEDGING: frequent — softens before conclusions")
     else:
         lines.append("HEDGING: occasional — hedges selectively")
+
+    # Thought density — how much this writer compresses into each sentence
+    if raw_text and len(raw_text.split()) >= 80:
+        density = _score_thought_density(raw_text)
+        if density["density_instruction"]:
+            lines.append(f"\n{density['density_instruction']}")
+        if density["peak_density_sentences"]:
+            lines.append("DENSITY EXAMPLES — sentences where multiple ideas compress into one:")
+            for s in density["peak_density_sentences"]:
+                lines.append(f'  "{s}"')
 
     # Em dash usage in source writing
     em_dashes_in_source = len(re.findall(r"[—–\u2014\u2013]", raw_text))
@@ -1990,18 +2068,26 @@ def _grammar_fix_pass(text: str, client) -> str:
     Returns corrected text. If no errors found, returns original text unchanged.
     """
     system = (
-        "You are a grammar checker. Your only job is to fix grammar errors in the text provided.\n\n"
-        "RULES:\n"
-        "1. Fix grammar errors only: missing articles (a, an, the), subject-verb agreement, "
-        "dropped words, clearly malformed sentences.\n"
-        "2. Do NOT rewrite for style. Do NOT change word choices. Do NOT improve the prose.\n"
-        "3. Do NOT change sentence structure unless it is grammatically broken.\n"
-        "4. Preserve all punctuation choices, capitalisation choices, and register.\n"
-        "5. If there are no grammar errors, return the text exactly as given.\n"
-        "6. Return only the corrected text. No explanation. No preamble. No commentary."
+        "You are a precise grammar checker. Fix errors only. Never rewrite.\n\n"
+        "FIX THESE:\n"
+        "1. Adverb/adjective confusion: 'move quicker' → 'move more quickly', "
+        "'runs faster' is fine (manner adverb), 'move quicker' is not.\n"
+        "2. Missing prepositions: 'lagged the ambition' → 'lagged behind the ambition', "
+        "'fell short expectations' → 'fell short of expectations'.\n"
+        "3. Missing articles (a, an, the) before countable nouns.\n"
+        "4. Dropped words that break the meaning of a sentence.\n"
+        "5. Dangling modifiers and clearly malformed constructions.\n"
+        "\n"
+        "DO NOT TOUCH:\n"
+        "1. Collective nouns with plural verbs ('England are', 'the team are') — correct in UK English.\n"
+        "2. Sentence fragments used deliberately for rhythm ('Football in fragments.').\n"
+        "3. Any word choice, sentence structure, or punctuation that is grammatically valid.\n"
+        "4. Register, tone, or voice — change nothing that is not a clear error.\n"
+        "\n"
+        "Return only the corrected text. No explanation. No preamble."
     )
     response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-6",
         max_tokens=4096,
         system=system,
         messages=[{"role": "user", "content": text}],
