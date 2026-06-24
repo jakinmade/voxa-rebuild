@@ -1945,8 +1945,10 @@ def _regex_sweep(text: str) -> str:
     import re
 
     # 1. Em dashes — all variants
-    for dash in ["\u2014", "\u2013", "&#8212;", "&#8211;"]:
+    for dash in ["\u2014", "\u2013", "&#8212;", "&#8211;", "\u2012", "\u2015", "—", "–", "‒"]:
         text = text.replace(dash, " - ")
+    # Belt and braces — regex sweep for any remaining dash variants
+    text = re.sub(r"[\u2012\u2013\u2014\u2015]", " - ", text)
     text = re.sub(r'  +', ' ', text)
 
     # 2. Contractions — JA writes full form only
