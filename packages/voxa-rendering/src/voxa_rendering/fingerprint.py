@@ -530,31 +530,59 @@ async def generate_fingerprint_narrative(
 def _deterministic_fallback(observations: list[Observation]) -> list[dict]:
     """
     Fallback when LLM is unavailable.
-    Produces plain English observations from the data alone.
-    Not as polished — but specific, accurate, and never blank.
+    Character claim observations — specific enough to be wrong about someone.
+    Unique evidence quotes across all observations.
+    Sign-offs filtered. Directive pattern included.
     """
+    import re as _re
+
     result = []
+    used_quotes: set = set()  # Prevent same quote appearing in multiple observations
+
+    # Sign-off filter — never use as evidence
+    _signoff = _re.compile(
+        r'^(Regards|Best|Cheers|Thanks|Sincerely|Kind regards|Many thanks|JA|John)[,.]?\s*$',
+        _re.I
+    )
+
+    def _pick_quote(quotes: list[str], fallback: str = "") -> str:
+        """Pick first quote not already used and not a sign-off."""
+        for q in quotes:
+            q = q.strip()
+            if not q:
+                continue
+            if _signoff.match(q):
+                continue
+            if len(q.split()) < 4:
+                continue
+            if q in used_quotes:
+                continue
+            used_quotes.add(q)
+            return q
+        return fallback
 
     for obs in observations:
         if obs.id == "conclusion_position":
             point_first = obs.data.get("point_first", True)
-            avg = obs.data.get("avg_sentence_length", 8)
-            quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
+            quote = _pick_quote(obs.evidence_quotes)
             headline = "You lead with the answer" if point_first else "You build to the conclusion"
-            body = (
-                f"Your opening sentences carry the conclusion. "
-                f"Reasoning follows, it doesn't precede. "
-                f'"{quote}"' if quote else ""
-            ) if point_first else (
-                f"You develop context before landing the point. "
-                f"The conclusion arrives after the reasoning is laid."
-            )
+            if point_first and quote:
+                body = (
+                    f"The point comes first. Context and reasoning follow. "
+                    f'"{quote}"'
+                )
+            elif point_first:
+                body = "You lead with the conclusion. Reasoning follows, it does not precede."
+            else:
+                body = (
+                    f"You develop context before landing the point. "
+                    f"The conclusion arrives after the reasoning is laid."
+                )
 
         elif obs.id == "hedging_signature":
             owns = obs.data.get("owns_statements", True)
-            density = obs.data.get("hedge_density", 0)
             denial_count = obs.data.get("denial_count", 0)
-            quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
+            quote = _pick_quote(obs.evidence_quotes)
             headline = "You own your statements" if owns else "You soften before you land"
             if owns and denial_count > 0 and quote:
                 body = (
@@ -569,19 +597,17 @@ def _deterministic_fallback(observations: list[Observation]) -> list[dict]:
                     f"No inflation. That takes more confidence than pretending."
                 )
             elif owns:
-                body = (
-                    f"You state things directly. No cushioning before the point. "
-                    f"When you are uncertain, you say so plainly."
-                )
+                body = "You state things directly. No cushioning before the point."
             else:
                 body = (
                     f"Your writing uses cushioning language before conclusions. "
-                    f'"{quote}" — the softening comes before the point.'
+                    f'"{quote}" — the softening comes before the point.' if quote else
+                    "You soften before landing the point."
                 )
 
         elif obs.id == "reader_assumption":
             peer = obs.data.get("assumes_peer", True)
-            quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
+            quote = _pick_quote(obs.evidence_quotes)
             headline = "You write to an equal" if peer else "You write to inform"
             if peer and quote:
                 body = (
@@ -590,45 +616,66 @@ def _deterministic_fallback(observations: list[Observation]) -> list[dict]:
                     f'"{quote}" They usually are.'
                 )
             elif peer:
-                body = (
-                    f"No explanatory scaffolding. You assume the reader is already in the room."
-                )
+                body = "No explanatory scaffolding. You assume the reader is already in the room."
             else:
-                body = (
-                    f"You build context before the point. "
-                    f"The reader is assumed to need grounding before the conclusion."
-                )
+                body = "You build context before the point. The reader needs grounding before the conclusion."
 
         elif obs.id == "compression_philosophy":
-            structural = obs.data.get("structural", True)
             avg = obs.data.get("avg_sentence_length", 8)
-            quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
+            # Filter sign-offs before picking
+            clean_quotes = [q for q in obs.evidence_quotes if not _signoff.match(q.strip())]
+            quote = _pick_quote(clean_quotes)
             headline = "You close and move"
             if quote:
                 body = (
                     f"Short sentences. No padding. "
                     f"You finish when the point is made. "
-                    f'"{quote}" Flagged it. Done.'
+                    f'"{quote}"'
                 )
             else:
                 body = (
                     f"Short sentences. No padding. "
                     f"Average sentence: {avg:.0f} words. "
-                    f"You finish when the point is made, not when the line looks long enough."
+                    f"You finish when the point is made."
                 )
 
         elif obs.id == "energy_signature":
             verb_dom = obs.data.get("verb_dominant", True)
-            quote = obs.evidence_quotes[0] if obs.evidence_quotes else ""
+            quote = _pick_quote(obs.evidence_quotes)
             headline = "Your force comes from verbs" if verb_dom else "Your force comes from emphasis"
-            body = (
-                f"Intensity through action, not adjectives. "
-                f"The writing moves because the verbs move it. "
-                f'"{quote}"'
-            ) if verb_dom else (
-                f"You use emphasis words to carry weight. "
-                f"The intensity is in what you call things, not what you do with them."
-            )
+            if verb_dom and quote:
+                body = (
+                    f"Intensity through action, not adjectives. "
+                    f"The writing moves because the verbs move it. "
+                    f'"{quote}"'
+                )
+            elif verb_dom:
+                body = "Intensity through action, not adjectives. The writing moves because the verbs move it."
+            else:
+                body = "You use emphasis words to carry weight. The intensity is in what you call things."
+
+        elif obs.id == "directive_pattern":
+            hard_count = obs.data.get("hard_directive_count", 0)
+            quotes = obs.evidence_quotes
+            quote1 = _pick_quote(quotes)
+            quote2 = _pick_quote([q for q in quotes if q != quote1])
+            headline = "You instruct without cushioning"
+            if hard_count >= 2 and quote1:
+                body = (
+                    f'"{quote1}" '
+                    f"No please. No when you get a chance. "
+                    f"The instruction is the sentence."
+                    + (f' "{quote2}" Same again.' if quote2 else "")
+                )
+            elif hard_count >= 1 and quote1:
+                body = (
+                    f'"{quote1}" '
+                    f"No cushioning before the ask. The directive stands on its own."
+                )
+            else:
+                headline = "You soften your asks"
+                body = "Your action items come with softening. The ask is cushioned before it lands."
+
         else:
             headline = obs.id.replace("_", " ").title()
             body = f"Signal strength: {obs.signal_strength:.0%}"
