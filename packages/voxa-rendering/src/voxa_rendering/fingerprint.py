@@ -302,6 +302,56 @@ def score_energy_signature(sentences: list[str], text: str) -> Observation:
     )
 
 
+def score_directive_pattern(sentences: list[str], text: str) -> Observation:
+    """
+    Does the writer issue directives without softening?
+    "Pull together proposition to present to MTN" — no please, no could you.
+    High signal = person who issues action items directly.
+    One of the first things AI strips — replacing direct action items with suggestions.
+    """
+    imperative = re.compile(
+        r"^(Fix|Send|Call|Build|Close|Check|Review|Do|Make|Take|Stop|Start|Deploy|Ship|Run|Get|Go|"
+        r"Ensure|Define|Test|Pull|Explore|Present|Prepare|Draft|Share|Note|Consider|"
+        r"Look|Find|Use|Add|Remove|Update|Create|Set|Move|Push|Ask|Tell|Show|Keep|"
+        r"Remember|Try|Confirm|Check|Follow|Reach)\b", re.I
+    )
+    prefixed = re.compile(
+        r"^.{0,40}[-:]\s*(Fix|Send|Call|Build|Close|Check|Review|Do|Make|Take|Stop|Start|Deploy|Ship|Run|Get|Go|"
+        r"Ensure|Define|Test|Pull|Explore|Present|Prepare|Draft|Share|Note|Consider|"
+        r"Look|Find|Use|Add|Remove|Update|Create|Set|Move|Push)\b", re.I
+    )
+    softening = re.compile(
+        r"\b(please|could you|when you|if you|would you|kindly|feel free|don't hesitate)\b", re.I
+    )
+
+    all_imperatives = [s for s in sentences if imperative.match(s.strip()) or prefixed.match(s.strip())]
+    hard = [s for s in all_imperatives if not softening.search(s)]
+    soft_count = len([s for s in all_imperatives if softening.search(s)])
+    hard_count = len(hard)
+
+    if hard_count >= 2:
+        signal = 0.90
+    elif hard_count == 1:
+        signal = 0.78
+    elif soft_count > 0:
+        signal = 0.35
+    else:
+        signal = 0.20
+
+    return Observation(
+        id="directive_pattern",
+        signal_strength=signal,
+        dimension_hint="directness",
+        evidence_quotes=hard[:2] if hard else sentences[:1],
+        data={
+            "hard_directive_count": hard_count,
+            "softened_directive_count": soft_count,
+            "total_imperatives": len(all_imperatives),
+            "issues_direct_actions": hard_count > 0,
+        },
+    )
+
+
 def select_observations(text: str) -> list[Observation]:
     """
     Runs all five scorers. Returns 3–5 observations ordered by signal strength.
@@ -317,6 +367,7 @@ def select_observations(text: str) -> list[Observation]:
         score_reader_assumption(sentences, text),
         score_compression_philosophy(sentences, text),
         score_energy_signature(sentences, text),
+        score_directive_pattern(sentences, text),
     ]
 
     # Sort by signal strength, take top 5 above threshold
