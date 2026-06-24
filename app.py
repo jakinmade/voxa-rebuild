@@ -1896,7 +1896,7 @@ def _build_system_prompt(
         "Match or exceed it. If you run short, expand the ideas — do not pad with filler."
     )
 
-    if ai_score >= 0.45:
+    if ai_score >= 0.25:
         # AI-contaminated path — stripping + restoration
         restoration_block = (
             f"\n\n{_build_restoration_targets(baseline)}"
