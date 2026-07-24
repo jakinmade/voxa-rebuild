@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voxa — Check Tester</title>
+<style>
+  :root {
+    --ink: #1E2124;
+    --paper: #EEF0EF;
+    --match: #2F7A5B;
+    --drift: #B5482E;
+    --slate: #6B7280;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 32px 20px 60px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--slate); font-size: 14px; margin-bottom: 24px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 18px 0 6px; }
+  textarea {
+    width: 100%; min-height: 110px; padding: 12px;
+    border: 1px solid #ccc; border-radius: 6px;
+    font-family: inherit; font-size: 14px; resize: vertical;
+  }
+  input[type=text] {
+    width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px;
+  }
+  button {
+    margin-top: 20px; background: var(--ink); color: white; border: none;
+    padding: 12px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #result { margin-top: 28px; }
+  .score { font-family: "SF Mono", Consolas, monospace; font-size: 40px; font-weight: 700; }
+  .voiceprint { font-family: "SF Mono", Consolas, monospace; font-size: 22px; letter-spacing: 4px; margin: 6px 0 18px; }
+  .voiceprint .o { color: var(--match); }
+  .voiceprint .x { color: var(--drift); }
+  .dim { padding: 10px 0; border-top: 1px solid #ddd; }
+  .dim .label { font-weight: 600; font-size: 14px; }
+  .dim .status { font-size: 13px; margin-top: 2px; }
+  .dim .status.match { color: var(--match); }
+  .dim .status.drift { color: var(--drift); }
+  .dim .evidence { font-size: 13px; color: var(--slate); font-style: italic; margin-top: 4px; }
+  .error { color: var(--drift); font-size: 14px; margin-top: 16px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<h1>Voxa — Check Tester</h1>
+<div class="sub">Paste a sample of your normal writing, then a draft to check against it. No account, nothing saved.</div>
+
+<label>Reference — how you normally write</label>
+<textarea id="referenceText" placeholder="Paste a real email, post, or paragraph you've written yourself."></textarea>
+
+<label>Draft — the piece to check</label>
+<textarea id="draftText" placeholder="Paste the new draft you want to check against it."></textarea>
+
+<button id="checkBtn" onclick="runCheck()">Check</button>
+
+<div id="result"></div>
+
+<script>
+async function runCheck() {
+  const apiUrl = '';
+  const reference_text = document.getElementById('referenceText').value.trim();
+  const draft_text = document.getElementById('draftText').value.trim();
+  const resultDiv = document.getElementById('result');
+  const btn = document.getElementById('checkBtn');
+
+  resultDiv.innerHTML = '';
+  if (reference_text.length < 20 || draft_text.length < 10) {
+    resultDiv.innerHTML = '<div class="error">Reference needs at least 20 characters, draft at least 10.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+
+  try {
+    const res = await fetch(apiUrl + '/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reference_text, draft_text }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error('HTTP ' + res.status + '\n' + text);
+    }
+
+    const data = await res.json();
+
+    const voiceprintHtml = data.voiceprint
+      .split('')
+      .map(c => `<span class="${c === 'o' ? 'o' : 'x'}">${c}</span>`)
+      .join('');
+
+    const dimsHtml = data.dimensions.map(d => `
+      <div class="dim">
+        <div class="label">${d.label}</div>
+        <div class="status ${d.matched ? 'match' : 'drift'}">${d.matched ? 'Matches your voice' : 'Drifted'}</div>
+        ${d.evidence ? `<div class="evidence">"${d.evidence}"</div>` : ''}
+      </div>
+    `).join('');
+
+    resultDiv.innerHTML = `
+      <div class="score">${data.match_score}% in your voice</div>
+      <div class="voiceprint">${voiceprintHtml}</div>
+      ${dimsHtml}
+    `;
+  } catch (err) {
+    resultDiv.innerHTML = '<div class="error">Something went wrong:\n' + err.message + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check';
+  }
+}
+</script>
+
+</body>
+</html>
