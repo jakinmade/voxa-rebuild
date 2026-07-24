@@ -39,6 +39,38 @@ _DIMENSIONS = [
     ("energy_signature", score_energy_signature, "verb_dominant", "Energy signature"),
 ]
 
+# Human-readable reveal, not the internal dimension name — per fingerprint.py's own
+# documented design principle: "No dimension names exposed to the user... 'You lead
+# with the answer' is the reveal. No horoscope language."
+# Keyed by (dimension_id, profile_baseline_value) -> (matches_text, drifted_text)
+_REVEAL_TEXT = {
+    "conclusion_position": {
+        True: ("You usually open with your point.", "This builds up to the point instead of leading with it."),
+        False: ("You usually build up to your point.", "This opens with the point instead of building up to it."),
+    },
+    "hedging_signature": {
+        True: ("You usually own your statements directly.", "This hedges more than you usually do."),
+        False: ("You usually cushion your statements.", "This is more direct than you usually are."),
+    },
+    "reader_assumption": {
+        True: ("You usually write like your reader already knows the context.", "This explains more than you usually would, like the reader's a stranger."),
+        False: ("You usually spell things out for the reader.", "This assumes more background knowledge than you usually would."),
+    },
+    "compression_philosophy": {
+        True: ("You usually write short, structured sentences.", "This runs longer and looser than you usually do."),
+        False: ("You usually let sentence length vary deliberately.", "This is more uniform and structural than you usually are."),
+    },
+    "energy_signature": {
+        True: ("Your energy usually comes through verbs.", "This leans on adjectives more than you usually do."),
+        False: ("Your energy usually comes through adjectives and emphasis.", "This leans on verbs more than you usually do."),
+    },
+}
+
+
+def _reveal(dim_id: str, profile_value: bool, matched: bool) -> str:
+    matches_text, drifted_text = _REVEAL_TEXT[dim_id][profile_value]
+    return matches_text if matched else drifted_text
+
 
 class CheckRequest(BaseModel):
     reference_text: str = Field(..., min_length=20, description="Sample(s) of the user's own established writing")
@@ -49,9 +81,10 @@ class DimensionResult(BaseModel):
     id: str
     label: str
     matched: bool
+    reveal: str
     evidence: str | None = None
     suggested_rewrite: str | None = None
-    rewrite_status: str | None = None
+    rewrite_status: str | None = None  # internal diagnostic - UI should not show this to end users
 
 
 class CheckResponse(BaseModel):
@@ -108,7 +141,11 @@ async def check(request: CheckRequest) -> CheckResponse:
             quotes = draft_scores[dim_id]["evidence"]
             evidence = quotes[0] if quotes else None
 
-        results.append(DimensionResult(id=dim_id, label=label, matched=matched, evidence=evidence))
+        results.append(DimensionResult(
+            id=dim_id, label=label, matched=matched,
+            reveal=_reveal(dim_id, bool(ref_value), matched),
+            evidence=evidence,
+        ))
         if matched:
             matched_count += 1
 
@@ -231,8 +268,9 @@ async def check_against_profile(request: CheckProfileRequest) -> CheckResponse:
                 )
 
         results.append(DimensionResult(
-            id=dim_id, label=label, matched=matched, evidence=evidence,
-            suggested_rewrite=suggestion, rewrite_status=rewrite_status,
+            id=dim_id, label=label, matched=matched,
+            reveal=_reveal(dim_id, dim_profile["value"], matched),
+            evidence=evidence, suggested_rewrite=suggestion, rewrite_status=rewrite_status,
         ))
         if matched:
             matched_count += 1
