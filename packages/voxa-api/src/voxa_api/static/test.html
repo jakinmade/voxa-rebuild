@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Voxa — Check Tester</title>
+<title>Voxa</title>
 <style>
   :root {
     --ink: #1E2124;
@@ -22,20 +22,32 @@
   }
   h1 { font-size: 20px; margin-bottom: 4px; }
   .sub { color: var(--slate); font-size: 14px; margin-bottom: 24px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid #ccc; }
+  .tab {
+    padding: 10px 16px; cursor: pointer; font-size: 14px; font-weight: 600;
+    color: var(--slate); border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+  .panel { display: none; }
+  .panel.active { display: block; }
   label { display: block; font-size: 13px; font-weight: 600; margin: 18px 0 6px; }
   textarea {
-    width: 100%; min-height: 110px; padding: 12px;
+    width: 100%; min-height: 100px; padding: 12px;
     border: 1px solid #ccc; border-radius: 6px;
     font-family: inherit; font-size: 14px; resize: vertical;
   }
-  input[type=text] {
+  input[type=email] {
     width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px;
   }
   button {
     margin-top: 20px; background: var(--ink); color: white; border: none;
     padding: 12px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
+  button.secondary { background: white; color: var(--ink); border: 1px solid #ccc; margin-left: 8px; }
   button:disabled { opacity: 0.5; cursor: default; }
+  .status { margin-top: 16px; font-size: 14px; }
+  .status.ok { color: var(--match); }
+  .status.err { color: var(--drift); white-space: pre-wrap; }
   #result { margin-top: 28px; }
   .score { font-family: "SF Mono", Consolas, monospace; font-size: 40px; font-weight: 700; }
   .voiceprint { font-family: "SF Mono", Consolas, monospace; font-size: 22px; letter-spacing: 4px; margin: 6px 0 18px; }
@@ -43,39 +55,148 @@
   .voiceprint .x { color: var(--drift); }
   .dim { padding: 10px 0; border-top: 1px solid #ddd; }
   .dim .label { font-weight: 600; font-size: 14px; }
-  .dim .status { font-size: 13px; margin-top: 2px; }
-  .dim .status.match { color: var(--match); }
-  .dim .status.drift { color: var(--drift); }
+  .dim .dimstatus { font-size: 13px; margin-top: 2px; }
+  .dim .dimstatus.match { color: var(--match); }
+  .dim .dimstatus.drift { color: var(--drift); }
   .dim .evidence { font-size: 13px; color: var(--slate); font-style: italic; margin-top: 4px; }
-  .error { color: var(--drift); font-size: 14px; margin-top: 16px; white-space: pre-wrap; }
 </style>
 </head>
 <body>
 
-<h1>Voxa — Check Tester</h1>
-<div class="sub">Paste a sample of your normal writing, then a draft to check against it. No account, nothing saved.</div>
+<h1>Voxa</h1>
+<div class="sub">Does this still sound like you?</div>
 
-<label>Reference — how you normally write</label>
-<textarea id="referenceText" placeholder="Paste a real email, post, or paragraph you've written yourself."></textarea>
+<div class="tabs">
+  <div class="tab active" data-tab="build" onclick="switchTab('build')">1. Build your profile</div>
+  <div class="tab" data-tab="check" onclick="switchTab('check')">2. Check a draft</div>
+</div>
 
-<label>Draft — the piece to check</label>
-<textarea id="draftText" placeholder="Paste the new draft you want to check against it."></textarea>
+<div id="panel-build" class="panel active">
+  <label>Your email</label>
+  <input type="email" id="buildEmail" placeholder="you@example.com">
 
-<button id="checkBtn" onclick="runCheck()">Check</button>
+  <label>Paste one or more samples of your own writing (the more you give it, the stronger the profile)</label>
+  <textarea id="samplesText" placeholder="Paste a real sample here."></textarea>
 
-<div id="result"></div>
+  <button onclick="buildProfile()" id="buildBtn">Build profile</button>
+  <button class="secondary" onclick="checkExistingProfile()" id="loadBtn">Load my existing profile</button>
+
+  <div id="buildStatus" class="status"></div>
+</div>
+
+<div id="panel-check" class="panel">
+  <label>Your email</label>
+  <input type="email" id="checkEmail" placeholder="you@example.com">
+
+  <label>Draft to check</label>
+  <textarea id="draftText" placeholder="Paste the new draft you want to check."></textarea>
+
+  <button onclick="runCheck()" id="checkBtn">Check</button>
+
+  <div id="checkStatus" class="status"></div>
+  <div id="result"></div>
+</div>
 
 <script>
-async function runCheck() {
-  const apiUrl = '';
-  const reference_text = document.getElementById('referenceText').value.trim();
-  const draft_text = document.getElementById('draftText').value.trim();
-  const resultDiv = document.getElementById('result');
-  const btn = document.getElementById('checkBtn');
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === name); });
+  document.querySelectorAll('.panel').forEach(function(p) { p.classList.toggle('active', p.id === 'panel-' + name); });
+}
 
+var savedEmail = localStorage.getItem('voxa_email');
+if (savedEmail) {
+  document.getElementById('buildEmail').value = savedEmail;
+  document.getElementById('checkEmail').value = savedEmail;
+}
+
+function rememberEmail(email) {
+  localStorage.setItem('voxa_email', email);
+  document.getElementById('buildEmail').value = email;
+  document.getElementById('checkEmail').value = email;
+}
+
+async function buildProfile() {
+  var email = document.getElementById('buildEmail').value.trim();
+  var samplesText = document.getElementById('samplesText').value.trim();
+  var statusDiv = document.getElementById('buildStatus');
+  var btn = document.getElementById('buildBtn');
+
+  statusDiv.className = 'status';
+  statusDiv.textContent = '';
+
+  if (!email || samplesText.length < 20) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Enter your email and at least 20 characters of sample writing.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Building...';
+
+  try {
+    var res = await fetch('/profile/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, samples: [samplesText] }),
+    });
+    if (!res.ok) {
+      var errText = await res.text();
+      throw new Error('HTTP ' + res.status + ' - ' + errText);
+    }
+    var data = await res.json();
+    rememberEmail(email);
+    statusDiv.className = 'status ok';
+    statusDiv.textContent = 'Profile built from ' + data.sample_count + ' sample(s). Add more anytime to strengthen it. Switch to "Check a draft" when ready.';
+    document.getElementById('samplesText').value = '';
+  } catch (err) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Something went wrong: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Build profile';
+  }
+}
+
+async function checkExistingProfile() {
+  var email = document.getElementById('buildEmail').value.trim();
+  var statusDiv = document.getElementById('buildStatus');
+  if (!email) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Enter your email first.';
+    return;
+  }
+  try {
+    var res = await fetch('/profile/' + encodeURIComponent(email));
+    if (res.status === 404) {
+      statusDiv.className = 'status err';
+      statusDiv.textContent = 'No profile yet for this email. Paste a sample above and build one.';
+      return;
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    rememberEmail(email);
+    statusDiv.className = 'status ok';
+    statusDiv.textContent = 'Found a profile with ' + data.sample_count + ' sample(s) already saved.';
+  } catch (err) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Something went wrong: ' + err.message;
+  }
+}
+
+async function runCheck() {
+  var email = document.getElementById('checkEmail').value.trim();
+  var draft_text = document.getElementById('draftText').value.trim();
+  var statusDiv = document.getElementById('checkStatus');
+  var resultDiv = document.getElementById('result');
+  var btn = document.getElementById('checkBtn');
+
+  statusDiv.className = 'status';
+  statusDiv.textContent = '';
   resultDiv.innerHTML = '';
-  if (reference_text.length < 20 || draft_text.length < 10) {
-    resultDiv.innerHTML = '<div class="error">Reference needs at least 20 characters, draft at least 10.</div>';
+
+  if (!email || draft_text.length < 10) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Enter your email and at least 10 characters of draft text.';
     return;
   }
 
@@ -83,39 +204,45 @@ async function runCheck() {
   btn.textContent = 'Checking...';
 
   try {
-    const res = await fetch(apiUrl + '/check', {
+    var res = await fetch('/check-profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reference_text, draft_text }),
+      body: JSON.stringify({ email: email, draft_text: draft_text }),
     });
 
+    if (res.status === 404) {
+      statusDiv.className = 'status err';
+      statusDiv.textContent = 'No profile found for this email. Go build one on the first tab.';
+      return;
+    }
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error('HTTP ' + res.status + '\n' + text);
+      var errText = await res.text();
+      throw new Error('HTTP ' + res.status + ' - ' + errText);
     }
 
-    const data = await res.json();
+    var data = await res.json();
+    rememberEmail(email);
 
-    const voiceprintHtml = data.voiceprint
-      .split('')
-      .map(c => `<span class="${c === 'o' ? 'o' : 'x'}">${c}</span>`)
-      .join('');
+    var voiceprintHtml = data.voiceprint.split('').map(function(c) {
+      return '<span class="' + (c === 'o' ? 'o' : 'x') + '">' + c + '</span>';
+    }).join('');
 
-    const dimsHtml = data.dimensions.map(d => `
-      <div class="dim">
-        <div class="label">${d.label}</div>
-        <div class="status ${d.matched ? 'match' : 'drift'}">${d.matched ? 'Matches your voice' : 'Drifted'}</div>
-        ${d.evidence ? `<div class="evidence">"${d.evidence}"</div>` : ''}
-      </div>
-    `).join('');
+    var dimsHtml = data.dimensions.map(function(d) {
+      var evidenceHtml = d.evidence ? '<div class="evidence">"' + d.evidence + '"</div>' : '';
+      return '<div class="dim">' +
+        '<div class="label">' + d.label + '</div>' +
+        '<div class="dimstatus ' + (d.matched ? 'match' : 'drift') + '">' + (d.matched ? 'Matches your voice' : 'Drifted') + '</div>' +
+        evidenceHtml +
+        '</div>';
+    }).join('');
 
-    resultDiv.innerHTML = `
-      <div class="score">${data.match_score}% in your voice</div>
-      <div class="voiceprint">${voiceprintHtml}</div>
-      ${dimsHtml}
-    `;
+    resultDiv.innerHTML =
+      '<div class="score">' + data.match_score + '% in your voice</div>' +
+      '<div class="voiceprint">' + voiceprintHtml + '</div>' +
+      dimsHtml;
   } catch (err) {
-    resultDiv.innerHTML = '<div class="error">Something went wrong:\n' + err.message + '</div>';
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Something went wrong: ' + err.message;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Check';
