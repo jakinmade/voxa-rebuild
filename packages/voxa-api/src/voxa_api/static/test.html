@@ -59,6 +59,8 @@
   .dim .dimstatus.match { color: var(--match); }
   .dim .dimstatus.drift { color: var(--drift); }
   .dim .evidence { font-size: 13px; color: var(--slate); font-style: italic; margin-top: 4px; }
+  .dim .suggestion { font-size: 13px; color: var(--ink); margin-top: 6px; padding-top: 6px; border-top: 1px dashed #ccc; }
+  .dim .suggestion b { color: var(--match); }
 </style>
 </head>
 <body>
@@ -229,10 +231,12 @@ async function runCheck() {
 
     var dimsHtml = data.dimensions.map(function(d) {
       var evidenceHtml = d.evidence ? '<div class="evidence">"' + d.evidence + '"</div>' : '';
+      var suggestionHtml = d.suggested_rewrite ? '<div class="suggestion">Try: <b>"' + d.suggested_rewrite + '"</b></div>' : '';
       return '<div class="dim">' +
         '<div class="label">' + d.label + '</div>' +
         '<div class="dimstatus ' + (d.matched ? 'match' : 'drift') + '">' + (d.matched ? 'Matches your voice' : 'Drifted') + '</div>' +
         evidenceHtml +
+        suggestionHtml +
         '</div>';
     }).join('');
 

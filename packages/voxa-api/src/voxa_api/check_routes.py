@@ -25,6 +25,7 @@ from voxa_rendering.fingerprint import (
     score_energy_signature,
 )
 from voxa_api import profile_store
+from voxa_api.rewrite import suggest_and_verify
 
 router = APIRouter()
 
@@ -48,6 +49,7 @@ class DimensionResult(BaseModel):
     label: str
     matched: bool
     evidence: str | None = None
+    suggested_rewrite: str | None = None
 
 
 class CheckResponse(BaseModel):
@@ -174,7 +176,7 @@ async def check_against_profile(request: CheckProfileRequest) -> CheckResponse:
     results: list[DimensionResult] = []
     matched_count = 0
 
-    for dim_id, _fn, data_key, label in _DIMENSIONS:
+    for dim_id, fn, data_key, label in _DIMENSIONS:
         dim_profile = profile["dimensions"].get(dim_id)
         if dim_profile is None:
             continue
@@ -182,11 +184,21 @@ async def check_against_profile(request: CheckProfileRequest) -> CheckResponse:
         matched = (draft_value == dim_profile["value"])
 
         evidence = None
+        suggestion = None
         if not matched:
             quotes = draft_scores[dim_id]["evidence"]
             evidence = quotes[0] if quotes else None
+            if evidence:
+                suggestion = await suggest_and_verify(
+                    sentence=evidence,
+                    dim_id=dim_id,
+                    dimension_label=label,
+                    data_key=data_key,
+                    scorer_fn=fn,
+                    profile_dimension=dim_profile,
+                )
 
-        results.append(DimensionResult(id=dim_id, label=label, matched=matched, evidence=evidence))
+        results.append(DimensionResult(id=dim_id, label=label, matched=matched, evidence=evidence, suggested_rewrite=suggestion))
         if matched:
             matched_count += 1
 
