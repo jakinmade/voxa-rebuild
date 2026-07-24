@@ -39,6 +39,14 @@ app = FastAPI(
     version="9.5.0",
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Pre-launch UAT only — tighten before real launch
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.middleware("http")
 async def voxa_middleware(request: StarletteRequest, call_next):
     try:
