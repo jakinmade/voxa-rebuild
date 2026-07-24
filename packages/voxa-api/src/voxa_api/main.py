@@ -287,3 +287,6 @@ _sprint3_router = _s3r(
     org_policies=_org_policies,
 )
 app.include_router(_sprint3_router)
+
+from voxa_api.check_routes import router as _check_router
+app.include_router(_check_router)
