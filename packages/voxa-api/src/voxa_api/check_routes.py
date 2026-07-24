@@ -27,6 +27,7 @@ from voxa_rendering.fingerprint import (
 from voxa_api import profile_store
 from voxa_api.rewrite import suggest_and_verify
 from voxa_api.fitness import score_sample_fitness, fitness_gate
+from voxa_api.recalibrate import compute_baseline_metrics, merge_baseline, recalibrate_draft
 
 router = APIRouter()
 
@@ -112,6 +113,18 @@ class ProfileResponse(BaseModel):
 class CheckProfileRequest(BaseModel):
     email: str = Field(..., min_length=3)
     draft_text: str = Field(..., min_length=10)
+
+
+class RecalibrateRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    draft_text: str = Field(..., min_length=20)
+
+
+class RecalibrateResponse(BaseModel):
+    original_match_score: int
+    rewritten_text: str | None
+    rewritten_match_score: int | None
+    status: str
 
 
 def _score_text(text: str) -> dict[str, dict]:
@@ -207,11 +220,20 @@ async def build_profile(request: BuildProfileRequest) -> ProfileResponse:
     cumulative_docs = prior_cumulative_docs + len(request.samples)
     gate = fitness_gate(fitness, cumulative_words, cumulative_docs)
 
+    # Numeric baseline (hedge density, sentence rhythm, ownership, directness) —
+    # richer, continuous data that /recalibrate needs. Weighted merge across
+    # all samples given so far, same as the dimension baseline.
+    prior_restoration_metrics = existing.get("restoration_metrics") if existing else None
+    restoration_metrics = prior_restoration_metrics
+    for sample in request.samples:
+        restoration_metrics = merge_baseline(restoration_metrics, compute_baseline_metrics(sample))
+
     profile = {
         "raw_samples": all_samples,
         "dimensions": baseline,
         "cumulative_words": cumulative_words,
         "cumulative_docs": cumulative_docs,
+        "restoration_metrics": restoration_metrics,
     }
     profile_store.save_profile(request.email, profile)
 
@@ -279,3 +301,62 @@ async def check_against_profile(request: CheckProfileRequest) -> CheckResponse:
     voiceprint = "".join("o" if r.matched else "x" for r in results)
 
     return CheckResponse(match_score=match_score, dimensions=results, voiceprint=voiceprint)
+
+
+def _quick_match_score(draft_text: str, dimensions: dict) -> int:
+    """Match score only, no evidence/suggestions - used for before/after comparison."""
+    scores = _score_text(draft_text)
+    matched_count = 0
+    total = 0
+    for dim_id, _fn, data_key, _label in _DIMENSIONS:
+        dim_profile = dimensions.get(dim_id)
+        if dim_profile is None:
+            continue
+        total += 1
+        draft_value = scores[dim_id]["data"].get(data_key)
+        if draft_value == dim_profile["value"]:
+            matched_count += 1
+    return round((matched_count / total) * 100) if total else 0
+
+
+@router.post("/recalibrate", response_model=RecalibrateResponse)
+async def recalibrate(request: RecalibrateRequest) -> RecalibrateResponse:
+    """
+    Full-draft recalibration against the persisted profile - not a single
+    flagged line, the whole draft. Per JA's explicit direction (25 July
+    2026): use the baseline to rework a new draft that needs it, not just
+    point at what's wrong.
+
+    Self-checked the same way as everything else in this file: the
+    rewritten draft is re-scored against the same profile before being
+    returned, so the response always shows whether it genuinely landed
+    closer to the user's voice, not just that a rewrite happened.
+    """
+    profile = profile_store.get_profile(request.email)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile found for this email yet. Build one first with /profile/build.")
+
+    restoration_metrics = profile.get("restoration_metrics")
+    if restoration_metrics is None:
+        raise HTTPException(status_code=422, detail="Profile exists but has no restoration baseline yet - build or add to your profile again to populate it.")
+
+    original_score = _quick_match_score(request.draft_text, profile["dimensions"])
+
+    result = await recalibrate_draft(request.draft_text, restoration_metrics)
+
+    if result["rewritten"] is None:
+        return RecalibrateResponse(
+            original_match_score=original_score,
+            rewritten_text=None,
+            rewritten_match_score=None,
+            status=result["status"],
+        )
+
+    rewritten_score = _quick_match_score(result["rewritten"], profile["dimensions"])
+
+    return RecalibrateResponse(
+        original_match_score=original_score,
+        rewritten_text=result["rewritten"],
+        rewritten_match_score=rewritten_score,
+        status=result["status"],
+    )

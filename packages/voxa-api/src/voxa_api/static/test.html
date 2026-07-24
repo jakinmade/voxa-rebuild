@@ -61,6 +61,12 @@
   .dim .evidence { font-size: 13px; color: var(--slate); font-style: italic; margin-top: 4px; }
   .dim .suggestion { font-size: 13px; color: var(--ink); margin-top: 6px; padding-top: 6px; border-top: 1px dashed #ccc; }
   .dim .suggestion b { color: var(--match); }
+  .recal-scores { display: flex; gap: 24px; margin: 16px 0; }
+  .recal-score-block { text-align: center; }
+  .recal-score-block .num { font-family: "SF Mono", Consolas, monospace; font-size: 28px; font-weight: 700; }
+  .recal-score-block .lbl { font-size: 12px; color: var(--slate); }
+  .recal-arrow { align-self: center; font-size: 20px; color: var(--slate); }
+  .rewritten-text { white-space: pre-wrap; background: white; border: 1px solid #ccc; border-radius: 6px; padding: 14px; font-size: 14px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -71,6 +77,7 @@
 <div class="tabs">
   <div class="tab active" data-tab="build" onclick="switchTab('build')">1. Build your profile</div>
   <div class="tab" data-tab="check" onclick="switchTab('check')">2. Check a draft</div>
+  <div class="tab" data-tab="recalibrate" onclick="switchTab('recalibrate')">3. Recalibrate a draft</div>
 </div>
 
 <div id="panel-build" class="panel active">
@@ -97,6 +104,19 @@
 
   <div id="checkStatus" class="status"></div>
   <div id="result"></div>
+</div>
+
+<div id="panel-recalibrate" class="panel">
+  <label>Your email</label>
+  <input type="email" id="recalEmail" placeholder="you@example.com">
+
+  <label>Draft that needs reworking</label>
+  <textarea id="recalDraftText" placeholder="Paste the full draft you want rewritten closer to your voice."></textarea>
+
+  <button onclick="runRecalibrate()" id="recalBtn">Recalibrate</button>
+
+  <div id="recalStatus" class="status"></div>
+  <div id="recalResult"></div>
 </div>
 
 <script>
@@ -262,6 +282,72 @@ async function runCheck() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Check';
+  }
+}
+async function runRecalibrate() {
+  var email = document.getElementById('recalEmail').value.trim();
+  var draft_text = document.getElementById('recalDraftText').value.trim();
+  var statusDiv = document.getElementById('recalStatus');
+  var resultDiv = document.getElementById('recalResult');
+  var btn = document.getElementById('recalBtn');
+
+  statusDiv.className = 'status';
+  statusDiv.textContent = '';
+  resultDiv.innerHTML = '';
+
+  if (!email || draft_text.length < 20) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Enter your email and at least 20 characters of draft text.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Recalibrating...';
+
+  try {
+    var res = await fetch('/recalibrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, draft_text: draft_text }),
+    });
+
+    if (res.status === 404) {
+      statusDiv.className = 'status err';
+      statusDiv.textContent = 'No profile found for this email. Go build one on the first tab.';
+      return;
+    }
+    if (!res.ok) {
+      var errText = await res.text();
+      throw new Error('HTTP ' + res.status + ' - ' + errText);
+    }
+
+    var data = await res.json();
+    rememberEmail(email);
+
+    if (data.status !== 'ok') {
+      statusDiv.className = 'status err';
+      statusDiv.textContent = data.status === 'no_api_key'
+        ? 'Recalibration is not switched on yet for this deployment (no API key configured).'
+        : 'Something went wrong: ' + data.status;
+      resultDiv.innerHTML =
+        '<div class="recal-scores"><div class="recal-score-block"><div class="num">' +
+        data.original_match_score + '%</div><div class="lbl">Original</div></div></div>';
+      return;
+    }
+
+    resultDiv.innerHTML =
+      '<div class="recal-scores">' +
+        '<div class="recal-score-block"><div class="num">' + data.original_match_score + '%</div><div class="lbl">Original</div></div>' +
+        '<div class="recal-arrow">&rarr;</div>' +
+        '<div class="recal-score-block"><div class="num" style="color:var(--match);">' + data.rewritten_match_score + '%</div><div class="lbl">Recalibrated</div></div>' +
+      '</div>' +
+      '<div class="rewritten-text">' + data.rewritten_text.replace(/</g, '&lt;') + '</div>';
+  } catch (err) {
+    statusDiv.className = 'status err';
+    statusDiv.textContent = 'Something went wrong: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Recalibrate';
   }
 }
 </script>
