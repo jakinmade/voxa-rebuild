@@ -26,6 +26,7 @@ from voxa_rendering.fingerprint import (
 )
 from voxa_api import profile_store
 from voxa_api.rewrite import suggest_and_verify
+from voxa_api.fitness import score_sample_fitness, fitness_gate
 
 router = APIRouter()
 
@@ -68,6 +69,11 @@ class ProfileResponse(BaseModel):
     email: str
     sample_count: int
     dimensions: dict
+    status: str  # "ready", "nudge", "accumulate"
+    confidence: str  # "high", "medium", "provisional"
+    nudge: str | None = None
+    tier: str  # of the most recently added sample
+    cumulative_words: int
 
 
 class CheckProfileRequest(BaseModel):
@@ -150,13 +156,33 @@ def _build_baseline(samples: list[str]) -> dict:
 async def build_profile(request: BuildProfileRequest) -> ProfileResponse:
     existing = profile_store.get_profile(request.email)
     prior_samples = existing["raw_samples"] if existing else []
-    all_samples = prior_samples + request.samples
+    prior_cumulative_words = existing.get("cumulative_words", 0) if existing else 0
+    prior_cumulative_docs = existing.get("cumulative_docs", 0) if existing else 0
 
+    all_samples = prior_samples + request.samples
     baseline = _build_baseline(all_samples)
-    profile = {"raw_samples": all_samples, "dimensions": baseline}
+
+    # Fitness is scored on the newest submission (may be several samples in
+    # one call, joined) so the nudge reflects what was just pasted.
+    newest_text = "\n\n".join(request.samples)
+    fitness = score_sample_fitness(newest_text)
+    cumulative_words = prior_cumulative_words + fitness["word_count"]
+    cumulative_docs = prior_cumulative_docs + len(request.samples)
+    gate = fitness_gate(fitness, cumulative_words, cumulative_docs)
+
+    profile = {
+        "raw_samples": all_samples,
+        "dimensions": baseline,
+        "cumulative_words": cumulative_words,
+        "cumulative_docs": cumulative_docs,
+    }
     profile_store.save_profile(request.email, profile)
 
-    return ProfileResponse(email=request.email, sample_count=len(all_samples), dimensions=baseline)
+    return ProfileResponse(
+        email=request.email, sample_count=len(all_samples), dimensions=baseline,
+        status=gate["action"], confidence=gate["confidence"], nudge=gate["message"],
+        tier=fitness["tier"], cumulative_words=cumulative_words,
+    )
 
 
 @router.get("/profile/{email}", response_model=ProfileResponse)
@@ -164,7 +190,11 @@ async def get_profile(email: str) -> ProfileResponse:
     profile = profile_store.get_profile(email)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found for this email yet. Build one first with /profile/build.")
-    return ProfileResponse(email=email, sample_count=len(profile["raw_samples"]), dimensions=profile["dimensions"])
+    return ProfileResponse(
+        email=email, sample_count=len(profile["raw_samples"]), dimensions=profile["dimensions"],
+        status="ready", confidence="existing", nudge=None, tier="n/a",
+        cumulative_words=profile.get("cumulative_words", 0),
+    )
 
 
 @router.post("/check-profile", response_model=CheckResponse)

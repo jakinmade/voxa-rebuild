@@ -147,8 +147,21 @@ async function buildProfile() {
     }
     var data = await res.json();
     rememberEmail(email);
-    statusDiv.className = 'status ok';
-    statusDiv.textContent = 'Profile built from ' + data.sample_count + ' sample(s). Add more anytime to strengthen it. Switch to "Check a draft" when ready.';
+
+    if (data.status === 'ready') {
+      statusDiv.className = 'status ok';
+      var confidenceNote = data.confidence === 'high' ? 'Strong sample. Your profile is ready.' :
+        data.confidence === 'medium' ? 'Good sample. Your profile is ready.' :
+        'Profile ready, provisionally - paste more to sharpen it.';
+      statusDiv.textContent = confidenceNote + ' (' + data.sample_count + ' sample(s), ' + data.cumulative_words + ' words total). Switch to "Check a draft" when ready.';
+    } else if (data.status === 'nudge') {
+      statusDiv.className = 'status err';
+      statusDiv.style.color = '#C8962E';
+      statusDiv.textContent = data.nudge;
+    } else {
+      statusDiv.className = 'status';
+      statusDiv.textContent = data.cumulative_words + ' words submitted. ' + (data.nudge || 'Paste more of your own writing.');
+    }
     document.getElementById('samplesText').value = '';
   } catch (err) {
     statusDiv.className = 'status err';
