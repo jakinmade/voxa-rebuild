@@ -50,6 +50,7 @@ class DimensionResult(BaseModel):
     matched: bool
     evidence: str | None = None
     suggested_rewrite: str | None = None
+    rewrite_status: str | None = None
 
 
 class CheckResponse(BaseModel):
@@ -185,11 +186,12 @@ async def check_against_profile(request: CheckProfileRequest) -> CheckResponse:
 
         evidence = None
         suggestion = None
+        rewrite_status = None
         if not matched:
             quotes = draft_scores[dim_id]["evidence"]
             evidence = quotes[0] if quotes else None
             if evidence:
-                suggestion = await suggest_and_verify(
+                suggestion, rewrite_status = await suggest_and_verify(
                     sentence=evidence,
                     dim_id=dim_id,
                     dimension_label=label,
@@ -198,7 +200,10 @@ async def check_against_profile(request: CheckProfileRequest) -> CheckResponse:
                     profile_dimension=dim_profile,
                 )
 
-        results.append(DimensionResult(id=dim_id, label=label, matched=matched, evidence=evidence, suggested_rewrite=suggestion))
+        results.append(DimensionResult(
+            id=dim_id, label=label, matched=matched, evidence=evidence,
+            suggested_rewrite=suggestion, rewrite_status=rewrite_status,
+        ))
         if matched:
             matched_count += 1
 

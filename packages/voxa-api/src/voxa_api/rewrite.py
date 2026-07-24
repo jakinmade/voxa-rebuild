@@ -31,15 +31,14 @@ async def suggest_rewrite(
     sentence: str,
     dimension_label: str,
     profile_dimension: dict,
-) -> str | None:
+) -> tuple[str | None, str]:
     """
-    Returns a rewritten version of `sentence`, or None if no API key is
-    configured, the call fails, or the rewrite doesn't actually improve
-    on the flagged dimension.
+    Returns (rewritten_sentence_or_None, status).
+    status is one of: "ok", "no_api_key", "api_error:<detail>"
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return None
+        return None, "no_api_key"
 
     direction = "direct and owns the statement" if profile_dimension.get("value") else "hedges and cushions the statement"
     prompt = (
@@ -58,10 +57,13 @@ async def suggest_rewrite(
             messages=[{"role": "user", "content": prompt}],
         )
         rewritten = response.content[0].text.strip().strip('"')
-    except Exception:
-        return None
+    except Exception as e:
+        return None, f"api_error:{type(e).__name__}: {str(e)[:150]}"
 
-    return rewritten if rewritten and rewritten != sentence else None
+    if not rewritten or rewritten == sentence:
+        return None, "no_change_returned"
+
+    return rewritten, "ok"
 
 
 async def suggest_and_verify(
@@ -71,23 +73,27 @@ async def suggest_and_verify(
     data_key: str,
     scorer_fn,
     profile_dimension: dict,
-) -> str | None:
+) -> tuple[str | None, str]:
     """
     Gets a rewrite, then checks it against the SAME scorer used everywhere
     else. Only returns the rewrite if it actually lands on the profile's
     baseline value for this dimension. This is the self-check: a
     suggestion is never shown unless it demonstrably fixes the thing
     it claims to fix.
+
+    Returns (rewritten_or_None, status) - status is always meaningful,
+    never silently swallowed, so a missing suggestion is diagnosable
+    rather than a guess.
     """
-    rewritten = await suggest_rewrite(sentence, dimension_label, profile_dimension)
+    rewritten, status = await suggest_rewrite(sentence, dimension_label, profile_dimension)
     if rewritten is None:
-        return None
+        return None, status
 
     check_sentences = _extract_sentences(rewritten) or [rewritten]
     obs = scorer_fn(check_sentences, rewritten)
     rewritten_value = obs.data.get(data_key)
 
     if rewritten_value != profile_dimension.get("value"):
-        return None  # Didn't actually fix it - don't show a suggestion that fails its own check
+        return None, "self_check_failed"  # Rewrite didn't actually fix it - don't show it
 
-    return rewritten
+    return rewritten, "ok"

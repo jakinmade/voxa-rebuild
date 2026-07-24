@@ -231,7 +231,12 @@ async function runCheck() {
 
     var dimsHtml = data.dimensions.map(function(d) {
       var evidenceHtml = d.evidence ? '<div class="evidence">"' + d.evidence + '"</div>' : '';
-      var suggestionHtml = d.suggested_rewrite ? '<div class="suggestion">Try: <b>"' + d.suggested_rewrite + '"</b></div>' : '';
+      var suggestionHtml = '';
+      if (d.suggested_rewrite) {
+        suggestionHtml = '<div class="suggestion">Try: <b>"' + d.suggested_rewrite + '"</b></div>';
+      } else if (d.rewrite_status && d.rewrite_status !== 'ok') {
+        suggestionHtml = '<div class="suggestion" style="color:#999;">(no suggestion: ' + d.rewrite_status + ')</div>';
+      }
       return '<div class="dim">' +
         '<div class="label">' + d.label + '</div>' +
         '<div class="dimstatus ' + (d.matched ? 'match' : 'drift') + '">' + (d.matched ? 'Matches your voice' : 'Drifted') + '</div>' +
