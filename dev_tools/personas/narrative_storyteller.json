@@ -1,0 +1,15 @@
+{
+  "persona_name": "narrative_storyteller",
+  "sample1_text": "So picture this. It's 11pm, we're three days from launch, and the payment integration just silently stops working with zero error logs. No stack trace, nothing. Turned out to be a timezone mismatch in a config file someone had touched eight months earlier. Found it by accident, scrolling through git blame at 2am out of pure desperation.",
+  "sample2_completions": [
+    "The thing I'd tell someone new to this is the bug is never where you think it is.",
+    "What actually annoys me is when the fix is embarrassingly small compared to how long you spent finding it.",
+    "If I'm honest, the hardest part was staying calm enough to actually think straight at that hour.",
+    "The way I'd explain this to a friend is debugging is mostly just patience wearing a technical hat."
+  ],
+  "render_input": "It is important to note that a critical payment integration failure was identified prior to launch. Furthermore, root cause analysis revealed a configuration discrepancy. This underscores the need for a more robust pre-launch testing methodology going forward.",
+  "refinement": {
+    "tags": ["Too formal", "Too long"],
+    "freetext": "kills the whole story, reads like an incident report not something I'd actually tell someone"
+  }
+}
