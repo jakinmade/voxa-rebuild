@@ -1,0 +1,15 @@
+{
+  "persona_name": "casual_contractions",
+  "sample1_text": "Honestly I don't think we're going to hit the deadline, and I'm not sure anyone's told the client yet. We've been saying it's fine for weeks but it isn't. I'll flag it tomorrow if nobody else does, I just don't want it landing on me when it blows up.",
+  "sample2_completions": [
+    "The thing I'd tell someone new to this is that it's never as bad as it feels at 5pm.",
+    "What actually annoys me is when people don't just say what they mean.",
+    "If I'm honest, the hardest part was admitting I couldn't do it all myself.",
+    "The way I'd explain this to a friend is that you can't fix what you won't name."
+  ],
+  "render_input": "It is important to note that project timelines have shifted and stakeholder communication is required. This underscores the need for a robust escalation process going forward, furthermore the current approach is not sustainable.",
+  "refinement": {
+    "tags": ["Missing my directness"],
+    "freetext": ""
+  }
+}

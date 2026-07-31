@@ -19,24 +19,70 @@ additions new in this rebuild:
 
 import re
 import math
+import json
+import hashlib
 from dataclasses import dataclass
 from collections import Counter
+
+_DOTTED_ABBREV = re.compile(r'\b(?:[A-Za-z]\.){2,}')
+_WORD_ABBREV = re.compile(
+    r'\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Rev|Hon|vs|etc|approx|dept|no|vol|pp|'
+    r'Ltd|Inc|Co|Corp|Ave|Blvd|Rd)\.',
+    re.I
+)
+
+
+def _protect_abbreviations(text: str) -> str:
+    """
+    Swaps periods inside known abbreviations (Mr., Dr., U.K., e.g., i.e.)
+    for a placeholder so they don't get read as sentence boundaries.
+    Restored after splitting.
+    """
+    text = _DOTTED_ABBREV.sub(lambda m: m.group(0).replace('.', '\u0000'), text)
+    text = _WORD_ABBREV.sub(lambda m: m.group(0).replace('.', '\u0000'), text)
+    return text
+
 
 def _extract_sentences(text: str) -> list[str]:
     """Split into sentences. Returns non-empty sentences only."""
     text = re.sub(r'\n+', '. ', text)
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    protected = _protect_abbreviations(text)
+    sentences = re.split(r"(?<=[.!?])\s+", protected.strip())
+    sentences = [s.replace('\u0000', '.') for s in sentences]
     return [s.strip() for s in sentences if s.strip() and len(s.split()) >= 2]
 def _shortest_sentences(sentences: list[str], n: int = 2) -> list[str]:
     """Returns the n shortest sentences — evidence for compression."""
     return sorted(sentences, key=lambda s: len(s.split()))[:n]
+# Expanded from the original 20-word list per external review — still a
+# fixed deterministic list, not NLP/POS tagging, just wider coverage of
+# common imperative openers (instructional/directive verbs).
+_IMPERATIVE_VERBS = (
+    "Fix|Send|Call|Build|Close|Check|Review|Do|Make|Take|Stop|Start|Deploy|"
+    "Ship|Run|Get|Go|Ensure|Define|Test|Remember|Consider|Treat|Avoid|Keep|"
+    "Let|Try|Add|Bring|Cut|Drop|Follow|Focus|Handle|Hold|Improve|Increase|"
+    "Reduce|Confirm|Contact|Schedule|Plan|Prepare|Draft|Submit|Approve|Reject|"
+    "Escalate|Flag|Verify|Validate|Assess|Evaluate|Note|Watch|Look|Read|Write|"
+    "Update|Delete|Create|Move|Push|Pull|Set|Use|Find|Prove|Drive|Establish|"
+    "Maintain|Monitor|Track|Log|Report|Notify|Alert|Warn|Prevent|Limit|"
+    "Restrict|Allow|Enable|Disable|Remove|Cancel|Postpone|Reschedule|Book|"
+    "Arrange|Organise|Organize|Coordinate|Delegate|Assign|Own|Lead|Manage|"
+    "Oversee|Supervise|Audit|Inspect|Investigate|Research|Analyse|Analyze|"
+    "Compare|Measure|Calculate|Estimate|Forecast|Project|Predict|Anticipate|"
+    "Expect|Assume|Question|Challenge|Insist|Demand|Request|Ask|Tell|Explain|"
+    "Clarify|Simplify|Summarise|Summarize|Highlight|Emphasise|Emphasize|"
+    "Stress|Repeat|Restate|Rephrase|Reconsider|Rethink|Revisit|Return|Revert|"
+    "Restore|Recover|Repair|Rebuild|Redesign|Refactor|Rewrite|Revise|Edit|"
+    "Polish|Finalise|Finalize|Complete|Finish|Wrap|Open|Launch|Release|"
+    "Publish|Post|Share|Circulate|Distribute|Forward|Attach|Include|Exclude|"
+    "Omit|Skip|Ignore|Dismiss|Discard|Retain|Preserve|Protect|Secure|Lock|"
+    "Unlock|Grant|Revoke|Withdraw"
+)
+_imperative_pattern = re.compile(rf"^({_IMPERATIVE_VERBS})\b", re.I)
+
+
 def _imperative_sentences(sentences: list[str]) -> list[str]:
     """Sentences that start with an imperative verb."""
-    pattern = re.compile(
-        r"^(Fix|Send|Call|Build|Close|Check|Review|Do|Make|Take|"
-        r"Stop|Start|Deploy|Ship|Run|Get|Go|Ensure|Define|Test)\b", re.I
-    )
-    return [s for s in sentences if pattern.match(s)]
+    return [s for s in sentences if _imperative_pattern.match(s)]
 def _hedge_sentences(sentences: list[str]) -> list[str]:
     """Sentences containing hedge words."""
     hedges = re.compile(
@@ -436,14 +482,13 @@ def compute_baseline_metrics(text: str) -> dict:
         directive_ratio    — proportion of sentences that are imperatives
         word_count         — total words in sample (for confidence weighting)
     """
-    import re
-    import math
-
     words = text.split()
     total_words = max(len(words), 1)
 
-    # Sentence split
-    sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip() and len(s.split()) >= 2]
+    # Sentence split — shared function, so the abbreviation guard
+    # (Mr./Dr./U.K./e.g.) applies here too, not just to the observation
+    # narrative. Was previously a separate inline re.split() that missed it.
+    sentences = _extract_sentences(text)
     total_sents = max(len(sentences), 1)
 
     # 1. Hedge density — per 100 words
@@ -466,14 +511,13 @@ def compute_baseline_metrics(text: str) -> dict:
     fp_sents = sum(1 for s in sentences if first_person.search(s))
     first_person_ratio = round(fp_sents / total_sents, 3)
 
-    # 4. Directive ratio — imperative sentences
-    imp = re.compile(
-        r"^(Fix|Send|Call|Build|Close|Check|Review|Do|Make|Take|Stop|Start|"
-        r"Deploy|Ship|Run|Get|Go|Ensure|Define|Test|Prove|Drive|Write|Create|"
-        r"Use|Set|Add|Remove|Update|Push|Pull|Ask|Tell|Show|Find|Keep|"
-        r"Remember|Consider|Note|Look|Think|Try)\b", re.I
-    )
-    directive_sents = sum(1 for s in sentences if imp.match(s.strip()))
+    # 4. Directive ratio — imperative sentences.
+    # Uses the same _imperative_sentences()/_IMPERATIVE_VERBS list as the
+    # fingerprint observations (score_reader_assumption, score_directive_pattern)
+    # rather than a separate inline list — one source of truth, so an
+    # expansion to the verb list can't silently apply to the narrative but
+    # not the actual scored metric.
+    directive_sents = len(_imperative_sentences(sentences))
     directive_ratio = round(directive_sents / total_sents, 3)
 
     return {
@@ -483,6 +527,35 @@ def compute_baseline_metrics(text: str) -> dict:
         "directive_ratio": directive_ratio,
         "word_count": total_words,
     }
+
+
+def fingerprint_hash(baseline: dict) -> str:
+    """
+    Deterministic hash of the baseline metrics dict. Same input text
+    must always produce the same hash — this is a demonstration and
+    regression check of the engine's determinism (per the v4 spec's
+    core design principle), not a security control.
+
+    Uses canonical JSON (sorted keys, fixed separators) so key
+    ordering can never change the hash, then SHA-256, truncated to
+    12 hex chars and grouped for display, e.g. "5F4A-92BC-11DD".
+
+    Only the four scored dimensions are hashed, not word_count —
+    word_count changes between Sample 1 alone and the merged Sample
+    1+2 baseline (see _merge_baseline), which would make the hash
+    look non-deterministic across pipeline stages when the underlying
+    voice measurement hasn't actually changed.
+    """
+    scored_dims = {
+        k: baseline[k]
+        for k in ("hedge_density", "sentence_length_sd", "first_person_ratio", "directive_ratio")
+        if k in baseline
+    }
+    canonical = json.dumps(scored_dims, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest().upper()
+    return "-".join(digest[i:i + 4] for i in range(0, 12, 4))
+
+
 def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
     """
     Running average merge. Weights by word count so larger samples count more.

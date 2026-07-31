@@ -1,0 +1,15 @@
+{
+  "persona_name": "direct_founder",
+  "sample1_text": "Sent the proposal over yesterday. Not sure they will go for it, the timeline is tight and the budget is a stretch for what we discussed. Will chase Sarah on Monday if I have not heard back. Pls remember we still need sign off from legal before anything moves. Also worth flagging the Manchester office wants their own version of this, different numbers entirely.",
+  "sample2_completions": [
+    "The thing I would tell someone new to this is just start, do not overthink the first version.",
+    "What actually annoys me is when people ask for feedback then argue with every point you make.",
+    "If I am honest, the hardest part was admitting the first approach was not working.",
+    "The way I would explain this to a friend is that most of the job is just saying no to things."
+  ],
+  "render_input": "It is important to note that, in today's fast-paced business landscape, effective stakeholder communication is absolutely essential. Furthermore, one cannot overstate the value of a robust, seamless proposal process. This underscores the critical need for a transformative approach going forward.",
+  "refinement": {
+    "tags": ["Too formal", "Doesn't sound like me"],
+    "freetext": "way too polished, I never talk like this"
+  }
+}

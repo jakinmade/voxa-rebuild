@@ -1,0 +1,15 @@
+{
+  "persona_name": "warm_hedging_manager",
+  "sample1_text": "I think, on balance, the draft is mostly there, though I wonder if the opening could land a little softer. It might just be me, but the middle section feels like it moves quite fast. Perhaps worth sitting with it another day before sending. Not a big deal either way, just a thought.",
+  "sample2_completions": [
+    "The thing I'd tell someone new to this is it's usually fine to ask, people don't mind as much as you'd think.",
+    "What actually annoys me is when feedback lands as criticism when it wasn't meant that way.",
+    "If I'm honest, the hardest part was learning to say the hard thing kindly.",
+    "The way I'd explain this to a friend is most conflict is just two people who care, talking past each other."
+  ],
+  "render_input": "This report demonstrates a robust and transformative approach to the quarterly review process. It is important to note that stakeholder alignment was achieved through a seamless, data-driven methodology, which underscores the paramount value of the initiative.",
+  "refinement": {
+    "tags": ["Too blunt", "Doesn't sound like me"],
+    "freetext": "needs more softening, I never state things this flatly"
+  }
+}

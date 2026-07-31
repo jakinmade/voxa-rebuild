@@ -1,0 +1,15 @@
+{
+  "persona_name": "terse_engineer",
+  "sample1_text": "Build broke on merge. Root cause was the env var rename in the last PR, nobody updated the CI config. Fixed now. Deploy blocked until QA signs off. Will not ship on a Friday again, learned that one twice now.",
+  "sample2_completions": [
+    "The thing I'd tell someone new to this is read the error message before you google it.",
+    "What actually annoys me is code review comments that just say fix this with no reason.",
+    "If I'm honest, the hardest part was trusting the team to own their own mistakes.",
+    "The way I'd explain this to a friend is most bugs are configuration, not logic."
+  ],
+  "render_input": "It is worth noting that the deployment pipeline experienced a robust failure due to a configuration oversight. This underscores the importance of a seamless CI/CD process moving forward, and the team leveraged a swift resolution.",
+  "refinement": {
+    "tags": ["Too long", "Too blunt"],
+    "freetext": "cut it down more, I don't explain myself this much"
+  }
+}
