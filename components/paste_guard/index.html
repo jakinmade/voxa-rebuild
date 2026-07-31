@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; font-family: 'Inter', -apple-system, sans-serif; }
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 110px;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid #d8d8e0;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+  }
+  textarea:focus { border-color: #1a1a2e; }
+  textarea.blocked-flash { border-color: #c0392b; }
+  .hint {
+    font-size: 0.78rem;
+    color: #999;
+    margin-top: 0.3rem;
+  }
+  .hint.warn { color: #c0392b; }
+</style>
+</head>
+<body>
+  <textarea id="ta" placeholder="Type here — pasted text won't be accepted."></textarea>
+  <div class="hint" id="hint">Type this one yourself. Paste is disabled on this field on purpose.</div>
+
+<script>
+// Minimal, self-contained implementation of the Streamlit bidirectional
+// component protocol — no build step, no npm package. Sends the current
+// value back to Python on every keystroke via setComponentValue, and
+// hard-blocks paste (preventDefault), not just a soft warning.
+//
+// NOTE FOR JA: this is the one piece of the rebuild I cannot verify
+// end-to-end without a live browser session against a running Streamlit
+// app — I don't have a browser in this environment. The protocol below
+// is implemented to Streamlit's documented spec, but treat this
+// specific file as needing a real smoke test on Railway before you
+// trust it, not as already proven the way everything else in this
+// rebuild is.
+
+const ta = document.getElementById("ta");
+const hint = document.getElementById("hint");
+
+function sendValue(value) {
+  const outData = {
+    isStreamlitMessage: true,
+    type: "streamlit:setComponentValue",
+    value: value,
+  };
+  window.parent.postMessage(outData, "*");
+}
+
+function setFrameHeight() {
+  const outData = {
+    isStreamlitMessage: true,
+    type: "streamlit:setFrameHeight",
+    height: document.body.scrollHeight + 10,
+  };
+  window.parent.postMessage(outData, "*");
+}
+
+function onRender(event) {
+  const data = event.data;
+  if (!data || data.type !== "streamlit:render") return;
+  const initialValue = (data.args && data.args.value) || "";
+  if (ta.value === "" && initialValue) {
+    ta.value = initialValue;
+  }
+  setFrameHeight();
+}
+
+// Hard block: paste event is prevented entirely, not just flagged.
+ta.addEventListener("paste", function (e) {
+  e.preventDefault();
+  ta.classList.add("blocked-flash");
+  hint.classList.add("warn");
+  hint.textContent = "Pasting is disabled here on purpose — type it yourself.";
+  setTimeout(function () {
+    ta.classList.remove("blocked-flash");
+  }, 400);
+});
+
+// Also block drag-and-drop text insertion, the other way to bypass typing.
+ta.addEventListener("drop", function (e) {
+  e.preventDefault();
+});
+
+ta.addEventListener("input", function () {
+  sendValue(ta.value);
+  setFrameHeight();
+});
+
+window.addEventListener("message", onRender);
+
+// Handshake — tell Streamlit the component is ready.
+window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
+setFrameHeight();
+</script>
+</body>
+</html>

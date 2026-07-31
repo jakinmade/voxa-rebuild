@@ -1,16 +1,4 @@
-# Voxa — install all packages in editable mode
-# Usage from repo root: pip install -r requirements.txt
-./packages/voxa-core
-./packages/voxa-humanisation
-./packages/voxa-profile
-./packages/voxa-rendering
-./packages/voxa-calibration
-./packages/voxa-governance
-./packages/voxa-api
-# Runtime dependencies
+# Voxa — Streamlit app runtime dependencies
 streamlit>=1.32.0
 anthropic>=0.25.0
 httpx>=0.27.0
-# Test dependencies
-pytest>=8.0
-pytest-asyncio>=0.23.0
