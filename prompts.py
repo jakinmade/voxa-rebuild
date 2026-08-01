@@ -558,7 +558,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
         (r'\bIt goes without saying\b', 'Obviously'),
         (r'\bNeedless to say\b', 'Obviously'),
         (r'\bWith that (said|in mind)\b', 'So'),
-        (r'\bAs (we|you) (know|can see|may know)\b', ''),
+        (r'\bAs (we|you) (know|can see|may know)\b,?\s*', ''),
         (r'\bThis (underscores|highlights|demonstrates|illustrates|showcases)\b', 'This shows'),
         (r'\bMoving forward\b', 'Going forward'),
         (r'\bLeverage\b', 'Use'),
@@ -645,6 +645,12 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
         text = _re_tri.sub(pattern, replacement, text, flags=_re_tri.IGNORECASE)
     text = _re_tri.sub(r"  +", " ", text).strip()
 
+    # 10. Recapitalise sentence starts — opener-strip rules above (I think that,
+    # I believe that, I would argue that, As we/you know) can leave a lowercase
+    # word at the front of a sentence or the whole string. Safety net, not
+    # tied to any one pattern.
+    text = re.sub(r'(^|[.!?]\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), text)
+
     return text
 def _grammar_fix_pass(text: str, client) -> str:
     """
@@ -687,6 +693,37 @@ def _grammar_fix_pass(text: str, client) -> str:
 # ============================================================
 # New in v4 — correction prompt extended to target semantic drift
 # ============================================================
+
+def merge_starter_evidence(blended_delta: dict, starter_delta: dict | None) -> dict:
+    """
+    Widens what feeds build_correction_prompt using the starter-only
+    baseline, not just the blended (sample1 + starters, word-count
+    weighted) one.
+
+    Why: the four sentence-starter completions are the least performed,
+    most candid writing collected. Blended into a weighted average with
+    sample1, a real drift on a starter-specific dimension can get
+    diluted below the correction threshold if sample1 is long and
+    already close to target. This does not change that dilution - the
+    blended baseline stays the one reported as Voice Match. It only
+    adds a second, independent check: if the starter-only baseline
+    alone would flag a MISS that the blended check missed, that
+    dimension gets promoted into the correction instructions too.
+
+    Rule-based only. No API call. Reuses score_render_delta's own
+    HIT/CLOSE/MISSED verdict logic on both baselines - this function
+    just decides which entries reach the one correction call that
+    already conditionally fires.
+    """
+    if not starter_delta:
+        return blended_delta
+    merged = dict(blended_delta)
+    for key, s_entry in starter_delta.items():
+        b_entry = merged.get(key)
+        if s_entry.get("verdict") == "MISSED" and (not b_entry or b_entry.get("verdict") != "MISSED"):
+            merged[key] = s_entry
+    return merged
+
 
 def build_correction_prompt(delta: dict, semantic: dict | None = None) -> str | None:
     """

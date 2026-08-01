@@ -2,10 +2,10 @@
   "persona_name": "hedging_academic",
   "sample1_text": "It could perhaps be argued that the results, whilst promising, do not yet constitute conclusive evidence. There may be several confounding factors we have not fully accounted for, and it is possible that a larger sample would reveal a somewhat different pattern. I would tentatively suggest that further investigation is warranted before any firm conclusions are drawn, though I remain uncertain as to which direction that investigation should take.",
   "sample2_completions": [
-    "The thing I would tell someone new to this is that certainty is rarely available, and that is perhaps acceptable.",
-    "What actually annoys me is when people present preliminary findings as though they were settled fact.",
-    "If I am honest, the hardest part was learning to sit with ambiguity rather than resolve it prematurely.",
-    "The way I would explain this to a friend is that most research raises more questions than it answers, and that is somewhat the point."
+    "This does not, I think, quite meet what was asked for, though it is possible I am reading the brief too narrowly, I would want to check before saying more.",
+    "I suppose I try to understand things carefully enough that other people do not have to, though that is perhaps a generous way of putting it.",
+    "I have, tentatively, decided that we should delay the rollout, though I remain somewhat uncertain whether that is the right call.",
+    "When someone states a preliminary finding as though it were settled, that is, I will admit, the one thing that genuinely troubles me."
   ],
   "render_input": "The findings clearly demonstrate that the intervention worked. Users loved it. This proves our hypothesis was correct all along and we should roll it out immediately without further testing.",
   "refinement": null

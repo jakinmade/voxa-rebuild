@@ -2,14 +2,17 @@
   "persona_name": "dry_sarcastic",
   "sample1_text": "Great, another 'quick sync' that ran forty minutes and solved nothing. Love that for us. Anyway the numbers are down again, shocking given nobody's actually changed anything since March. I'll put together a summary nobody reads by Friday, the tradition continues.",
   "sample2_completions": [
-    "The thing I'd tell someone new to this is lower your expectations early, saves time later.",
-    "What actually annoys me is meetings that could've been one sentence in a chat.",
-    "If I'm honest, the hardest part was pretending to be surprised when things went wrong exactly as predicted.",
-    "The way I'd explain this to a friend is most of the job is politely restating the obvious."
+    "Great, this is nothing like the brief, love that for us, I'll just rewrite the whole thing myself again then.",
+    "I mostly attend meetings that could have been an email and then fix the thing the meeting didn't fix.",
+    "I've decided we're cancelling the Friday summary nobody reads, shocking development, I'll tell the team and brace for the silence.",
+    "When someone says 'quick chat' and means forty minutes, that's the moment I lose the will to engage."
   ],
   "render_input": "It is important to note that the meeting was highly productive and yielded significant strategic alignment. Furthermore, the team demonstrated a robust, seamless approach to problem-solving, which underscores a truly transformative collaborative process.",
   "refinement": {
-    "tags": ["Too formal", "Missing my directness"],
+    "tags": [
+      "Too formal",
+      "Missing my directness"
+    ],
     "freetext": "no edge at all, sounds like it was written by HR"
   }
 }

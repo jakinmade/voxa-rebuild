@@ -19,6 +19,9 @@ USAGE
     export ANTHROPIC_API_KEY=sk-ant-...
     python3 harness.py personas/direct_founder.json
 
+  Cheap smoke test — one persona, low token ceiling, no refinement call:
+    python3 harness.py personas/direct_founder.json --max-tokens 600 --no-refinement
+
   Batch — run every persona in a folder, one JSON report out:
     python3 harness.py personas/ --batch --out results.json
 
@@ -99,6 +102,8 @@ def run_fingerprint_stage(persona: dict) -> dict:
 
         sample2_metrics = ve.compute_baseline_metrics(combined_sample2)
         baseline = ve._merge_baseline(baseline, sample2_metrics)
+    else:
+        sample2_metrics = None
 
     fingerprint_corpus = sample1 + " " + combined_sample2
     keep_contractions = ve.uses_contractions(fingerprint_corpus)
@@ -106,6 +111,10 @@ def run_fingerprint_stage(persona: dict) -> dict:
     return {
         "observations": observations,
         "baseline": baseline,
+        # Unmerged starter-only baseline - kept separately so the render
+        # stage can run a second, independent check against it, same as
+        # the live app now does (see app.py's starter_baseline).
+        "starter_baseline": sample2_metrics,
         "fingerprint_hash": ve.fingerprint_hash(baseline),
         "fitness": fitness,
         "locale": locale,
@@ -115,11 +124,23 @@ def run_fingerprint_stage(persona: dict) -> dict:
     }
 
 
-def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
+def run_render_stage(
+    persona: dict, fingerprint: dict, api_key: str,
+    max_tokens: int = 4096, skip_refinement: bool = False,
+) -> dict:
     """
     Mirrors screen 4 / _run_render in the live app: the actual rewrite,
     correction pass, and the full Voice Report pipeline. Needs a real
     API key — this is the one stage that costs tokens.
+
+    max_tokens defaults to 4096 to match production exactly. Test
+    render_input strings are one to three sentences, so a lower value
+    (e.g. --max-tokens 600 from the CLI) is realistic headroom for
+    harness runs without changing what app.py itself does.
+
+    skip_refinement drops the optional 4th call (Sample 3 simulation)
+    even when the persona has a refinement block set - lets a cheap
+    smoke-test pass skip it, without editing the persona fixture.
     """
     import anthropic
 
@@ -140,9 +161,9 @@ def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
         word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
     response = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=4096,
+        model="claude-sonnet-4-6", max_tokens=max_tokens,
         system=system, messages=[{"role": "user", "content": input_text}],
     )
     clean = response.content[0].text
@@ -155,12 +176,18 @@ def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
     delta = ve.score_render_delta(baseline, clean)
     semantic = ve.score_semantic_drift(input_text, clean)
 
-    correction_prompt = pr.build_correction_prompt(delta, semantic)
+    # Second, independent check against the starter-only baseline -
+    # mirrors app.py exactly. Rule-based, no extra API call.
+    starter_baseline = fingerprint.get("starter_baseline")
+    starter_delta = ve.score_render_delta(starter_baseline, clean) if starter_baseline else None
+    correction_delta = pr.merge_starter_evidence(delta, starter_delta)
+
+    correction_prompt = pr.build_correction_prompt(correction_delta, semantic)
     correction_applied = False
     if correction_prompt:
         try:
             correction_response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=4096,
+                model="claude-sonnet-4-6", max_tokens=max_tokens,
                 system=correction_prompt, messages=[{"role": "user", "content": clean}],
             )
             corrected = correction_response.content[0].text
@@ -185,7 +212,7 @@ def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
 
     # Simulated refinement — Sample 3, one round, per the v4 spec
     refinement_result = None
-    if persona.get("refinement"):
+    if persona.get("refinement") and not skip_refinement:
         ref = persona["refinement"]
         tags = ref.get("tags", [])
         freetext = ref.get("freetext", "")
@@ -195,7 +222,7 @@ def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
         refined_input = f"{input_text}\n\n[Refinement requested: {note}]" if note else input_text
 
         response2 = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=4096,
+            model="claude-sonnet-4-6", max_tokens=max_tokens,
             system=system, messages=[{"role": "user", "content": refined_input}],
         )
         clean2 = response2.content[0].text
@@ -212,6 +239,8 @@ def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
         report2 = ve.build_voice_report(delta2, semantic2, confidence, risk2, ai_tells2)
 
         refinement_result = {"output": clean2, "voice_report": report2}
+    elif persona.get("refinement") and skip_refinement:
+        refinement_result = "skipped_by_flag"
 
     return {
         "detected_mode": detected_mode,
@@ -223,7 +252,10 @@ def run_render_stage(persona: dict, fingerprint: dict, api_key: str) -> dict:
     }
 
 
-def run_persona(persona: dict, dry_run: bool, api_key: str | None) -> dict:
+def run_persona(
+    persona: dict, dry_run: bool, api_key: str | None,
+    max_tokens: int = 4096, skip_refinement: bool = False,
+) -> dict:
     result = {"persona_name": persona.get("persona_name", "unnamed")}
 
     fingerprint = run_fingerprint_stage(persona)
@@ -242,7 +274,7 @@ def run_persona(persona: dict, dry_run: bool, api_key: str | None) -> dict:
         return result
 
     try:
-        render = run_render_stage(persona, fingerprint, api_key)
+        render = run_render_stage(persona, fingerprint, api_key, max_tokens, skip_refinement)
         result["render_stage"] = render
         result["status"] = "complete"
     except Exception as e:
@@ -258,6 +290,17 @@ def main():
     parser.add_argument("--batch", action="store_true", help="Treat path as a folder of persona JSON files")
     parser.add_argument("--dry-run", action="store_true", help="Fingerprint stage only — no API calls, free")
     parser.add_argument("--out", default=None, help="Write JSON report to this file instead of stdout")
+    parser.add_argument(
+        "--max-tokens", type=int, default=4096,
+        help="Max output tokens per API call. Production default is 4096; "
+             "test render_input strings are short, so a lower value (e.g. 600) "
+             "cuts real cost without changing production app.py."
+    )
+    parser.add_argument(
+        "--no-refinement", action="store_true",
+        help="Skip the optional 4th API call (Sample 3 refinement round) even "
+             "if the persona has a refinement block set. Cheaper first pass."
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -272,7 +315,10 @@ def main():
         with open(args.path) as f:
             personas.append(json.load(f))
 
-    results = [run_persona(p, args.dry_run, api_key) for p in personas]
+    results = [
+        run_persona(p, args.dry_run, api_key, args.max_tokens, args.no_refinement)
+        for p in personas
+    ]
     output = results[0] if len(results) == 1 and not args.batch else {"results": results}
 
     output_json = json.dumps(output, indent=2)

@@ -2,14 +2,17 @@
   "persona_name": "formal_civil_servant",
   "sample1_text": "Following our discussion on Tuesday, I have reviewed the proposal and have a small number of concerns regarding the implementation timeline. Specifically, the resourcing assumptions in section three do not appear to account for the procurement lead time. I would welcome a short call before this goes to the board.",
   "sample2_completions": [
-    "The thing I would tell someone new to this is that process exists for a reason, even when it feels slow.",
-    "What actually annoys me is proposals that skip the risk section because it is inconvenient.",
-    "If I am honest, the hardest part was learning to disagree without being disagreeable.",
-    "The way I would explain this to a friend is most delays come from decisions nobody was willing to make earlier."
+    "I have reviewed this and it does not, I am afraid, meet the requirements set out in the brief. I would welcome a short discussion before proceeding further.",
+    "I ensure that decisions are made properly, with the right people consulted, before anything is put into practice.",
+    "I have decided that this cannot go to the board as it stands, and I intend to raise my concerns directly before that meeting.",
+    "When a proposal proceeds without proper consideration of risk, I find that genuinely difficult to overlook."
   ],
   "render_input": "OMG this proposal is honestly kind of a mess lol, the timeline makes zero sense and nobody thought about procurement at all!! Anyway thoughts?? Let's chat before the board thing.",
   "refinement": {
-    "tags": ["Too blunt", "Doesn't sound like me"],
+    "tags": [
+      "Too blunt",
+      "Doesn't sound like me"
+    ],
     "freetext": "far too casual, I would never write like this in a work context"
   }
 }

@@ -34,7 +34,7 @@ from prompts import (
     _build_voice_dna, _build_system_prompt,
     _detect_mode, apply_intent_mode, _detect_locale,
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
-    build_correction_prompt,
+    build_correction_prompt, merge_starter_evidence,
 )
 from components.paste_guard import paste_guard
 
@@ -415,10 +415,10 @@ def screen_reveal():
 # ============================================================
 
 STARTERS = [
-    "The thing I'd tell someone new to this is...",
-    "What actually annoys me about... ",
-    "If I'm honest, the hardest part was...",
-    "The way I'd explain this to a friend is...",
+    "Someone just sent over work that missed the brief entirely. Type your reply exactly as it comes to you, first draft, no editing...",
+    "A friend just asked what you actually do for work. Answer them right now, in your own words...",
+    "You've just decided something that affects someone else, and you have to tell them now. What do you say...",
+    "Something someone just said is genuinely getting under your skin. Write down what you're thinking, unfiltered...",
 ]
 
 SAMPLE2_MIN_WORDS = 40
@@ -430,7 +430,8 @@ def screen_sample2():
     st.markdown('<div class="headline">One more sample.</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="sub">Finish these four starters, typed live. This proves the sample is genuinely '
-        'yours right now, and strengthens your fingerprint.</div>',
+        'yours right now, and strengthens your fingerprint. Don\'t think it through, don\'t edit - '
+        'first version only.</div>',
         unsafe_allow_html=True
     )
 
@@ -470,6 +471,10 @@ def screen_sample2():
                 st.session_state.observations = existing[:5]
 
                 new_metrics = compute_baseline_metrics(combined)
+                # Keep this unmerged - the correction pass needs the
+                # starter-only baseline as a second, independent check,
+                # separate from the blended one used for Voice Match.
+                st.session_state.starter_baseline = new_metrics
                 st.session_state.baseline_fingerprint = _merge_baseline(
                     st.session_state.get("baseline_fingerprint"), new_metrics
                 )
@@ -503,15 +508,24 @@ def _run_render(input_text: str):
     observations = st.session_state.observations
     raw_text = st.session_state.get("raw_text", "")
     baseline = st.session_state.get("baseline_fingerprint")
-    voice_dna = _build_voice_dna(observations, raw_text, baseline, ai_score)
+
+    # Full corpus for voice DNA extraction: screen 1 paste + the four
+    # starter completions. The starters used to feed only the numeric
+    # baseline and the contraction check - their sentences never reached
+    # anchor-sentence, vocabulary-fingerprint, or function-pattern
+    # extraction. Fixed: they're candid, unperformed writing and belong
+    # in the same corpus that shapes the render.
+    fingerprint_corpus = raw_text + " " + " ".join(st.session_state.get("sample2_completions", []))
+    fingerprint_corpus = fingerprint_corpus.strip()
+
+    voice_dna = _build_voice_dna(observations, fingerprint_corpus or raw_text, baseline, ai_score)
     mode_instruction = apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
 
     # Baseline-driven, not assumed: does this person's own writing use
     # contractions? Only strip them from the output if their own writing
     # doesn't have them either.
-    fingerprint_corpus = raw_text + " " + " ".join(st.session_state.get("sample2_completions", []))
-    keep_contractions = uses_contractions(fingerprint_corpus) if fingerprint_corpus.strip() else False
+    keep_contractions = uses_contractions(fingerprint_corpus) if fingerprint_corpus else False
 
     system = _build_system_prompt(
         voice_dna=voice_dna, mode_instruction=mode_instruction,
@@ -535,7 +549,16 @@ def _run_render(input_text: str):
             delta = score_render_delta(baseline, clean)
             semantic = score_semantic_drift(input_text, clean)
 
-            correction_prompt = build_correction_prompt(delta, semantic)
+            # Second, independent check against the starter-only baseline
+            # (unblended with sample1) - catches drift the blended average
+            # can dilute below the correction threshold. Rule-based, no
+            # extra API call: reuses score_render_delta, only widens what
+            # feeds the one correction call that already fires conditionally.
+            starter_baseline = st.session_state.get("starter_baseline")
+            starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
+            correction_delta = merge_starter_evidence(delta, starter_delta)
+
+            correction_prompt = build_correction_prompt(correction_delta, semantic)
             if correction_prompt:
                 try:
                     correction_response = client.messages.create(

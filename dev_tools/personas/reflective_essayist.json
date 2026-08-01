@@ -2,14 +2,17 @@
   "persona_name": "reflective_essayist",
   "sample1_text": "I keep coming back to the idea that most of what I was afraid of at thirty never actually happened, and most of what did happen I never saw coming at all. I think I used to plan for certainty. Now I mostly just try to stay steady when things move, which is a different skill entirely, and one I'm still learning.",
   "sample2_completions": [
-    "The thing I'd tell someone new to this is you'll waste years trying to control what was never yours to control.",
-    "What actually annoys me is advice that assumes everyone's starting point looks the same.",
-    "If I'm honest, the hardest part was admitting I didn't know what I wanted, not just how to get it.",
-    "The way I'd explain this to a friend is growth is mostly just noticing the same mistake a little sooner each time."
+    "This isn't quite what was asked for, and I notice my first instinct is to soften that, but I think it's worth just saying plainly.",
+    "I spend most of my time trying to understand why things happen the way they do, which is a harder question than it sounds.",
+    "I've decided to step back from this, and I need to tell them honestly, not with the version that makes it easier to hear.",
+    "When someone assumes their starting point is everyone's starting point, that's the thing that quietly gets under my skin."
   ],
   "render_input": "It is important to note that personal growth represents a robust and transformative journey. Furthermore, one's ability to navigate uncertainty demonstrates a paramount life skill in today's ever-evolving landscape.",
   "refinement": {
-    "tags": ["Too formal", "Doesn't sound like me"],
+    "tags": [
+      "Too formal",
+      "Doesn't sound like me"
+    ],
     "freetext": "this sounds like a LinkedIn post about resilience, not how I actually think or write"
   }
 }

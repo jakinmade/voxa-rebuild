@@ -36,10 +36,10 @@ python3 harness.py personas/ --batch --out results.json
   "persona_name": "whatever you want to call them",
   "sample1_text": "a realistic paste of writing — email, message, note. 10+ words minimum.",
   "sample2_completions": [
-    "finishes: The thing I'd tell someone new to this is...",
-    "finishes: What actually annoys me about...",
-    "finishes: If I'm honest, the hardest part was...",
-    "finishes: The way I'd explain this to a friend is..."
+    "answers: Someone just sent over work that missed the brief entirely...",
+    "answers: A friend just asked what you actually do for work...",
+    "answers: You've just decided something that affects someone else, and have to tell them now...",
+    "answers: Something someone just said is genuinely getting under your skin..."
   ],
   "render_input": "an AI-sounding draft to rewrite — verbose, em dashes, filler words work well as a test",
   "refinement": { "tags": ["Too formal"], "freetext": "" }

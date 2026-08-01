@@ -2,14 +2,17 @@
   "persona_name": "enthusiastic_marketer",
   "sample1_text": "OK so the campaign numbers came in and honestly?? Better than we hoped! Open rate was up 12% on last quarter, click through nearly doubled. Team worked so hard on this one, genuinely proud of what we pulled off in like three weeks. Next up is the retargeting push, going to be fun figuring out the segments.",
   "sample2_completions": [
-    "The thing I'd tell someone new to this is just ship it, you can always tweak later.",
-    "What actually annoys me is when people kill a good idea in the first meeting.",
-    "If I'm honest, the hardest part was getting everyone to agree on the tone.",
-    "The way I'd explain this to a friend is marketing is just testing what makes people care."
+    "Oh this is way off brief but honestly no stress, I can see what happened, let's fix it together and get it right!",
+    "I basically figure out what makes people care about something and then tell everyone about it, love it honestly.",
+    "I've decided we're launching the retargeting push Monday, team's ready, I'm telling everyone in standup first thing.",
+    "When someone kills a good idea before it's even had a chance, genuinely that gets to me every time."
   ],
   "render_input": "It is important to note that the campaign leveraged a holistic, data-driven strategy. Furthermore, engagement metrics demonstrated a robust, transformative uplift across all key channels. This underscores the paramount value of a seamless marketing approach.",
   "refinement": {
-    "tags": ["Too formal", "Too long"],
+    "tags": [
+      "Too formal",
+      "Too long"
+    ],
     "freetext": "way too corporate, I never sound like a press release"
   }
 }

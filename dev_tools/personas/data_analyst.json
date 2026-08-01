@@ -2,14 +2,17 @@
   "persona_name": "data_analyst",
   "sample1_text": "Churn is up 4.2 points quarter on quarter, concentrated almost entirely in the under-90-day cohort. Pricing change in April lines up with the timing but correlation isn't causation, need to check the support ticket volume for the same window before drawing conclusions. Pulling that data now.",
   "sample2_completions": [
-    "The thing I'd tell someone new to this is check your denominator before you trust any percentage.",
-    "What actually annoys me is when someone presents a trend line off two data points.",
-    "If I'm honest, the hardest part was learning to say I don't know yet instead of guessing.",
-    "The way I'd explain this to a friend is most bad decisions come from a good story, not bad numbers."
+    "This misses the brief, the churn segment isn't even mentioned, I'll need the underlying data before I can say anything more useful than that.",
+    "I look at the numbers everyone else is too busy to check, and I tell people what they actually mean, not what they hoped they'd mean.",
+    "I've decided we're pulling the April pricing test, the churn signal is too strong to ignore, I'll explain the numbers behind it separately.",
+    "When someone says a chart 'basically shows' something it doesn't actually show, that's the fastest way to lose my attention."
   ],
   "render_input": "It is worth noting that customer attrition has demonstrated a notable upward trajectory this quarter, which underscores a potentially transformative shift in the underlying market landscape requiring further robust analysis going forward.",
   "refinement": {
-    "tags": ["Too formal", "Too long"],
+    "tags": [
+      "Too formal",
+      "Too long"
+    ],
     "freetext": "just give me the number and the reason, cut the rest"
   }
 }
