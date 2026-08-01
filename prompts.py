@@ -274,7 +274,10 @@ def _build_system_prompt(
         "6. UK English throughout.\n"
         "7. Every paragraph in the input gets a paragraph in the output. Do not compress into a summary.\n"
         f"8. Output must be at least {word_count_input} words. The input is {word_count_input} words. "
-        "Match or exceed it. If you run short, expand the ideas — do not pad with filler."
+        "Match or exceed it. If you run short, add specificity and texture to points already in the "
+        "input - more detail on what is already there. Do not pad with filler, and do not introduce "
+        "a new claim, opinion, or idea that is not stated or directly implied by the input, even to "
+        "hit the word count."
     )
 
     if ai_score >= 0.25:
