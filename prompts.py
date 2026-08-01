@@ -465,7 +465,8 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     4. Claude default constructions replaced
     5. Repeated words
     6. Double spaces
-    7. Missing article fix
+    7. [removed] Missing article fix — see note at that step below;
+       blacklist heuristic broke correct text, removed rather than patched.
     """
     import re
 
@@ -604,25 +605,18 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     # 6. Double spaces
     text = re.sub(r'  +', ' ', text)
 
-    # 7. Missing article fix
-    article_needed = re.compile(
-        r'\b(was not|is not|were not|are not|this was not|it was not|that was not)'
-        r'\s+([bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]\w{2,})\b'
-    )
-    def _insert_article(m):
-        verb_phrase = m.group(1)
-        noun = m.group(2)
-        no_article = {'clear', 'enough', 'simple', 'wrong', 'right', 'new',
-                      'good', 'bad', 'free', 'ready', 'done', 'finished',
-                      'certain', 'sure', 'possible', 'necessary', 'perfect',
-                      'disaster', 'statement', 'mistake', 'accident',
-                      'talent', 'quality', 'cohesion', 'progress', 'clarity',
-                      'identity', 'momentum', 'confidence', 'rhythm', 'intent',
-                      'pressure', 'direction', 'purpose', 'structure', 'balance'}
-        if noun.lower() in no_article:
-            return m.group(0)
-        return f"{verb_phrase} a {noun}"
-    text = article_needed.sub(_insert_article, text)
+    # 7. [removed] Missing article fix — blacklist-based heuristic
+    # ("was not X" -> "was not a X" unless X is in a ~35-word exception
+    # list) couldn't distinguish adjectives from nouns. Demonstrated in
+    # production: "The pressures are not small." -> "...not a small."
+    # because "small" wasn't on the exception list. A blacklist against
+    # the entire English adjective vocabulary can't scale - there is
+    # always another adjective not on the list. Also redundant:
+    # _grammar_fix_pass (the LLM call, runs right before this sweep)
+    # already has "Missing articles before countable nouns" in its
+    # brief, and can actually tell nouns from adjectives. Removed
+    # rather than patched - patching means adding "small" today and
+    # the next missed adjective next time.
 
     # 8. Tricolon fragment lists — three consecutive fragments starting with A/An/The
     # AI uses these as rhetorical closers. Deterministic strip.
