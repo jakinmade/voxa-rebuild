@@ -1,10 +1,12 @@
-# Voxa
+# Voicova
 
 **Governed Communication Identity System**
 
 Architecture Specification v9.2.0 | Build v9.5.0
 
-Voxa is not an AI humaniser. Voxa is a governed communication identity system.
+Voicova is not an AI humaniser. Voicova is a governed communication identity system.
+
+> Package names below still read `voxa-*` — the `packages/` monorepo isn't renamed yet, deliberately. See build plan.
 
 ## Monorepo Structure
 

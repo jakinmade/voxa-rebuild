@@ -1,8 +1,8 @@
 """
-Voxa — Communication Identity Platform
+Voicova — Communication Identity Platform
 Streamlit App
 
-"Voxa preserves who you are when you write."
+"Voicova preserves who you are when you write."
 
 Flow (per v4 frozen spec):
   Screen 1 — Paste your writing (no account, no friction)
@@ -20,7 +20,7 @@ fully self-contained.
 import os
 import streamlit as st
 
-from storage import init_state, go_to, reset_all, generate_receipt
+from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from voice_engine import (
     analyse_writing, _analyse_intro,
     compute_baseline_metrics, _merge_baseline,
@@ -40,7 +40,7 @@ from components.paste_guard import paste_guard
 
 # ---- Page config — must be first ----
 st.set_page_config(
-    page_title="Voxa - Communication Identity",
+    page_title="Voicova - Communication Identity",
     page_icon="\U0001F535",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -284,8 +284,8 @@ def _deepen_fingerprint_panel():
 def screen_paste():
     progress_dots(1)
 
-    st.markdown('<div class="tagline">VOXA</div>', unsafe_allow_html=True)
-    st.markdown('<div class="headline">Voxa preserves who you are when you write.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">Voicova preserves who you are when you write.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Paste anything you\'ve written. We\'ll show you what it reveals.</div>', unsafe_allow_html=True)
 
     text = st.text_area(
@@ -606,7 +606,7 @@ def screen_render():
     progress_dots(4)
 
     st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Paste AI-generated text here. Voxa rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
 
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
@@ -634,6 +634,10 @@ def screen_render():
         st.text_area(
             label="output", value=output, height=350,
             label_visibility="collapsed", key=output_key,
+        )
+        st.markdown(
+            '<div class="microcopy">The engine wrote as you. Not for you.</div>',
+            unsafe_allow_html=True
         )
 
         report = st.session_state.get("voice_report")
@@ -716,7 +720,7 @@ def screen_render():
                 st.rerun()
 
         st.markdown("")
-        col1, col2 = st.columns([1, 1])
+        col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             if st.button("Write again", use_container_width=True):
                 st.session_state.render_input_text = ""
@@ -727,9 +731,17 @@ def screen_render():
             if st.button("Start over", type="primary", use_container_width=True):
                 reset_all()
                 st.rerun()
+        with col3:
+            st.download_button(
+                "Export your profile",
+                data=export_profile(),
+                file_name="voicova-profile.json",
+                mime="application/json",
+                use_container_width=True,
+            )
 
     st.markdown(
-        '<div class="microcopy" style="margin-top:2rem;">Voxa keeps your voice.</div>',
+        '<div class="microcopy" style="margin-top:2rem;">Voicova keeps your voice.</div>',
         unsafe_allow_html=True
     )
 

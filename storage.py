@@ -8,6 +8,7 @@ one file that changes. Nothing else should need to know where state
 actually lives.
 """
 
+import json
 import streamlit as st
 from datetime import datetime
 
@@ -77,3 +78,21 @@ def generate_receipt(session_start: str, word_count: int) -> dict:
             "No calibration data was recorded."
         ),
     }
+
+
+def export_profile() -> str:
+    """
+    Portable voice profile — plain JSON, owned by the user.
+    Nothing here lives only on Voicova's servers; this is the file
+    a person keeps regardless of what happens to the session.
+    """
+    profile = {
+        "exported_at": datetime.now().strftime("%d %B %Y, %H:%M"),
+        "session_started": st.session_state.get("session_start"),
+        "locale": st.session_state.get("locale"),
+        "words_analysed": st.session_state.get("cumulative_words", 0),
+        "documents_analysed": st.session_state.get("cumulative_docs", 0),
+        "fingerprint": st.session_state.get("observations", []),
+        "baseline": st.session_state.get("baseline_fingerprint"),
+    }
+    return json.dumps(profile, indent=2, default=str)

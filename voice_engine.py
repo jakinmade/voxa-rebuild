@@ -1,5 +1,5 @@
 """
-voice_engine.py — Voxa's measurement core.
+voice_engine.py — Voicova's measurement core.
 
 No Streamlit. No API calls. This module measures. It does not generate.
 

@@ -353,7 +353,7 @@ def _detect_locale(text: str) -> str:
     """
     Detects whether the user writes in UK or US English.
     Scans for UK spelling markers. If enough are present, returns "uk".
-    Falls back to "uk" if inconclusive — Voxa is a UK product.
+    Falls back to "uk" if inconclusive — Voicova is a UK product.
     """
     import re
 
