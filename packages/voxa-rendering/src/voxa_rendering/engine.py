@@ -117,9 +117,12 @@ def _build_system_prompt(constraints: dict[str, object]) -> str:
     """
     forbidden = constraints.get("forbidden_phrases", [])
     preferred = constraints.get("preferred_verbs", [])
+    task_instruction = constraints.get("task_instruction", "")
 
     forbidden_str = ", ".join(forbidden) if forbidden else "none specified"
     preferred_str = ", ".join(preferred) if preferred else "none specified"
+
+    task_block = f"\n\nTASK: {task_instruction}" if task_instruction else ""
 
     return f"""You are a voice rendering engine. Your only job is to rewrite the provided text to match the communication constraints below. You do not make decisions. You do not infer rules. You apply constraints exactly as specified.
 
@@ -143,7 +146,7 @@ RULES:
 3. If a forbidden phrase appears, replace it — do not delete the underlying meaning.
 4. Return only the rewritten text. No preamble. No explanation. No commentary.
 5. Match the length of the original. Do not shorten. Do not summarise. Every paragraph in gets a paragraph out.
-6. Never use em dashes (—) or en dashes (–). Use a hyphen or restructure the sentence."""
+6. Never use em dashes (—) or en dashes (–). Use a hyphen or restructure the sentence.{task_block}"""
 
 
 # ---------------------------------------------------------------------------

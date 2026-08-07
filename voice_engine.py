@@ -1520,6 +1520,82 @@ _AI_TELL_PHRASES = re.compile(
     re.I
 )
 
+# ---------------------------------------------------------------------------
+# Analytical-register AI tells — added because _AI_TELL_PHRASES above is
+# tuned for corporate-marketing-slop vocabulary (leverage, synergy, robust)
+# and misses a completely different tell vocabulary that shows up in
+# analytical/argumentative writing: essay-style connective tissue and the
+# habit of pressing abstract nouns into service as verbs. "Drift", "surface"
+# and "land on" are as diagnostic in this register as "leverage" is in the
+# corporate one. This is additive — _AI_TELL_PHRASES is untouched, this is
+# a second, separate list applied only when _classify_register says the
+# text warrants it. See _classify_register below.
+# ---------------------------------------------------------------------------
+_ANALYTICAL_TELL_PHRASES = re.compile(
+    r"\b(drift(s|ed|ing)?|surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
+    r"unpack(s|ed|ing)?|gestur(e|es|ed|ing) (at|toward|towards)|"
+    r"sit(s)? with|push back (on|against)|"
+    r"worth noting|to be fair|on reflection|"
+    r"the (real|deeper) (question|issue|tension) (is|here)|"
+    r"i suspect|i would push back|closer to .* than to)\b",
+    re.I
+)
+
+# Fragment-as-emphasis: a short sentence ending in a period, immediately
+# followed by a capitalised noun-phrase fragment with no verb of its own
+# (e.g. "Distinct stage. Not a subdivision."). Common essay-voice tic.
+_FRAGMENT_EMPHASIS_PATTERN = re.compile(
+    r"[.!?]\s+(Not\s+\w+|Different\s+\w+|No\s+\w+(?:\s+\w+){0,3})[.!?]",
+    re.I
+)
+
+
+def _classify_register(text: str) -> str:
+    """
+    Buckets input text as 'corporate', 'analytical', or 'mixed' so
+    score_ai_tells and the rewrite sweep know which tell-vocabulary
+    to apply. Heuristic, not ML — counts hits against each existing
+    tell list plus a couple of structural markers, and compares.
+
+    Self-contained by design: does not call other private scoring
+    helpers, so it can't be broken by changes to unrelated functions.
+
+    Deliberately conservative — ties or thin margins fall to 'mixed',
+    which means both lists get applied. A false positive from the
+    analytical list on corporate text costs nothing since the words
+    in that list barely occur in corporate writing anyway; a missed
+    analytical tell (false negative) is the failure mode we're
+    actually trying to close, so 'mixed' is the safe default.
+    """
+    if not text or not text.strip():
+        return "mixed"
+
+    corporate_hits = len(_AI_TELL_PHRASES.findall(text))
+    analytical_hits = len(_ANALYTICAL_TELL_PHRASES.findall(text))
+    analytical_hits += len(_FRAGMENT_EMPHASIS_PATTERN.findall(text))
+
+    # Structural signal: analytical/essay writing tends to run longer,
+    # more varied sentence lengths than corporate copy. Cheap proxy —
+    # standard deviation of sentence word-counts.
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    word_counts = [len(s.split()) for s in sentences] if sentences else []
+    if len(word_counts) >= 3:
+        mean = sum(word_counts) / len(word_counts)
+        variance = sum((c - mean) ** 2 for c in word_counts) / len(word_counts)
+        stdev = variance ** 0.5
+    else:
+        stdev = 0.0
+
+    structural_leans_analytical = stdev >= 6.0  # empirically wide spread
+
+    if corporate_hits == 0 and analytical_hits == 0:
+        return "mixed" if structural_leans_analytical else "corporate"
+    if analytical_hits > corporate_hits:
+        return "analytical"
+    if corporate_hits > analytical_hits:
+        return "corporate"
+    return "mixed"
+
 
 def uses_contractions(text: str) -> bool:
     """
@@ -1543,22 +1619,39 @@ def score_ai_tells(text: str) -> dict:
     clean=True only if there are zero hard-fail hits. Em dashes are a
     hard fail on their own — a single one surviving is enough to fail,
     since the whole point of the sweep is that there should be none.
+
+    Checks two separate tell vocabularies: _AI_TELL_PHRASES (corporate
+    register — leverage, synergy, robust) always runs. _ANALYTICAL_TELL_
+    PHRASES (essay/argumentative register — drift, surface, land on)
+    runs when _classify_register says the text is 'analytical' or
+    'mixed'. Return shape is unchanged from before this check existed,
+    so every existing caller (app.py, dev_tools/harness.py) keeps
+    working without modification.
     """
     em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
-    phrase_hits = _AI_TELL_PHRASES.findall(text)
+    phrase_hits = list(_AI_TELL_PHRASES.findall(text))
+
+    register = _classify_register(text)
+    analytical_hits = []
+    if register in ("analytical", "mixed"):
+        analytical_hits = list(_ANALYTICAL_TELL_PHRASES.findall(text))
+        analytical_hits += list(_FRAGMENT_EMPHASIS_PATTERN.findall(text))
+
+    all_hits = phrase_hits + analytical_hits
 
     flagged = []
     if em_dash_hits:
         flagged.append(f"{em_dash_hits} em dash(es) survived the sweep")
-    if phrase_hits:
-        unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in phrase_hits))
+    if all_hits:
+        unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in all_hits))
         flagged.append(f"AI-typical phrasing found: {', '.join(unique_phrases[:5])}")
 
-    clean = em_dash_hits == 0 and len(phrase_hits) == 0
+    clean = em_dash_hits == 0 and len(all_hits) == 0
 
     return {
         "clean": clean,
         "em_dash_count": em_dash_hits,
-        "phrase_hit_count": len(phrase_hits),
+        "phrase_hit_count": len(all_hits),
         "flagged": flagged,
+        "register": register,
     }

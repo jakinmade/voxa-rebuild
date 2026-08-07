@@ -21,6 +21,7 @@ from voice_engine import (
     _format_vocabulary_fingerprint,
     _extract_function_patterns,
     _format_function_patterns,
+    _classify_register,
 )
 
 def _detect_mode(text: str) -> str:
@@ -598,6 +599,31 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     ]
     for pattern, replacement in claude_constructions:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    # Analytical-register constructions — separate from claude_constructions
+    # above because that list is tuned for corporate-slop vocabulary and
+    # doesn't touch the abstract-noun-as-verb habit that shows up in
+    # analytical/argumentative writing (drift, surface, land on, unpack).
+    # Only applied when _classify_register says the text warrants it, so
+    # this never fires on — and never risks mangling — corporate-register
+    # input. Mirrors _ANALYTICAL_TELL_PHRASES in voice_engine.py; kept as
+    # a replace-list here since this function's job is to fix, not flag.
+    if _classify_register(text) in ("analytical", "mixed"):
+        analytical_constructions = [
+            (r'\bdrifts?\b', 'changes'),
+            (r'\bdrifted\b', 'changed'),
+            (r'\bdrifting\b', 'changing'),
+            (r'\bsurfaces?(?!\s+area)\b', 'shows up'),
+            (r'\bsurfaced\b', 'showed up'),
+            (r'\blands? on\b', 'settles on'),
+            (r'\blanded on\b', 'settled on'),
+            (r'\bunpacks?\b', 'looks at'),
+            (r'\bunpacked\b', 'looked at'),
+            (r'\bworth noting\b', 'notable'),
+            (r'\bto be fair\b', 'fairly'),
+        ]
+        for pattern, replacement in analytical_constructions:
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
     # 5. Repeated words
     text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
