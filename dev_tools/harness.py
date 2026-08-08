@@ -30,8 +30,15 @@ a worked example. Five fields, four required:
 
   persona_name        str            — label only, for your own reference
   sample1_text        str            — Sample 1: pasted writing
-  sample2_completions  list[str]      — Sample 2: the four sentence-starter
-                                        completions (see app.py's STARTERS)
+  sample2_completions  list[str]      — Sample 2: sentence-starter completions
+                                        (see app.py's _build_starters()).
+                                        Only index [0] is required, at least
+                                        SAMPLE2_REQUIRED_MIN_WORDS words -
+                                        matches the live app's Screen 3 gate.
+                                        Indices [1:] are optional enrichment,
+                                        same as the app's "Deepen your
+                                        fingerprint" expander - fill with ""
+                                        or omit entirely.
   render_input         str            — the AI-ish text to rewrite
   refinement            dict, optional — {"tags": [...], "freetext": "..."}
                                          simulates the one-refinement step
@@ -60,7 +67,10 @@ if _REPO_ROOT not in sys.path:
 import voice_engine as ve
 import prompts as pr
 
-SAMPLE2_MIN_WORDS = 40
+# Mirrors app.py's SAMPLE2_REQUIRED_MIN_WORDS. Only the first
+# sample2_completions entry is required; entries beyond it are optional
+# "deepen your fingerprint" enrichment, same as the live app's expander.
+SAMPLE2_REQUIRED_MIN_WORDS = 10
 
 
 def _detect_locale_simple(text: str) -> str:
@@ -70,8 +80,9 @@ def _detect_locale_simple(text: str) -> str:
 
 def run_fingerprint_stage(persona: dict) -> dict:
     """
-    Mirrors screens 1-3 of the live app: Sample 1 paste, Sample 2 four
-    sentence starters. Pure computation, no API call, free to run.
+    Mirrors screens 1-3 of the live app: Sample 1 paste, Sample 2 starters
+    (one required, up to three optional). Pure computation, no API call,
+    free to run.
     """
     sample1 = persona["sample1_text"]
     completions = persona.get("sample2_completions", [])
@@ -85,25 +96,37 @@ def run_fingerprint_stage(persona: dict) -> dict:
     fitness = ve._score_sample_fitness(sample1)
     locale = _detect_locale_simple(sample1)
 
-    # Sample 2 — same word-floor check the app enforces
+    # Sample 2 — same gate app.py enforces: only completions[0] is
+    # required, at SAMPLE2_REQUIRED_MIN_WORDS. Missing or empty entirely
+    # is a persona-fixture error, not a soft failure - the live app can't
+    # reach Screen 4 without it, so a harness run that let it through
+    # silently would report results the live app could never produce.
+    first = completions[0].strip() if completions else ""
+    first_word_count = len(first.split())
+    sample2_ok = bool(first) and first_word_count >= SAMPLE2_REQUIRED_MIN_WORDS
+    if not sample2_ok:
+        return {
+            "error": (
+                f"sample2_completions[0] must be at least {SAMPLE2_REQUIRED_MIN_WORDS} "
+                f"words - the live app blocks Continue on Screen 3 otherwise. "
+                f"Got {first_word_count} word(s)."
+            )
+        }
+
     combined_sample2 = " ".join(c.strip() for c in completions if c.strip())
     sample2_word_count = len(combined_sample2.split())
-    sample2_ok = sample2_word_count >= SAMPLE2_MIN_WORDS
 
-    if sample2_ok:
-        intro_obs = ve._analyse_intro(combined_sample2)
-        existing_headlines = {o["headline"] for o in observations}
-        for obs in intro_obs:
-            if obs["headline"] not in existing_headlines:
-                observations.append(obs)
-                existing_headlines.add(obs["headline"])
-        observations.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
-        observations = observations[:5]
+    intro_obs = ve._analyse_intro(combined_sample2)
+    existing_headlines = {o["headline"] for o in observations}
+    for obs in intro_obs:
+        if obs["headline"] not in existing_headlines:
+            observations.append(obs)
+            existing_headlines.add(obs["headline"])
+    observations.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
+    observations = observations[:5]
 
-        sample2_metrics = ve.compute_baseline_metrics(combined_sample2)
-        baseline = ve._merge_baseline(baseline, sample2_metrics)
-    else:
-        sample2_metrics = None
+    sample2_metrics = ve.compute_baseline_metrics(combined_sample2)
+    baseline = ve._merge_baseline(baseline, sample2_metrics)
 
     fingerprint_corpus = sample1 + " " + combined_sample2
     keep_contractions = ve.uses_contractions(fingerprint_corpus)
@@ -119,6 +142,7 @@ def run_fingerprint_stage(persona: dict) -> dict:
         "fitness": fitness,
         "locale": locale,
         "sample2_word_count": sample2_word_count,
+        "sample2_required_word_count": first_word_count,
         "sample2_met_floor": sample2_ok,
         "keep_contractions": keep_contractions,
     }
