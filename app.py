@@ -18,6 +18,7 @@ fully self-contained.
 """
 
 import os
+import re
 import streamlit as st
 
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
@@ -414,6 +415,10 @@ def screen_reveal():
 # Screen 3 — Four sentence starters, typed live, paste blocked
 # ============================================================
 
+# Generic fallback scenarios - used when there's nothing usable in the
+# Screen 1 paste to anchor to (too short, no sentence-shaped fragments).
+# Kept under the old name so anything referencing app.STARTERS (e.g. the
+# harness docstring) still resolves to something sensible.
 STARTERS = [
     "Someone just sent over work that missed the brief entirely. Type your reply exactly as it comes to you, first draft, no editing...",
     "A friend just asked what you actually do for work. Answer them right now, in your own words...",
@@ -421,31 +426,87 @@ STARTERS = [
     "Something someone just said is genuinely getting under your skin. Write down what you're thinking, unfiltered...",
 ]
 
-SAMPLE2_MIN_WORDS = 40
+# Anchored versions of the same four scenarios - {s} is a sentence pulled
+# from the user's own Screen 1 paste. Continuation is a lower-effort task
+# than invention, so anchoring to their own words instead of a free-floating
+# scenario should raise both completion rate and how genuinely-voiced the
+# sample is.
+_ANCHOR_TEMPLATES = [
+    'Picture someone pushing back hard on this line you wrote: "{s}" Type your reply exactly as it comes to you, first draft, no editing...',
+    'A friend just read this line of yours — "{s}" — and asked what you actually meant. Answer them right now, in your own words...',
+    'Someone just asked you to justify this: "{s}" What do you say...',
+    'Keep going from where you left off — "{s}" — write the next few sentences, unfiltered, first version only...',
+]
+
+
+def _extract_anchor_sentences(raw_text: str, n: int) -> list[str]:
+    """Pull up to n sentence-shaped fragments from the user's own Screen 1
+    paste. Crude split, good enough for anchoring a prompt - not meant to
+    be grammatically precise. Returns fewer than n (or none) if raw_text
+    doesn't have enough usable material; callers fall back to the generic
+    scenario for any starter that doesn't get an anchor."""
+    if not raw_text:
+        return []
+    sentences = re.split(r'(?<=[.!?])\s+', raw_text.strip())
+    usable = [s.strip() for s in sentences if 5 <= len(s.split()) <= 25]
+    return usable[:n]
+
+
+def _build_starters(raw_text: str) -> list[str]:
+    """Screen 3 starters, anchored to the Screen 1 paste where possible,
+    falling back to the generic scenario per-slot where it isn't."""
+    anchors = _extract_anchor_sentences(raw_text, n=len(STARTERS))
+    starters = []
+    for i, generic in enumerate(STARTERS):
+        if i < len(anchors):
+            starters.append(_ANCHOR_TEMPLATES[i].format(s=anchors[i]))
+        else:
+            starters.append(generic)
+    return starters
+
+
+# Word floor for the one required starter. Not the old 40-word combined
+# floor across four boxes - see screen_sample2() for the gate logic.
+SAMPLE2_REQUIRED_MIN_WORDS = 10
 
 
 def screen_sample2():
     progress_dots(3)
 
+    starters = _build_starters(st.session_state.get("raw_text", ""))
+
     st.markdown('<div class="headline">One more sample.</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="sub">Finish these four starters, typed live. This proves the sample is genuinely '
+        '<div class="sub">Finish this starter, typed live. This proves the sample is genuinely '
         'yours right now, and strengthens your fingerprint. Don\'t think it through, don\'t edit - '
         'first version only.</div>',
         unsafe_allow_html=True
     )
 
     completions = st.session_state.sample2_completions
-    for i, starter in enumerate(STARTERS):
-        st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starter}</div>', unsafe_allow_html=True)
-        completions[i] = paste_guard(value=completions[i], key=f"starter_{i}")
-    st.session_state.sample2_completions = completions
 
-    total_words = sum(len(c.split()) for c in completions)
+    st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starters[0]}</div>', unsafe_allow_html=True)
+    completions[0] = paste_guard(value=completions[0], key="starter_0")
+
+    required_words = len(completions[0].split())
     st.markdown(
-        f'<div class="microcopy" style="text-align:left;margin-top:0.4rem;">{total_words} / {SAMPLE2_MIN_WORDS} words</div>',
+        f'<div class="microcopy" style="text-align:left;margin-top:0.4rem;">'
+        f'{required_words} / {SAMPLE2_REQUIRED_MIN_WORDS} words</div>',
         unsafe_allow_html=True
     )
+
+    st.markdown("")
+    with st.expander("Deepen your fingerprint"):
+        st.markdown(
+            '<div class="sub" style="margin-bottom:0.8rem;">Optional. Each one you answer '
+            'strengthens your fingerprint further.</div>',
+            unsafe_allow_html=True
+        )
+        for i, starter in enumerate(starters[1:], start=1):
+            st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starter}</div>', unsafe_allow_html=True)
+            completions[i] = paste_guard(value=completions[i], key=f"starter_{i}")
+
+    st.session_state.sample2_completions = completions
 
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -454,12 +515,13 @@ def screen_sample2():
             st.rerun()
     with col2:
         if st.button("Continue \u2192", type="primary", use_container_width=True):
-            combined = " ".join(c.strip() for c in completions if c.strip())
-            if not combined:
-                st.error("Complete at least one starter first.")
-            elif total_words < SAMPLE2_MIN_WORDS:
-                st.error(f"A little more — {SAMPLE2_MIN_WORDS} words total across the four, {total_words} so far.")
+            if required_words < SAMPLE2_REQUIRED_MIN_WORDS:
+                st.error(
+                    f"A little more — at least {SAMPLE2_REQUIRED_MIN_WORDS} words "
+                    f"to continue, {required_words} so far."
+                )
             else:
+                combined = " ".join(c.strip() for c in completions if c.strip())
                 intro_obs = _analyse_intro(combined)
                 existing = st.session_state.observations
                 existing_headlines = {o["headline"] for o in existing}
