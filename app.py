@@ -31,7 +31,7 @@ from voice_engine import (
     score_semantic_drift, compute_confidence, compute_risk,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells,
-    compute_dimension_stability,
+    compute_dimension_stability, confidence_caveat,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -788,6 +788,13 @@ def screen_render():
                 <div class="vr-changes">Biggest changes: {changes_html}</div>
             </div>
             """, unsafe_allow_html=True)
+
+            caveat = confidence_caveat(st.session_state.get("dimension_stability"))
+            if caveat:
+                st.markdown(
+                    f'<div class="microcopy" style="margin-top:0.5rem;">{caveat}</div>',
+                    unsafe_allow_html=True
+                )
 
         if st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)

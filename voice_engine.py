@@ -1499,6 +1499,41 @@ def compute_confidence(
     return "Low"
 
 
+def confidence_caveat(stability: dict | None) -> str | None:
+    """
+    One plain-English line for the UI, shown only when the Confidence
+    badge is being held back specifically because the two required
+    starters read differently from each other - not for every case, not
+    as a permanent fixture, and never naming a dimension or a metric.
+
+    Deliberately narrow: this only fires on the actual limiting
+    condition (stable_ratio below the Medium threshold used in
+    compute_confidence), so it never nags a user whose Confidence is
+    already High, and it never appears at all before Screen 3 has run
+    (sample_count < 2). No jargon - "stable", "volatile", "dimension"
+    and "coefficient of variation" stay engine-internal; the badge and
+    this one line are the only things the product surfaces.
+
+    Returns None (nothing shown) when there's nothing useful to say.
+    """
+    if not stability or stability.get("sample_count", 0) < 2:
+        return None
+
+    stable = stability.get("stable_count", 0)
+    volatile = stability.get("volatile_count", 0)
+    total = stable + volatile
+    if total == 0:
+        return None
+    stable_ratio = stable / total
+
+    if stable_ratio < 0.5:
+        return (
+            "Your two samples read pretty differently from each other. "
+            "Paste one more piece of your own writing to firm this up."
+        )
+    return None
+
+
 def compute_risk(delta: dict | None, semantic: dict | None, ai_tells: dict | None = None) -> str:
     """
     How much this specific rewrite moved from the person's normal style

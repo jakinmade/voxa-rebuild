@@ -143,3 +143,44 @@ def test_no_baseline_is_always_low_regardless_of_stability():
     stability = {"stable_count": 4, "volatile_count": 0, "sample_count": 3}
     confidence = ve.compute_confidence(_high_tier_fitness(), None, 5, stability)
     assert confidence == "Low"
+
+
+# ---------------------------------------------------------------------------
+# confidence_caveat — the one UI-facing line, shown only when it's
+# actionable. Never names a dimension, never fires when confidence
+# is already High, never fires before Screen 3 has run.
+# ---------------------------------------------------------------------------
+
+def test_no_stability_data_no_caveat():
+    assert ve.confidence_caveat(None) is None
+
+
+def test_single_sample_no_caveat():
+    assert ve.confidence_caveat({"stable_count": 0, "volatile_count": 0, "sample_count": 1}) is None
+
+
+def test_mostly_stable_no_caveat():
+    stability = {"stable_count": 4, "volatile_count": 0, "sample_count": 3}
+    assert ve.confidence_caveat(stability) is None
+
+
+def test_evenly_split_no_caveat_at_the_medium_threshold():
+    # 2 stable / 2 volatile = 0.5 ratio, same threshold compute_confidence
+    # uses for Medium - not yet the "mostly volatile" case this caveat
+    # exists for.
+    stability = {"stable_count": 2, "volatile_count": 2, "sample_count": 3}
+    assert ve.confidence_caveat(stability) is None
+
+
+def test_mostly_volatile_gives_a_plain_english_caveat():
+    stability = {"stable_count": 1, "volatile_count": 3, "sample_count": 3}
+    caveat = ve.confidence_caveat(stability)
+    assert caveat is not None
+    # No jargon leaks into the user-facing string.
+    for banned in ("stable", "volatile", "dimension", "coefficient", "variation", "cv"):
+        assert banned not in caveat.lower()
+
+
+def test_caveat_deterministic():
+    stability = {"stable_count": 1, "volatile_count": 3, "sample_count": 3}
+    assert ve.confidence_caveat(stability) == ve.confidence_caveat(stability)
