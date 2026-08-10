@@ -139,21 +139,34 @@ class TestRegexSweepFixesAnalyticalTells:
         result = pr._regex_sweep(text)
         assert "drift" not in result.lower()
 
-    def test_surfaces_replaced_by_sweep(self):
+    def test_surfaces_not_blind_fixed_by_sweep(self):
+        """
+        'surface(s)' is deliberately NOT in the auto-fix list. It has
+        no reliable noun/verb split via regex (compare: "it surfaces
+        when..." vs "the agent's surface") — same class of problem as
+        the missing-article heuristic that was removed for the same
+        reason. It stays in the detector (flag only) so a human makes
+        the call in context rather than the sweep guessing and
+        sometimes mangling a noun use.
+        """
         text = "It surfaces when someone finally asks the question."
         result = pr._regex_sweep(text)
-        assert not re.search(r"\bsurfaces\b", result, re.IGNORECASE)
+        assert re.search(r"\bsurfaces\b", result, re.IGNORECASE)
 
     def test_sweep_output_then_passes_verification(self):
         """
-        End-to-end: sweep a tell-laden sentence, then confirm the
-        verification check now considers it clean. This is the actual
-        product flow in app.py — sweep, then verify.
+        End-to-end: sweep a tell-laden sentence. 'drifts' is auto-fixed
+        so it clears; 'surfaces' is flag-only by design, so the overall
+        result is correctly still not clean and still names 'surface'
+        as the reason. This is the actual product flow in app.py —
+        sweep, then verify, then surface remaining flags to the user.
         """
         text = "The situation drifts and surfaces without warning."
         swept = pr._regex_sweep(text)
+        assert not re.search(r"\bdrifts\b", swept, re.IGNORECASE)
         result = ve.score_ai_tells(swept)
-        assert result["clean"] is True
+        assert result["clean"] is False
+        assert any("surface" in f.lower() for f in result["flagged"])
 
     def test_corporate_sweep_behaviour_unchanged(self):
         """
