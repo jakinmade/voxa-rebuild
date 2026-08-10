@@ -154,7 +154,7 @@ def test_screen4_caveat_and_deepen_panel_resolve_low_confidence_via_ui():
 
     page_text = " ".join(m.value for m in at.markdown)
     assert "read pretty differently" in page_text
-    assert any("Firm up your fingerprint" in e.label for e in at.expander)
+    assert any("Try one more sample" in e.label for e in at.expander)
 
     # Submit one more sample through the panel that appeared.
     at.text_area(key="deepen_text").set_value(

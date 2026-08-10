@@ -253,11 +253,13 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
     a sample is added, since Screen 4 already has a Voice Report on
     screen that should reflect the new number without a re-render.
     """
-    label = "Firm up your fingerprint" if show_caveat_framing else "Deepen your fingerprint"
+    label = "Try one more sample" if show_caveat_framing else "Deepen your fingerprint"
     body = (
-        "Paste one more piece of your own writing. This feeds the same "
-        "stability check as your two starters, so it can actually move "
-        "the Confidence badge above — not just add word count."
+        "Paste one more piece of your own writing. If it reads closer to "
+        "your other samples, this will lift the Confidence badge above. "
+        "If it doesn't, that's a real result too — some people's writing "
+        "genuinely shifts more than others across situations, and no "
+        "amount of extra samples changes that."
         if show_caveat_framing else
         "Paste more of your own writing. Each sample strengthens the baseline "
         "— useful if you want a higher bar than the fast path gives you."

@@ -1529,7 +1529,10 @@ def confidence_caveat(stability: dict | None) -> str | None:
     if stable_ratio < 0.5:
         return (
             "Your two samples read pretty differently from each other. "
-            "Paste one more piece of your own writing to firm this up."
+            "Paste one more — if your writing holds steady there, this "
+            "will strengthen things. If it lands differently again, that's "
+            "telling you something real too: your voice may just shift more "
+            "than most between these kinds of writing."
         )
     return None
 
