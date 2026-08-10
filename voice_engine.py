@@ -1651,11 +1651,48 @@ def score_render_delta(baseline: dict, output_text: str) -> dict:
 
 
 def voice_match_pct(delta: dict) -> int:
-    """Aggregate the per-dimension delta into a single headline percentage."""
+    """Aggregate the per-dimension delta into a single internal score.
+    Not shown to users as a headline number — see voice_match_label().
+    Precise percentages implied a precision the underlying metrics
+    (surface stats, not voice) can't support; scoring methods in this
+    space score below the measured human floor and don't correlate
+    well with each other across approaches."""
     if not delta:
         return 0
     scores = [max(0.0, 1.0 - d["pct_diff"]) for d in delta.values()]
     return round(100 * sum(scores) / len(scores))
+
+
+def voice_match_label(delta: dict) -> dict:
+    """
+    Qualitative replacement for the bare Voice Match %. Buckets the
+    internal score into a plain-language tier and surfaces the actual
+    evidence (which dimensions held, which drifted) instead of implying
+    false precision with a number.
+    """
+    pct = voice_match_pct(delta)
+    if pct >= 85:
+        tier, badge = "Strong", "badge-green"
+    elif pct >= 65:
+        tier, badge = "Good", "badge-green"
+    elif pct >= 45:
+        tier, badge = "Developing", "badge-amber"
+    else:
+        tier, badge = "Limited", "badge-red"
+
+    hits = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "HIT"]
+    missed = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "MISSED"]
+
+    if hits and not missed:
+        evidence = "Held on " + ", ".join(hits) + "."
+    elif hits and missed:
+        evidence = "Held on " + ", ".join(hits) + " — drifted on " + ", ".join(missed) + "."
+    elif missed:
+        evidence = "Drifted on " + ", ".join(missed) + "."
+    else:
+        evidence = "No baseline comparison available."
+
+    return {"tier": tier, "badge": badge, "evidence": evidence, "_raw_pct": pct}
 
 
 _DIMENSION_LABELS = {
@@ -1698,8 +1735,13 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         pct = round(d["pct_diff"] * 100)
         biggest_changes.append(f"{label} {direction}{pct}%")
 
+    voice_match = voice_match_label(delta)
+
     return {
-        "voice_match": voice_match_pct(delta),
+        "voice_match": voice_match["_raw_pct"],  # kept internally, not shown as headline
+        "voice_match_tier": voice_match["tier"],
+        "voice_match_badge": voice_match["badge"],
+        "voice_match_evidence": voice_match["evidence"],
         "semantic_match": semantic["semantic_match"],
         "confidence": confidence,
         "risk": risk,

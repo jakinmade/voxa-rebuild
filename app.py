@@ -804,12 +804,15 @@ def screen_render():
                 if report.get("ai_tell_clean", True)
                 else f'<span class="badge badge-red">Flagged</span> — {"; ".join(report.get("ai_tell_flags", []))}'
             )
+            vm_badge = report.get('voice_match_badge', 'badge-amber')
+            vm_tier = report.get('voice_match_tier', 'Unrated')
+            vm_evidence = report.get('voice_match_evidence', '')
             st.markdown(f"""
             <div class="voice-report">
                 <div class="vr-grid">
                     <div class="vr-stat">
-                        <div class="vr-stat-label">Voice Match</div>
-                        <div class="vr-stat-value">{report['voice_match']}%</div>
+                        <div class="vr-stat-label">Voice consistency</div>
+                        <span class="badge {vm_badge}">{vm_tier}</span>
                     </div>
                     <div class="vr-stat">
                         <div class="vr-stat-label">Semantic Match</div>
@@ -828,6 +831,7 @@ def screen_render():
                         {ai_tell_html}
                     </div>
                 </div>
+                <div class="vr-changes">{vm_evidence}</div>
                 <div class="vr-changes">Biggest changes: {changes_html}</div>
             </div>
             """, unsafe_allow_html=True)
