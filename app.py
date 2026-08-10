@@ -240,18 +240,31 @@ def progress_dots(current: int, total: int = 4):
     st.markdown(f'<div class="progress">{dots}</div>', unsafe_allow_html=True)
 
 
-def _deepen_fingerprint_panel():
+def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
     """
     Visible from first use, not gated behind anything — per the v4 spec's
     decision (Section 6/10): fast path is the default, but anyone who
     wants a stronger baseline can reach it without being funnelled there.
+
+    show_caveat_framing=True is used on Screen 4, only when
+    confidence_caveat() actually returned something - swaps the generic
+    copy for language that matches why the panel is showing up there,
+    and recomputes Confidence (and the caveat itself) immediately after
+    a sample is added, since Screen 4 already has a Voice Report on
+    screen that should reflect the new number without a re-render.
     """
-    with st.expander("Deepen your fingerprint"):
+    label = "Firm up your fingerprint" if show_caveat_framing else "Deepen your fingerprint"
+    body = (
+        "Paste one more piece of your own writing. This feeds the same "
+        "stability check as your two starters, so it can actually move "
+        "the Confidence badge above — not just add word count."
+        if show_caveat_framing else
+        "Paste more of your own writing. Each sample strengthens the baseline "
+        "— useful if you want a higher bar than the fast path gives you."
+    )
+    with st.expander(label, expanded=show_caveat_framing):
         st.markdown(
-            '<div class="sub" style="margin-bottom:0.8rem;">'
-            'Paste more of your own writing. Each sample strengthens the baseline '
-            '— useful if you want a higher bar than the fast path gives you.'
-            '</div>',
+            f'<div class="sub" style="margin-bottom:0.8rem;">{body}</div>',
             unsafe_allow_html=True,
         )
         extra = st.text_area(
@@ -275,7 +288,35 @@ def _deepen_fingerprint_panel():
                         existing_headlines.add(obs["headline"])
                 existing.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
                 st.session_state.observations = existing[:5]
+
+                # Feed the stability check too - previously this panel
+                # only touched the blended baseline, so a sample added
+                # here could never actually move the Confidence badge
+                # or resolve the caveat that sent someone here in the
+                # first place.
+                samples = st.session_state.get("fingerprint_samples", [])
+                samples.append(new_metrics)
+                st.session_state.fingerprint_samples = samples
+                st.session_state.dimension_stability = compute_dimension_stability(samples)
+
+                # If a Voice Report is already on screen (Screen 4),
+                # refresh its Confidence badge in place - the rewritten
+                # text itself doesn't change, only how much to trust the
+                # baseline it was measured against.
+                report = st.session_state.get("voice_report")
+                if report:
+                    new_confidence = compute_confidence(
+                        st.session_state.get("sample_fitness"),
+                        st.session_state.get("baseline_fingerprint"),
+                        len(st.session_state.get("observations", [])),
+                        st.session_state.get("dimension_stability"),
+                    )
+                    report["confidence"] = new_confidence
+                    st.session_state.confidence = new_confidence
+                    st.session_state.voice_report = report
+
                 st.success("Added. Your fingerprint just got stronger.")
+                st.rerun()
             else:
                 st.error("A bit more — at least a sentence or two.")
 
@@ -795,6 +836,7 @@ def screen_render():
                     f'<div class="microcopy" style="margin-top:0.5rem;">{caveat}</div>',
                     unsafe_allow_html=True
                 )
+                _deepen_fingerprint_panel(show_caveat_framing=True)
 
         if st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)

@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
+import voice_engine as ve
+
 _APP_PATH = str(Path(__file__).resolve().parents[2] / "app.py")
 
 SAMPLE_TEXT = (
@@ -95,6 +97,78 @@ def test_screen3_requires_both_contrasting_starters_via_ui():
     assert stability is not None
     assert stability["sample_count"] == 3
     assert at.session_state["starter_baseline"] is not None
+
+
+def test_screen4_caveat_and_deepen_panel_resolve_low_confidence_via_ui():
+    """
+    Full loop, driven live: starters deliberately register-mismatched
+    enough to trip the caveat -> caveat text and 'Firm up your
+    fingerprint' panel appear on Screen 4 -> submitting one more sample
+    through that panel actually grows dimension_stability and can move
+    Confidence, closing the gap where the caveat pointed at an action
+    with no way to take it.
+    """
+    at = AppTest.from_file(_APP_PATH)
+    at.run(timeout=15)
+
+    at.text_area[0].set_value(SAMPLE_TEXT)
+    at.button[0].click()
+    at.run(timeout=15)
+    assert at.session_state["screen"] == 2
+
+    assert _click(at, "Continue")
+    at.run(timeout=15)
+    assert at.session_state["screen"] == 3
+
+    completions = at.session_state["sample2_completions"]
+    completions[0] = "Fix this. Redo it properly. Send it back today. Do not sit on it."
+    completions[3] = (
+        "I might be wrong about this but I think perhaps I could possibly be "
+        "overreacting a little. I suppose I might just let it go for now maybe, "
+        "though I am somewhat unsure whether that is right."
+    )
+    at.session_state["sample2_completions"] = completions
+    at.run(timeout=15)
+    assert _click(at, "Continue")
+    at.run(timeout=15)
+    assert at.session_state["screen"] == 4
+
+    stability_before = at.session_state["dimension_stability"]
+    assert stability_before["stable_count"] == 0
+    caveat_before = ve.confidence_caveat(stability_before)
+    assert caveat_before is not None
+
+    # Seed a completed render (no live API call), same pattern as the
+    # other no-API test, so the Voice Report card - and the caveat under
+    # it - actually render.
+    at.session_state["render_output"] = "Stand-in rendered text."
+    at.session_state["render_input_text"] = "Stand-in AI draft."
+    at.session_state["voice_report"] = {
+        "voice_match": 80, "semantic_match": 90, "confidence": "Low", "risk": "Low",
+        "biggest_changes": [], "ai_tell_clean": True, "ai_tell_flags": [],
+    }
+    at.session_state["intent_mode"] = "GET_IT_DONE"
+    at.session_state["sample_fitness"] = {"tier": "strong"}
+    at.run(timeout=15)
+    assert not at.exception
+
+    page_text = " ".join(m.value for m in at.markdown)
+    assert "read pretty differently" in page_text
+    assert any("Firm up your fingerprint" in e.label for e in at.expander)
+
+    # Submit one more sample through the panel that appeared.
+    at.text_area(key="deepen_text").set_value(
+        "This is a perfectly ordinary extra sample of my own writing, long enough "
+        "to clear the ten word floor the deepen panel requires before it accepts anything."
+    )
+    at.run(timeout=15)
+    assert _click(at, "Add to my fingerprint")
+    at.run(timeout=15)
+    assert not at.exception
+
+    stability_after = at.session_state["dimension_stability"]
+    assert stability_after["sample_count"] == 4
+    assert at.session_state["voice_report"]["confidence"] == at.session_state["confidence"]
 
 
 def test_paste_to_fingerprint_to_export_no_api_call():
