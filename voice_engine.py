@@ -1318,6 +1318,56 @@ def _entities_and_numbers(text: str) -> set:
     return proper | numbers
 
 
+def _possessive_attributions(text: str) -> dict:
+    """
+    Maps each noun that follows 'your' or 'my' to the set of pronouns it
+    appeared with. Used to catch attribution swaps that score_semantic_drift
+    cannot see by construction — 'your' and 'my' are both in _STOPWORDS
+    (correctly, for ordinary content-overlap scoring), which means 'your
+    point' -> 'my point' looks identical to that scorer: 'point' survived,
+    nothing dropped. But that swap changes who the point belongs to - it's
+    a meaning change, not a style change, and content-word overlap can't
+    detect it by design.
+    """
+    pattern = re.compile(r"\b(your|my)\s+([a-z]+)\b", re.I)
+    mapping: dict = {}
+    for pronoun, noun in pattern.findall(text):
+        noun_l = noun.lower()
+        mapping.setdefault(noun_l, set()).add(pronoun.lower())
+    return mapping
+
+
+def detect_attribution_swaps(input_text: str, output_text: str) -> list[str]:
+    """
+    Flags nouns where 'your <noun>' in the input became 'my <noun>' in
+    the output, or vice versa - a credit/attribution flip, not a voice
+    adjustment. Deterministic, rule-based, per the standing architecture
+    constraint - no model call, same input always produces the same flags.
+
+    Narrow by design: only fires when a noun's possessive pronoun
+    actually flipped between your/my, not on every 'your'/'my' in the
+    text (most won't have a same-noun counterpart on the other side,
+    and aren't flagged). This will not catch every attribution error -
+    'as you said' -> 'as I said' uses different words per side, not the
+    same noun with a flipped pronoun - but it catches the specific,
+    high-consequence pattern seen in production: crediting yourself for
+    someone else's point, or vice versa, in the same reply.
+    """
+    input_map = _possessive_attributions(input_text)
+    output_map = _possessive_attributions(output_text)
+
+    flags = []
+    for noun, input_pronouns in input_map.items():
+        output_pronouns = output_map.get(noun)
+        if not output_pronouns:
+            continue
+        if "your" in input_pronouns and "my" in output_pronouns and "your" not in output_pronouns:
+            flags.append(f"'your {noun}' became 'my {noun}' — credit moved from them to you")
+        elif "my" in input_pronouns and "your" in output_pronouns and "my" not in output_pronouns:
+            flags.append(f"'my {noun}' became 'your {noun}' — credit moved from you to them")
+    return flags
+
+
 def score_semantic_drift(input_text: str, output_text: str) -> dict:
     """
     Deterministic proxy for whether the rewrite preserved what was
@@ -1350,11 +1400,14 @@ def score_semantic_drift(input_text: str, output_text: str) -> dict:
 
     semantic_match = round(100 * (0.6 * entity_score + 0.4 * content_score))
 
+    attribution_swaps = detect_attribution_swaps(input_text, output_text)
+
     return {
         "semantic_match": semantic_match,
         "entity_preservation": round(entity_score * 100),
         "content_overlap": round(content_score * 100),
         "dropped_entities": dropped[:5],
+        "attribution_swaps": attribution_swaps,
     }
 
 
@@ -1547,8 +1600,20 @@ def compute_risk(delta: dict | None, semantic: dict | None, ai_tells: dict | Non
     its own — High risk regardless of how the voice/semantic scores
     look, since the whole product promise breaks the moment an AI tell
     reaches the user, independent of everything else scoring well.
+
+    An attribution swap ('your point' -> 'my point' or reverse) is the
+    same category of hard failure, for the same reason: semantic_match
+    can sit at 97% with an attribution swap present, because the word-
+    overlap scorer that number comes from can't see it - 'your' and
+    'my' are stopwords for that comparison by design. A high headline
+    number next to a credit-reassignment error is worse than a low one,
+    since it tells the person everything's fine when it isn't. Treated
+    as High regardless of every other score, same as an AI tell.
     """
     if ai_tells and not ai_tells.get("clean", True):
+        return "High"
+
+    if (semantic or {}).get("attribution_swaps"):
         return "High"
 
     missed = sum(1 for d in (delta or {}).values() if d.get("verdict") == "MISSED")
@@ -1642,6 +1707,7 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "ai_tell_flags": (ai_tells or {}).get("flagged", []),
         "biggest_changes": biggest_changes[:3],
         "dropped_entities": semantic.get("dropped_entities", []),
+        "attribution_swaps": semantic.get("attribution_swaps", []),
     }
 
 # ============================================================

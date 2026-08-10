@@ -229,7 +229,10 @@ def _build_restoration_targets(baseline: dict) -> str:
         "RESTORATION TARGETS — from your baseline writing:",
         f"  Hedge density: {hedge:.1f}% per 100 words — match this rate, do not go lower",
         f"  Sentence rhythm: SD {sd:.1f} words — mix sentence lengths, do not flatten to uniform short",
-        f"  Ownership: {fp:.0%} of sentences use first-person — own statements at this rate",
+        f"  Ownership: {fp:.0%} of sentences use first-person — own YOUR OWN statements and "
+        f"claims at this rate. Never reassign credit for a point, idea, or argument that belongs "
+        f"to someone else in the conversation (e.g. do not turn \"your point\" into \"my point\") — "
+        f"this is a meaning change, not a voice adjustment.",
     ]
 
     # Only include directive target if signal is meaningful
@@ -798,8 +801,10 @@ def build_correction_prompt(delta: dict, semantic: dict | None = None) -> str | 
             if o_val < b_val:
                 correction_instructions.append(
                     f"Ownership is too low ({o_val:.0%} first-person, target {b_val:.0%}). "
-                    f"Replace passive or third-person constructions with direct first-person statements. "
-                    f"Own the points.")
+                    f"Replace passive or third-person constructions with direct first-person "
+                    f"statements — but ONLY for the writer's own claims and reactions. Never "
+                    f"reassign credit for a point, idea, or argument that belongs to someone else "
+                    f"in the conversation (e.g. do not turn 'your point' into 'my point').")
         elif key == "directive_ratio" and b_val >= 0.06:
             if o_val < b_val:
                 correction_instructions.append(
@@ -813,6 +818,22 @@ def build_correction_prompt(delta: dict, semantic: dict | None = None) -> str | 
         correction_instructions.append(
             f"The rewrite dropped specific facts from the original: {named}. "
             f"Add them back in naturally. Do not invent replacements — restore what was actually said.")
+
+    # Attribution swaps ('your point' -> 'my point' or reverse) are a
+    # meaning change disguised as a style change - score_semantic_drift's
+    # word-overlap comparison can't see these ('your'/'my' are stopwords
+    # there by design), so this is the one place they get caught and
+    # corrected. Listed first and phrased as a hard instruction, not a
+    # style nudge, since getting this wrong is worse than any of the
+    # voice-dimension misses above.
+    swaps = (semantic or {}).get("attribution_swaps", [])
+    if swaps:
+        listed = "; ".join(swaps)
+        correction_instructions.insert(
+            0,
+            f"CREDIT ERROR — fix this first: {listed}. Restore who the original text actually "
+            f"credited. This is not a style choice; check the original wording and correct it exactly."
+        )
 
     if not correction_instructions:
         return None

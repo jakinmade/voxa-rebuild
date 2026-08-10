@@ -832,6 +832,15 @@ def screen_render():
             </div>
             """, unsafe_allow_html=True)
 
+            swaps = report.get("attribution_swaps", [])
+            if swaps:
+                st.markdown(
+                    '<div class="microcopy" style="margin-top:0.5rem;color:#C0392B;">'
+                    '\u26a0 Check who gets credit before sending — the rewrite may have swapped '
+                    'whose point this was.</div>',
+                    unsafe_allow_html=True
+                )
+
             caveat = confidence_caveat(st.session_state.get("dimension_stability"))
             if caveat:
                 st.markdown(
