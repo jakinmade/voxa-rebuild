@@ -32,13 +32,16 @@ a worked example. Five fields, four required:
   sample1_text        str            — Sample 1: pasted writing
   sample2_completions  list[str]      — Sample 2: sentence-starter completions
                                         (see app.py's _build_starters()).
-                                        Only index [0] is required, at least
-                                        SAMPLE2_REQUIRED_MIN_WORDS words -
-                                        matches the live app's Screen 3 gate.
-                                        Indices [1:] are optional enrichment,
-                                        same as the app's "Deepen your
-                                        fingerprint" expander - fill with ""
-                                        or omit entirely.
+                                        Indices [0] and [3] are required, each
+                                        at least SAMPLE2_REQUIRED_MIN_WORDS
+                                        words - matches the live app's Screen 3
+                                        gate. Picked for register contrast
+                                        (defensive-professional vs unfiltered-
+                                        emotional), not just "the first one".
+                                        Indices [1] and [2] are optional
+                                        enrichment, same as the app's "Deepen
+                                        your fingerprint" expander - fill with
+                                        "" or omit entirely.
   render_input         str            — the AI-ish text to rewrite
   refinement            dict, optional — {"tags": [...], "freetext": "..."}
                                          simulates the one-refinement step
@@ -67,10 +70,12 @@ if _REPO_ROOT not in sys.path:
 import voice_engine as ve
 import prompts as pr
 
-# Mirrors app.py's SAMPLE2_REQUIRED_MIN_WORDS. Only the first
-# sample2_completions entry is required; entries beyond it are optional
-# "deepen your fingerprint" enrichment, same as the live app's expander.
+# Mirrors app.py's SAMPLE2_REQUIRED_MIN_WORDS and REQUIRED_STARTER_INDICES.
+# Indices 0 and 3 are required (picked for register contrast); 1 and 2
+# are optional "deepen your fingerprint" enrichment, same as the live
+# app's expander.
 SAMPLE2_REQUIRED_MIN_WORDS = 10
+REQUIRED_STARTER_INDICES = (0, 3)
 
 
 def _detect_locale_simple(text: str) -> str:
@@ -81,8 +86,8 @@ def _detect_locale_simple(text: str) -> str:
 def run_fingerprint_stage(persona: dict) -> dict:
     """
     Mirrors screens 1-3 of the live app: Sample 1 paste, Sample 2 starters
-    (one required, up to three optional). Pure computation, no API call,
-    free to run.
+    (indices 0 and 3 required, 1 and 2 optional). Pure computation, no API
+    call, free to run.
     """
     sample1 = persona["sample1_text"]
     completions = persona.get("sample2_completions", [])
@@ -95,21 +100,30 @@ def run_fingerprint_stage(persona: dict) -> dict:
     baseline = ve.compute_baseline_metrics(sample1)
     fitness = ve._score_sample_fitness(sample1)
     locale = _detect_locale_simple(sample1)
+    fingerprint_samples = [baseline]
 
-    # Sample 2 — same gate app.py enforces: only completions[0] is
-    # required, at SAMPLE2_REQUIRED_MIN_WORDS. Missing or empty entirely
-    # is a persona-fixture error, not a soft failure - the live app can't
-    # reach Screen 4 without it, so a harness run that let it through
-    # silently would report results the live app could never produce.
-    first = completions[0].strip() if completions else ""
-    first_word_count = len(first.split())
-    sample2_ok = bool(first) and first_word_count >= SAMPLE2_REQUIRED_MIN_WORDS
-    if not sample2_ok:
+    # Sample 2 — same gate app.py enforces: completions[0] and
+    # completions[3] are both required, at SAMPLE2_REQUIRED_MIN_WORDS
+    # each. Missing or empty is a persona-fixture error, not a soft
+    # failure - the live app can't reach Screen 4 without both, so a
+    # harness run that let it through silently would report results the
+    # live app could never produce.
+    required_word_counts = {}
+    missing = []
+    for idx in REQUIRED_STARTER_INDICES:
+        text = completions[idx].strip() if idx < len(completions) else ""
+        wc = len(text.split())
+        required_word_counts[idx] = wc
+        if not text or wc < SAMPLE2_REQUIRED_MIN_WORDS:
+            missing.append(idx)
+
+    if missing:
         return {
             "error": (
-                f"sample2_completions[0] must be at least {SAMPLE2_REQUIRED_MIN_WORDS} "
-                f"words - the live app blocks Continue on Screen 3 otherwise. "
-                f"Got {first_word_count} word(s)."
+                f"sample2_completions{missing} must each be at least "
+                f"{SAMPLE2_REQUIRED_MIN_WORDS} words - the live app blocks "
+                f"Continue on Screen 3 otherwise. "
+                f"Got {[required_word_counts[i] for i in missing]} word(s) respectively."
             )
         }
 
@@ -125,8 +139,22 @@ def run_fingerprint_stage(persona: dict) -> dict:
     observations.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
     observations = observations[:5]
 
-    sample2_metrics = ve.compute_baseline_metrics(combined_sample2)
-    baseline = ve._merge_baseline(baseline, sample2_metrics)
+    # Score each required starter SEPARATELY for the stability check -
+    # combining them first would destroy the register contrast the
+    # two-starter requirement exists to capture. The combined text
+    # (below) is still used for the starter-only render check and for
+    # _analyse_intro's narrative reading, same as before.
+    required_metrics = [
+        ve.compute_baseline_metrics(completions[idx].strip())
+        for idx in REQUIRED_STARTER_INDICES
+    ]
+    fingerprint_samples.extend(required_metrics)
+    dimension_stability = ve.compute_dimension_stability(fingerprint_samples)
+
+    required_starter_text = " ".join(completions[idx].strip() for idx in REQUIRED_STARTER_INDICES)
+    starter_baseline = ve.compute_baseline_metrics(required_starter_text)
+    for m in required_metrics:
+        baseline = ve._merge_baseline(baseline, m)
 
     fingerprint_corpus = sample1 + " " + combined_sample2
     keep_contractions = ve.uses_contractions(fingerprint_corpus)
@@ -137,13 +165,14 @@ def run_fingerprint_stage(persona: dict) -> dict:
         # Unmerged starter-only baseline - kept separately so the render
         # stage can run a second, independent check against it, same as
         # the live app now does (see app.py's starter_baseline).
-        "starter_baseline": sample2_metrics,
+        "starter_baseline": starter_baseline,
+        "dimension_stability": dimension_stability,
         "fingerprint_hash": ve.fingerprint_hash(baseline),
         "fitness": fitness,
         "locale": locale,
         "sample2_word_count": sample2_word_count,
-        "sample2_required_word_count": first_word_count,
-        "sample2_met_floor": sample2_ok,
+        "sample2_required_word_count": required_word_counts,
+        "sample2_met_floor": not missing,
         "keep_contractions": keep_contractions,
     }
 

@@ -2,9 +2,11 @@
 Tests for dev_tools/harness.py's Sample 2 gate logic.
 
 Confirms run_fingerprint_stage() mirrors app.py's screen_sample2() gate
-exactly: only sample2_completions[0] is required, at
-SAMPLE2_REQUIRED_MIN_WORDS words - everything after it is optional
-enrichment, same as the live app's "Deepen your fingerprint" expander.
+exactly: sample2_completions[0] AND sample2_completions[3] are both
+required, each at SAMPLE2_REQUIRED_MIN_WORDS words - picked for register
+contrast (defensive-professional vs unfiltered-emotional), not just "the
+first one". Indices 1 and 2 remain optional enrichment, same as the live
+app's "Deepen your fingerprint" expander.
 
 This matters because the harness exists specifically so results here are
 results the real product would produce. A harness run that let a persona
@@ -52,97 +54,134 @@ def test_sample1_below_floor_errors():
 
 
 # ---------------------------------------------------------------------------
-# Gate: sample2_completions[0] required, SAMPLE2_REQUIRED_MIN_WORDS floor
+# Gate: sample2_completions[0] and [3] required, SAMPLE2_REQUIRED_MIN_WORDS
+# floor each
 # ---------------------------------------------------------------------------
+
+_OK4 = [
+    "this is the first required starter and it clears the floor easily",
+    "a second optional starter with a handful of words in it",
+    "a third optional one, also filled in for good measure here",
+    "and a fourth, rounding out the full set of four answers",
+]
+
 
 def test_missing_sample2_completions_key_errors():
     persona = _persona()
     del persona["sample2_completions"]
     result = harness.run_fingerprint_stage(persona)
     assert "error" in result
-    assert "sample2_completions[0]" in result["error"]
+    assert "sample2_completions" in result["error"]
 
 
 def test_empty_sample2_completions_list_errors():
     result = harness.run_fingerprint_stage(_persona(sample2_completions=[]))
     assert "error" in result
-    assert "sample2_completions[0]" in result["error"]
+    assert "sample2_completions" in result["error"]
 
 
 def test_first_starter_empty_string_errors():
-    result = harness.run_fingerprint_stage(_persona(sample2_completions=[
-        "",
-        "plenty of words here to fill the second starter nicely",
-    ]))
+    completions = list(_OK4)
+    completions[0] = ""
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
+    assert "error" in result
+
+
+def test_fourth_starter_empty_string_errors():
+    completions = list(_OK4)
+    completions[3] = ""
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" in result
 
 
 def test_first_starter_whitespace_only_errors():
-    result = harness.run_fingerprint_stage(_persona(sample2_completions=["   \n\t  "]))
+    completions = list(_OK4)
+    completions[0] = "   \n\t  "
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" in result
 
 
 def test_first_starter_under_floor_errors():
     under = "one two three four five six seven eight nine"  # 9 words
     assert len(under.split()) == harness.SAMPLE2_REQUIRED_MIN_WORDS - 1
-    result = harness.run_fingerprint_stage(_persona(sample2_completions=[under]))
+    completions = list(_OK4)
+    completions[0] = under
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" in result
     assert str(harness.SAMPLE2_REQUIRED_MIN_WORDS) in result["error"]
 
 
-def test_first_starter_exactly_at_floor_passes():
+def test_fourth_starter_under_floor_errors():
+    under = "one two three four five six seven eight nine"  # 9 words
+    completions = list(_OK4)
+    completions[3] = under
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
+    assert "error" in result
+
+
+def test_both_required_starters_exactly_at_floor_passes():
     exactly = "one two three four five six seven eight nine ten"  # 10 words
     assert len(exactly.split()) == harness.SAMPLE2_REQUIRED_MIN_WORDS
-    result = harness.run_fingerprint_stage(_persona(sample2_completions=[exactly]))
+    completions = ["", "", "", ""]
+    completions[0] = exactly
+    completions[3] = exactly
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" not in result
     assert result["sample2_met_floor"] is True
-    assert result["sample2_required_word_count"] == harness.SAMPLE2_REQUIRED_MIN_WORDS
+    assert result["sample2_required_word_count"][0] == harness.SAMPLE2_REQUIRED_MIN_WORDS
+    assert result["sample2_required_word_count"][3] == harness.SAMPLE2_REQUIRED_MIN_WORDS
 
 
-def test_first_starter_alone_above_floor_passes_with_no_other_completions():
-    only_one = "this single starter easily clears the required word floor on its own merit"
-    result = harness.run_fingerprint_stage(_persona(sample2_completions=[only_one]))
+def test_only_required_starters_filled_passes_with_no_optional_completions():
+    completions = ["", "", "", ""]
+    completions[0] = "this single starter easily clears the required word floor on its own merit"
+    completions[3] = "and this fourth starter also clears the required word floor on its own"
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" not in result
     assert result["sample2_met_floor"] is True
-    assert result["sample2_word_count"] == len(only_one.split())
+    expected = len(completions[0].split()) + len(completions[3].split())
+    assert result["sample2_word_count"] == expected
     # Gate passed -> sample2 signal must be merged into the baseline,
     # same as app.py's unconditional merge once Continue is clickable.
     assert result["starter_baseline"] is not None
+    # Two register-distinct samples (screen 1 + both required starters
+    # scored separately) means stability is actually computable.
+    assert result["dimension_stability"]["sample_count"] == 3
 
 
 def test_all_four_starters_filled_combines_word_count():
-    completions = [
-        "this is the first required starter and it clears the floor easily",
-        "a second optional starter with a handful of words in it",
-        "a third optional one, also filled in for good measure here",
-        "and a fourth, rounding out the full set of four answers",
-    ]
-    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=_OK4))
     assert "error" not in result
-    expected_combined = sum(len(c.split()) for c in completions)
+    expected_combined = sum(len(c.split()) for c in _OK4)
     assert result["sample2_word_count"] == expected_combined
 
 
 def test_optional_starters_with_only_whitespace_excluded_from_combined_count():
-    completions = [
-        "this required starter alone clears the ten word floor by itself",
-        "   ",
-        "",
-        "\n\t",
-    ]
+    completions = list(_OK4)
+    completions[1] = "   "
+    completions[2] = "\n\t"
     result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" not in result
-    assert result["sample2_word_count"] == len(completions[0].split())
+    assert result["sample2_word_count"] == len(completions[0].split()) + len(completions[3].split())
 
 
 def test_second_starter_alone_does_not_satisfy_the_gate():
-    # Only completions[1] is filled - completions[0] is empty. The live
-    # app's Continue button stays disabled in this exact shape, since it
-    # only checks the first box.
+    # Only completions[1] is filled - completions[0] and [3], the
+    # required pair, are empty. The live app's Continue button stays
+    # disabled in this exact shape, since it checks both required boxes.
     result = harness.run_fingerprint_stage(_persona(sample2_completions=[
         "",
         "a full and proper answer to the second optional starter here",
+        "",
+        "",
     ]))
+    assert "error" in result
+
+
+def test_first_starter_alone_without_fourth_does_not_satisfy_the_gate():
+    completions = ["", "", "", ""]
+    completions[0] = "this single starter easily clears the required word floor on its own merit"
+    result = harness.run_fingerprint_stage(_persona(sample2_completions=completions))
     assert "error" in result
 
 
@@ -151,16 +190,17 @@ def test_second_starter_alone_does_not_satisfy_the_gate():
 # ---------------------------------------------------------------------------
 
 def test_run_persona_reports_error_status_when_gate_fails():
-    persona = _persona(sample2_completions=["too short"])
+    persona = _persona(sample2_completions=["too short", "", "", "too short"])
     result = harness.run_persona(persona, dry_run=True, api_key=None)
     assert result["status"] == "error"
     assert "error" in result["fingerprint_stage"]
 
 
 def test_run_persona_dry_run_completes_when_gate_passes():
-    persona = _persona(sample2_completions=[
-        "this required starter alone clears the ten word floor by itself"
-    ])
+    completions = ["", "", "", ""]
+    completions[0] = "this required starter alone clears the ten word floor by itself"
+    completions[3] = "and this fourth required starter also clears the ten word floor"
+    persona = _persona(sample2_completions=completions)
     result = harness.run_persona(persona, dry_run=True, api_key=None)
     assert result["status"] == "dry_run_complete"
 

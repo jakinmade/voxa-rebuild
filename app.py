@@ -7,7 +7,8 @@ Streamlit App
 Flow (per v4 frozen spec):
   Screen 1 — Paste your writing (no account, no friction)
   Screen 2 — Fingerprint reveal, as a checklist ("Your Voice")
-  Screen 3 — Four sentence starters, typed live, paste blocked
+  Screen 3 — Two required, register-contrasting sentence starters
+             (plus two optional), typed live, paste blocked
   Screen 4 — Paste AI text, rewrite it in your voice, get the Voice Report,
              one opportunity to refine
 
@@ -30,6 +31,7 @@ from voice_engine import (
     score_semantic_drift, compute_confidence, compute_risk,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells,
+    compute_dimension_stability,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -316,6 +318,12 @@ def screen_paste():
                 st.session_state.baseline_fingerprint = _merge_baseline(
                     st.session_state.get("baseline_fingerprint"), new_metrics
                 )
+                # Kept unmerged and separate from starter samples below -
+                # this is the register-distinct sample list stability is
+                # computed over. Reset here since Screen 1 can be re-pasted
+                # (Back button), and a stale Screen 3 sample from a
+                # previous pass shouldn't be compared against a new paste.
+                st.session_state.fingerprint_samples = [new_metrics]
 
                 fitness = _score_sample_fitness(text)
                 st.session_state.sample_fitness = fitness
@@ -465,9 +473,21 @@ def _build_starters(raw_text: str) -> list[str]:
     return starters
 
 
-# Word floor for the one required starter. Not the old 40-word combined
+# Word floor for each required starter. Not the old 40-word combined
 # floor across four boxes - see screen_sample2() for the gate logic.
 SAMPLE2_REQUIRED_MIN_WORDS = 10
+
+# Which two of the four starters are required, not optional. Chosen for
+# maximum register contrast, not just "first two": index 0 is a
+# professional, defensive-register scenario (replying to criticism of
+# your work); index 3 is an unfiltered, emotional-register scenario
+# (something getting under your skin). Research on register variation
+# says idiolect signal separates from register noise by comparing across
+# genuinely different registers, not by collecting more of the same one -
+# so the two required starters are picked to be as far apart on that axis
+# as the existing four scenarios allow. Indices 1 and 2 remain optional
+# enrichment in the "Deepen your fingerprint" expander.
+REQUIRED_STARTER_INDICES = (0, 3)
 
 
 def screen_sample2():
@@ -475,35 +495,38 @@ def screen_sample2():
 
     starters = _build_starters(st.session_state.get("raw_text", ""))
 
-    st.markdown('<div class="headline">One more sample.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">Two more samples.</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="sub">Finish this starter, typed live. This proves the sample is genuinely '
-        'yours right now, and strengthens your fingerprint. Don\'t think it through, don\'t edit - '
-        'first version only.</div>',
+        '<div class="sub">Finish both starters, typed live. Deliberately different situations - '
+        'that contrast is what lets us tell your real voice apart from just this one scenario. '
+        'Don\'t think it through, don\'t edit - first version only.</div>',
         unsafe_allow_html=True
     )
 
     completions = st.session_state.sample2_completions
+    required_word_counts = {}
 
-    st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starters[0]}</div>', unsafe_allow_html=True)
-    completions[0] = paste_guard(value=completions[0], key="starter_0")
-
-    required_words = len(completions[0].split())
-    st.markdown(
-        f'<div class="microcopy" style="text-align:left;margin-top:0.4rem;">'
-        f'{required_words} / {SAMPLE2_REQUIRED_MIN_WORDS} words</div>',
-        unsafe_allow_html=True
-    )
+    for idx in REQUIRED_STARTER_INDICES:
+        st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starters[idx]}</div>', unsafe_allow_html=True)
+        completions[idx] = paste_guard(value=completions[idx], key=f"starter_{idx}")
+        wc = len(completions[idx].split())
+        required_word_counts[idx] = wc
+        st.markdown(
+            f'<div class="microcopy" style="text-align:left;margin-top:0.4rem;">'
+            f'{wc} / {SAMPLE2_REQUIRED_MIN_WORDS} words</div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown("")
+    optional_indices = [i for i in range(len(starters)) if i not in REQUIRED_STARTER_INDICES]
     with st.expander("Deepen your fingerprint"):
         st.markdown(
             '<div class="sub" style="margin-bottom:0.8rem;">Optional. Each one you answer '
             'strengthens your fingerprint further.</div>',
             unsafe_allow_html=True
         )
-        for i, starter in enumerate(starters[1:], start=1):
-            st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starter}</div>', unsafe_allow_html=True)
+        for i in optional_indices:
+            st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starters[i]}</div>', unsafe_allow_html=True)
             completions[i] = paste_guard(value=completions[i], key=f"starter_{i}")
 
     st.session_state.sample2_completions = completions
@@ -515,10 +538,11 @@ def screen_sample2():
             st.rerun()
     with col2:
         if st.button("Continue \u2192", type="primary", use_container_width=True):
-            if required_words < SAMPLE2_REQUIRED_MIN_WORDS:
+            under_floor = [i for i in REQUIRED_STARTER_INDICES if required_word_counts[i] < SAMPLE2_REQUIRED_MIN_WORDS]
+            if under_floor:
                 st.error(
-                    f"A little more — at least {SAMPLE2_REQUIRED_MIN_WORDS} words "
-                    f"to continue, {required_words} so far."
+                    f"A little more on both — at least {SAMPLE2_REQUIRED_MIN_WORDS} words each "
+                    f"to continue."
                 )
             else:
                 combined = " ".join(c.strip() for c in completions if c.strip())
@@ -532,14 +556,35 @@ def screen_sample2():
                 existing.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
                 st.session_state.observations = existing[:5]
 
-                new_metrics = compute_baseline_metrics(combined)
-                # Keep this unmerged - the correction pass needs the
-                # starter-only baseline as a second, independent check,
-                # separate from the blended one used for Voice Match.
-                st.session_state.starter_baseline = new_metrics
-                st.session_state.baseline_fingerprint = _merge_baseline(
-                    st.session_state.get("baseline_fingerprint"), new_metrics
+                # Score each required starter SEPARATELY, not combined -
+                # combining them before measurement would throw away
+                # exactly the register contrast the two-starter
+                # requirement exists to capture. The combined text is
+                # still fine for _analyse_intro above, which reads
+                # narrative content, not the four numeric dimensions.
+                required_metrics = [
+                    compute_baseline_metrics(completions[i].strip())
+                    for i in REQUIRED_STARTER_INDICES
+                ]
+
+                # Starter-only baseline (both required starters combined)
+                # kept unmerged for the existing render-stage independent
+                # check - unchanged from before.
+                starter_combined = " ".join(
+                    completions[i].strip() for i in REQUIRED_STARTER_INDICES
                 )
+                starter_baseline = compute_baseline_metrics(starter_combined)
+                st.session_state.starter_baseline = starter_baseline
+
+                samples = st.session_state.get("fingerprint_samples", [])
+                samples.extend(required_metrics)
+                st.session_state.fingerprint_samples = samples
+                st.session_state.dimension_stability = compute_dimension_stability(samples)
+
+                for m in required_metrics:
+                    st.session_state.baseline_fingerprint = _merge_baseline(
+                        st.session_state.get("baseline_fingerprint"), m
+                    )
                 go_to(4)
                 st.rerun()
 
@@ -648,7 +693,8 @@ def _run_render(input_text: str):
                 ai_tells = score_ai_tells(clean)
 
             confidence = compute_confidence(
-                st.session_state.get("sample_fitness"), baseline, len(observations)
+                st.session_state.get("sample_fitness"), baseline, len(observations),
+                st.session_state.get("dimension_stability"),
             )
             risk = compute_risk(delta, semantic, ai_tells)
             st.session_state.render_delta = delta

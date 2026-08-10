@@ -10,9 +10,12 @@ call with real cost, and isn't worth automating into a test suite
 that may run repeatedly. Run that one manually, once, per change.
 """
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
+
+_APP_PATH = str(Path(__file__).resolve().parents[2] / "app.py")
 
 SAMPLE_TEXT = (
     "Sarah, I've been going back and forth on the Meridian contract all week and "
@@ -44,8 +47,58 @@ def _click(at, label_substr):
     return False
 
 
+def test_screen3_requires_both_contrasting_starters_via_ui():
+    """
+    Drives the actual live Screen 3 UI - fills starters, clicks Continue -
+    rather than force-setting session_state past it. Confirms the gate
+    genuinely blocks on one required starter missing and genuinely passes
+    with both filled, and that dimension_stability actually gets computed
+    from the live click path, not just the harness mirror.
+    """
+    at = AppTest.from_file(_APP_PATH)
+    at.run(timeout=15)
+
+    at.text_area[0].set_value(SAMPLE_TEXT)
+    at.button[0].click()
+    at.run(timeout=15)
+    assert at.session_state["screen"] == 2
+
+    assert _click(at, "Continue")
+    at.run(timeout=15)
+    assert at.session_state["screen"] == 3
+
+    # Only the first required starter (index 0) filled - second required
+    # starter (index 3) still empty. Continue must not advance the screen.
+    # paste_guard is a custom JS component AppTest can't drive through its
+    # widget API directly - set the value through session_state instead,
+    # which is what the component's return value flows into on each rerun.
+    completions = at.session_state["sample2_completions"]
+    completions[0] = "This completely misses what I actually asked for, and I need to say so plainly."
+    at.session_state["sample2_completions"] = completions
+    at.run(timeout=15)
+    assert _click(at, "Continue")
+    at.run(timeout=15)
+    assert at.session_state["screen"] == 3, "gate let the user through with only one required starter filled"
+
+    # Fill the second required starter (index 3) too - now Continue
+    # should genuinely advance.
+    completions = at.session_state["sample2_completions"]
+    completions[3] = "Honestly this has been bothering me all afternoon and I can't quite let it go."
+    at.session_state["sample2_completions"] = completions
+    at.run(timeout=15)
+    assert _click(at, "Continue")
+    at.run(timeout=15)
+    assert not at.exception
+    assert at.session_state["screen"] == 4
+
+    stability = at.session_state["dimension_stability"]
+    assert stability is not None
+    assert stability["sample_count"] == 3
+    assert at.session_state["starter_baseline"] is not None
+
+
 def test_paste_to_fingerprint_to_export_no_api_call():
-    at = AppTest.from_file("app.py")
+    at = AppTest.from_file(_APP_PATH)
     at.run()
     assert not at.exception
 
@@ -59,7 +112,7 @@ def test_paste_to_fingerprint_to_export_no_api_call():
 
     # Screen 2 -> 3
     assert _click(at, "Continue")
-    at.run()
+    at.run(timeout=15)
     assert not at.exception
     assert at.session_state["screen"] == 3
 

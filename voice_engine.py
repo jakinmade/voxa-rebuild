@@ -1358,11 +1358,115 @@ def score_semantic_drift(input_text: str, output_text: str) -> dict:
     }
 
 
-def compute_confidence(fitness: dict | None, baseline: dict | None, num_observations: int) -> str:
+_STABILITY_DIMENSIONS = (
+    "hedge_density", "sentence_length_sd", "first_person_ratio", "directive_ratio",
+)
+
+# Coefficient-of-variation threshold below which a dimension counts as
+# "stable" (consistent across registers -> likely genuine idiolect, not
+# a register artefact). Fixed and deterministic, same threshold for
+# every user - no per-persona tuning. 0.35 chosen as a first-pass value:
+# tight enough to catch a dimension that swings roughly proportional to
+# or beyond its own mean, loose enough that ordinary sample-to-sample
+# noise on short samples doesn't get everything flagged volatile.
+STABILITY_CV_THRESHOLD = 0.35
+
+
+def compute_dimension_stability(samples: list[dict]) -> dict:
+    """
+    Takes the per-sample baseline metrics for each register-distinct
+    sample collected (Screen 1 paste + the required contrasting
+    starters — NOT the blended/merged baseline) and reports, per
+    dimension, whether the value held steady across registers or
+    swung with them.
+
+    Why this exists: research on stylometry and idiolect (register
+    variation as the mechanism underlying most authorship-attribution
+    signal) says the only way to tell "this is genuinely how this
+    person writes" apart from "this is just what this scenario pulled
+    out of them" is to compare the same measurement across
+    deliberately different registers. A single blended average
+    (_merge_baseline) can't make that distinction — it was never given
+    more than one register's worth of independent data at once. This
+    function is that missing comparison. It doesn't replace
+    _merge_baseline (still needed as the single target number for
+    render-matching); it's a second, independent read that says how
+    much to trust each dimension of that number.
+
+    Deterministic and rule-based only, per the standing architecture
+    constraint - no model call, no randomness, same samples always
+    produce the same verdict.
+
+    Requires at least 2 samples to say anything about stability (one
+    sample has no variation to measure). With exactly 1 sample,
+    every dimension is reported "insufficient_data" rather than
+    guessed at.
+    """
+    if not samples:
+        return {"dimensions": {}, "stable_count": 0, "volatile_count": 0, "sample_count": 0}
+
+    if len(samples) < 2:
+        return {
+            "dimensions": {d: "insufficient_data" for d in _STABILITY_DIMENSIONS},
+            "stable_count": 0,
+            "volatile_count": 0,
+            "sample_count": len(samples),
+        }
+
+    dimensions = {}
+    stable_count = 0
+    volatile_count = 0
+
+    for dim in _STABILITY_DIMENSIONS:
+        values = [s.get(dim, 0.0) for s in samples]
+        n = len(values)
+        mean = sum(values) / n
+        variance = sum((v - mean) ** 2 for v in values) / n
+        stdev = math.sqrt(variance)
+
+        if mean == 0:
+            # No baseline to compare against (e.g. zero hedge words in
+            # every sample). Absence of the feature everywhere is
+            # itself a consistent signal, not missing data.
+            label = "stable" if stdev == 0 else "volatile"
+        else:
+            cv = stdev / abs(mean)
+            label = "stable" if cv <= STABILITY_CV_THRESHOLD else "volatile"
+
+        dimensions[dim] = label
+        if label == "stable":
+            stable_count += 1
+        elif label == "volatile":
+            volatile_count += 1
+
+    return {
+        "dimensions": dimensions,
+        "stable_count": stable_count,
+        "volatile_count": volatile_count,
+        "sample_count": len(samples),
+    }
+
+
+def compute_confidence(
+    fitness: dict | None,
+    baseline: dict | None,
+    num_observations: int,
+    stability: dict | None = None,
+) -> str:
     """
     How much to trust the Voice Match / Semantic Match numbers themselves.
     Built entirely from signal already computed elsewhere — not a new
     measurement, a read on the ones that already exist.
+
+    stability (from compute_dimension_stability) is now part of that
+    read. Word count and fitness tier say whether there's enough
+    writing to measure. Stability says whether what was measured is
+    actually the person's voice or just what one register happened to
+    pull out of them - a wordy, gold-tier sample that's register-driven
+    on most dimensions is not more trustworthy than the badge implies,
+    it's differently untrustworthy. High confidence now requires both:
+    plenty of good material AND most dimensions holding steady across
+    the register-distinct samples that were collected.
     """
     if not baseline:
         return "Low"
@@ -1370,9 +1474,27 @@ def compute_confidence(fitness: dict | None, baseline: dict | None, num_observat
     wc = baseline.get("word_count", 0)
     tier = (fitness or {}).get("tier", "thin")
 
-    if wc >= 800 and tier in ("gold", "strong") and num_observations >= 4:
+    # No stability data (e.g. called before Screen 3, or on an older
+    # single-sample flow) - fall back to the word-count/tier read alone
+    # rather than penalising for data that was never collected.
+    if not stability or stability.get("sample_count", 0) < 2:
+        if wc >= 800 and tier in ("gold", "strong") and num_observations >= 4:
+            return "High"
+        if wc >= 250 and tier in ("gold", "strong", "thin"):
+            return "Medium"
+        return "Low"
+
+    stable = stability.get("stable_count", 0)
+    volatile = stability.get("volatile_count", 0)
+    total = stable + volatile
+    stable_ratio = (stable / total) if total else 0.0
+
+    if (
+        wc >= 800 and tier in ("gold", "strong") and num_observations >= 4
+        and stable_ratio >= 0.75
+    ):
         return "High"
-    if wc >= 250 and tier in ("gold", "strong", "thin"):
+    if wc >= 250 and tier in ("gold", "strong", "thin") and stable_ratio >= 0.5:
         return "Medium"
     return "Low"
 
