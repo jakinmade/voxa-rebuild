@@ -1,0 +1,20 @@
+{
+  "participant_id": "p01",
+  "_instructions": "Copy this file, rename to the participant's id, fill in real text, delete this _instructions key. See PROTOCOL.md for how to collect each field and stimuli.md for the exact Condition C prompts.",
+
+  "condition_a_text": "PASTE 150-250 WORDS of the participant's own existing writing here (an email, a Slack message, a doc excerpt — whatever they have to hand). This is Condition A: onboarding via an open writing sample, no prompts.",
+
+  "condition_b_completions": [
+    "REQUIRED (index 0) - participant's completion of the current live product's first scenario starter, professional/defensive register, >=10 words.",
+    "OPTIONAL (index 1) - enrichment, leave empty string if unused.",
+    "OPTIONAL (index 2) - enrichment, leave empty string if unused.",
+    "REQUIRED (index 3) - participant's completion of the current live product's second scenario starter, unfiltered/emotional register, >=10 words."
+  ],
+
+  "condition_c_completions": [
+    "REQUIRED (index 0) - participant's natural reply to Stimulus 1 in stimuli.md (professional/defensive), >=10 words.",
+    "REQUIRED (index 1) - participant's natural reply to Stimulus 2 in stimuli.md (unfiltered/reactive), >=10 words."
+  ],
+
+  "render_input": "The AI-ish text to rewrite for this participant. Same text run through all three conditions so the comparison is fair. Can reuse one render_input across all participants, or vary it — just keep it constant WITHIN a participant's three conditions."
+}

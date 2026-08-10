@@ -1,0 +1,5 @@
+# Real participant writing samples are personal/work content — never commit.
+# Per PROTOCOL.md: keep local or in a private store.
+participants/*.json
+!participants/TEMPLATE.json
+results/
