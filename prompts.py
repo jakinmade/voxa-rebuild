@@ -613,6 +613,145 @@ def _split_dashes_deterministic(text: str) -> str:
     return output
 
 
+_ABSOLUTE_CLAIM_PATTERN = re.compile(
+    r"\b(unmatched|unparalleled|unrivalled|unrivaled|incomparable|second to none|"
+    r"without equal|beyond compare|guaranteed|the best|the greatest|"
+    r"nothing (?:compares|rivals)|hard to match|difficult to match|"
+    r"always|never|only)\b",
+    re.I,
+)
+_HEDGE_WORD_PATTERN = re.compile(
+    r"\b(might|could|perhaps|possibly|maybe|potentially|somewhat|quite|rather)\b",
+    re.I,
+)
+_TRAILING_QUALIFIER_PATTERN = re.compile(
+    r",\s*(?:though|although)\b(?:(?!\.|!|\?).)*?\b"
+    r"(?:might|could|perhaps|possibly|maybe|potentially|somewhat|quite|rather)\b[^.!?]*",
+    re.I,
+)
+
+
+def _strip_hedges_from_absolute_claims(text: str) -> str:
+    """
+    Business-rule guardrail, not a model instruction. A hedge word landing
+    in the same sentence as an absolute/superlative claim doesn't soften
+    tone, it changes the claim - "unmatched" and "might be hard to match,
+    though it could vary" are different statements. This was already an
+    explicit instruction in both the initial prompt and the correction
+    pass (RESTORATION TARGETS, build_correction_prompt) - live testing
+    showed the model doesn't reliably follow it. Prompt compliance isn't
+    a guardrail. This is the hard version: scans the actual output text,
+    no model judgement involved, same input always same output, matching
+    every other rule in this sweep.
+
+    Known limitation, stated plainly rather than glossed over: this only
+    catches absolute claims that survive as recognisable words/phrases in
+    the output, including two paraphrases we've actually observed in
+    testing ("hard to match", "difficult to match" for "unmatched"). A
+    claim paraphrased into wording outside that list won't be caught -
+    it's a lexical guardrail against known patterns, not a meaning
+    detector. Expand the list as new paraphrase patterns turn up in
+    testing rather than trying to anticipate all of them up front.
+    """
+    parts = re.split(r'(?<=[.!?])(\s+)', text)
+
+    for i in range(0, len(parts), 2):
+        sentence = parts[i]
+        if not sentence or not _ABSOLUTE_CLAIM_PATTERN.search(sentence):
+            continue
+
+        fixed = sentence
+
+        # Trailing ", though/although ... [hedge word] ..." clauses
+        # undermine the claim structurally - strip the whole clause, not
+        # just the hedge word inside it, since removing only the word
+        # would leave a dangling qualifier with nothing hedged in it.
+        fixed = _TRAILING_QUALIFIER_PATTERN.sub('.', fixed)
+        fixed = re.sub(r'\.{2,}', '.', fixed)
+
+        if _HEDGE_WORD_PATTERN.search(fixed):
+            # Pure adverb hedges - safe to delete outright, no verb
+            # conjugation involved.
+            fixed = re.sub(
+                r'\b(perhaps|possibly|maybe|potentially|somewhat|quite|rather)\s+',
+                '', fixed, flags=re.I,
+            )
+            # Modal + be/have - safe, fixed auxiliary swap.
+            fixed = re.sub(r'\bmight be\b', 'is', fixed, flags=re.I)
+            fixed = re.sub(r'\bcould be\b', 'is', fixed, flags=re.I)
+            fixed = re.sub(r'\bmight have\b', 'has', fixed, flags=re.I)
+            fixed = re.sub(r'\bcould have\b', 'has', fixed, flags=re.I)
+
+            # Modal + bare verb - strip the modal, conjugate what's left.
+            # Checks the word before the modal for a plural signal first
+            # (see _looks_plural_subject) - reduces subject-verb
+            # disagreement but doesn't eliminate it for edge cases
+            # (irregular plurals, "crisis"-style false positives).
+            # Accepting the remaining risk over leaving a claim-changing
+            # hedge in place - the trade this whole guardrail is built on.
+            def _modal_verb_repl(m):
+                verb = m.group(1)
+                if verb.lower() in ('be', 'have'):
+                    return m.group(0)
+                if _looks_plural_subject(fixed[:m.start()]):
+                    return verb
+                return _conjugate_verb(m)
+
+            fixed = re.sub(
+                r'\b(?:might|could)\s+(\w+)\b',
+                _modal_verb_repl,
+                fixed, flags=re.I,
+            )
+
+        fixed = re.sub(r'\s{2,}', ' ', fixed)
+        fixed = re.sub(r'\s+([,.!?])', r'\1', fixed)
+        parts[i] = fixed
+
+    return ''.join(parts)
+
+
+_PLURAL_SUBJECT_MARKERS = {
+    "they", "we", "you", "these", "those", "some", "many", "several",
+    "both", "few", "others",
+}
+_RELATIVE_PRONOUNS = {"that", "which", "who"}
+
+
+def _looks_plural_subject(preceding_text: str) -> bool:
+    """
+    Crude plural-subject check used only to decide verb conjugation when
+    stripping a modal (see _strip_hedges_from_absolute_claims). Looks at
+    the word immediately before the modal - and if that word is a
+    relative pronoun (that/which/who), steps back one more word to the
+    actual antecedent ("crowds that could generate" needs to check
+    "crowds", not "that"). Not a parser - a cheap signal to avoid the
+    most common subject-verb disagreement. Known to be imperfect (e.g.
+    "crisis", "focus" end in s but are singular; irregular plurals like
+    "people" won't be caught) - reduces the conjugation error rate,
+    doesn't eliminate it.
+    """
+    words = preceding_text.strip().split()
+    if not words:
+        return False
+    last = words[-1].lower().strip(",.;:\"'")
+    if last in _RELATIVE_PRONOUNS and len(words) >= 2:
+        last = words[-2].lower().strip(",.;:\"'")
+    if last in _PLURAL_SUBJECT_MARKERS:
+        return True
+    if last.endswith("s") and not last.endswith(("ss", "us", "is", "os")):
+        return True
+    return False
+
+
+def _conjugate_verb(m):
+    verb = m.group(1)
+    if re.search(r'(s|x|z|ch|sh)$', verb, re.I):
+        return verb + 'es'
+    if re.search(r'[^aeiou]y$', verb, re.I):
+        return verb[:-1] + 'ies'
+    return verb + 's'
+
+
 def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     """
     Deterministic guardrail sweep — runs on every render output.
@@ -632,7 +771,10 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     4. Claude default constructions replaced
     5. Repeated words
     6. Double spaces
-    7. [removed] Missing article fix — see note at that step below;
+    7. Hedges stripped from sentences carrying an absolute/superlative
+       claim (see _strip_hedges_from_absolute_claims) - a business-rule
+       guardrail, not a prompt instruction the model might skip.
+    8. [removed] Missing article fix — see note at that step below;
        blacklist heuristic broke correct text, removed rather than patched.
     """
     import re
@@ -852,6 +994,11 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     # word at the front of a sentence or the whole string. Safety net, not
     # tied to any one pattern.
     text = re.sub(r'(^|[.!?]\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), text)
+
+    # 11. Strip hedges from sentences carrying an absolute/superlative claim.
+    # Business-rule guardrail, not a prompt instruction - see
+    # _strip_hedges_from_absolute_claims for why this had to move here.
+    text = _strip_hedges_from_absolute_claims(text)
 
     return text
 def _grammar_fix_pass(text: str, client) -> str:
