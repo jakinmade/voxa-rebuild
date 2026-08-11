@@ -229,10 +229,14 @@ def _build_restoration_targets(baseline: dict) -> str:
         "RESTORATION TARGETS — from your baseline writing:",
         f"  Hedge density: {hedge:.1f}% per 100 words — match this rate, do not go lower",
         f"  Sentence rhythm: SD {sd:.1f} words — mix sentence lengths, do not flatten to uniform short",
-        f"  Ownership: {fp:.0%} of sentences use first-person — own YOUR OWN statements and "
-        f"claims at this rate. Never reassign credit for a point, idea, or argument that belongs "
-        f"to someone else in the conversation (e.g. do not turn \"your point\" into \"my point\") — "
-        f"this is a meaning change, not a voice adjustment.",
+        f"  Ownership: {fp:.0%} of sentences use first-person — where the input ALREADY contains "
+        f"a claim, observation, or opinion of yours (stated directly, hedged, or in passive voice), "
+        f"phrase it as first-person ownership at this rate. Do NOT use this target to add opinion, "
+        f"stance, or claims to input that is purely factual or third-party reporting with nothing "
+        f"of yours to own — that is manufacturing a claim, which breaks rule 8 above regardless of "
+        f"ratio. Never reassign credit for a point, idea, or argument that belongs to someone else "
+        f"in the conversation (e.g. do not turn \"your point\" into \"my point\") — this is a "
+        f"meaning change, not a voice adjustment.",
     ]
 
     # Only include directive target if signal is meaningful
@@ -453,12 +457,93 @@ def _apply_uk_english(text: str) -> str:
     text = _re_like.sub(r"\b(issues|problems|areas|things|factors|topics)\s+like\b",
                         lambda m: m.group(1) + " such as", text)
     return text
+
+
+# Dash removal must not just swap punctuation - " - " reads as its own AI
+# tell (see score_ai_tells' spaced-hyphen check). Deterministic, no model
+# in the loop: for each dash, look at the clause on either side. If both
+# read as full independent clauses (4+ words, and the clause after doesn't
+# open on a dependent word like "which"/"because"), split into two proper
+# sentences. Otherwise join with a comma. Heuristic, not perfect - but it's
+# the same input/same output guarantee as everything else in this sweep,
+# and it never reproduces the tell it's meant to remove.
+_DASH_VARIANTS_PATTERN = re.compile(
+    r"&#8212;|&#8211;|[\u2010\u2012\u2013\u2014\u2015—–‒]"
+)
+_DASH_DEPENDENT_STARTERS = {
+    "and", "but", "or", "which", "who", "whose", "that", "because",
+    "since", "while", "although", "though", "yet", "so", "if", "when",
+    "where", "as", "unless", "until",
+}
+
+
+def _split_dashes_deterministic(text: str) -> str:
+    matches = list(_DASH_VARIANTS_PATTERN.finditer(text))
+    if not matches:
+        return text
+
+    result = []
+    last_end = 0
+    capitalize_next = False
+
+    for m in matches:
+        start, end = m.start(), m.end()
+        segment = text[last_end:start].rstrip()
+        if capitalize_next and segment:
+            segment = segment[0].upper() + segment[1:]
+        result.append(segment)
+        capitalize_next = False
+
+        global_before = text[:start].rstrip()
+        prev_boundary = max(
+            global_before.rfind("."), global_before.rfind("!"), global_before.rfind("?")
+        )
+        clause_before = global_before[prev_boundary + 1:].strip()
+
+        global_after = text[end:].lstrip()
+        next_boundary_match = re.search(r"[.!?]", global_after)
+        clause_after = global_after[:next_boundary_match.start()] if next_boundary_match else global_after
+
+        words_before = clause_before.split()
+        words_after = clause_after.split()
+        first_word_after = words_after[0].lower().strip(",\"'") if words_after else ""
+
+        independent = (
+            len(words_before) >= 4
+            and len(words_after) >= 4
+            and first_word_after not in _DASH_DEPENDENT_STARTERS
+        )
+
+        if independent:
+            result.append(". ")
+            capitalize_next = True
+        else:
+            result.append(", ")
+        last_end = end
+
+    tail = text[last_end:]
+    if capitalize_next:
+        tail = tail.lstrip()
+        if tail:
+            tail = tail[0].upper() + tail[1:]
+    result.append(tail)
+
+    output = "".join(result)
+    output = re.sub(r" +", " ", output)
+    output = re.sub(r" ([,.!?])", r"\1", output)
+    output = re.sub(r",\s*,", ",", output)
+    return output
+
+
 def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     """
     Deterministic guardrail sweep — runs on every render output.
     No API call. No Claude involvement. Code enforces these rules.
 
-    1. Em dashes — all unicode variants replaced with hyphen
+    1. Em dashes — split into two sentences or joined with a comma,
+       whichever the surrounding clauses support (see
+       _split_dashes_deterministic). Never a spaced hyphen — that is
+       just as much an AI tell as the em dash it replaced.
     2. Contractions expanded to full form — ONLY if the user's own baseline
        doesn't use them. This used to be unconditional (hardcoded to one
        person's writing convention). Fixed: contractions are a real voice
@@ -474,11 +559,11 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     """
     import re
 
-    # 1. Em dashes — all variants
-    for dash in ["\u2014", "\u2013", "&#8212;", "&#8211;", "\u2012", "\u2015", "—", "–", "‒"]:
-        text = text.replace(dash, " - ")
-    # Belt and braces — regex sweep for any remaining dash variants
-    text = re.sub(r"[\u2012\u2013\u2014\u2015]", " - ", text)
+    # 1. Em dashes — split or join, never a spaced-hyphen substitute
+    text = _split_dashes_deterministic(text)
+    # Belt and braces — any remaining dash variant the splitter missed
+    # falls back to a comma join, not " - " (that reintroduces the tell).
+    text = re.sub(r"[\u2012\u2013\u2014\u2015]\s*", ", ", text)
     text = re.sub(r'  +', ' ', text)
 
     # 2. Contractions — only expanded if the user's own baseline doesn't use them
@@ -802,9 +887,12 @@ def build_correction_prompt(delta: dict, semantic: dict | None = None) -> str | 
                 correction_instructions.append(
                     f"Ownership is too low ({o_val:.0%} first-person, target {b_val:.0%}). "
                     f"Replace passive or third-person constructions with direct first-person "
-                    f"statements — but ONLY for the writer's own claims and reactions. Never "
-                    f"reassign credit for a point, idea, or argument that belongs to someone else "
-                    f"in the conversation (e.g. do not turn 'your point' into 'my point').")
+                    f"statements — but ONLY for the writer's own claims and reactions that are "
+                    f"already present in the input. If the input has no claims, opinions, or "
+                    f"reactions of the writer's own to convert (e.g. it is factual or third-party "
+                    f"reporting), leave the ratio short — do not manufacture a claim just to hit "
+                    f"the target. Never reassign credit for a point, idea, or argument that belongs "
+                    f"to someone else in the conversation (e.g. do not turn 'your point' into 'my point').")
         elif key == "directive_ratio" and b_val >= 0.06:
             if o_val < b_val:
                 correction_instructions.append(

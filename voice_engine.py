@@ -1817,6 +1817,20 @@ _FRAGMENT_EMPHASIS_PATTERN = re.compile(
     re.I
 )
 
+# Spaced-hyphen dash substitute: _regex_sweep (prompts.py) converts every
+# em/en dash to " - " as its fix, but the em-dash check below only looks
+# for the literal unicode dash characters that substitution just removed.
+# Result: the sweep launders the tell into a form its own detector can't
+# see, and "clean" stops meaning "no dash-smell" and starts meaning "no
+# *unconverted* dash." Found via John's Premier League rewrite test —
+# "drama - the league runs" scored clean.
+#
+# Matches a hyphen with a space on both sides, i.e. used as a standalone
+# connective, not a hyphenated compound ("well-known", no spaces) and not
+# a number range ("10-15", no spaces) and not a line-leading list bullet
+# ("- item", no preceding non-space char for the lookbehind to anchor on).
+_SPACED_HYPHEN_DASH_PATTERN = re.compile(r"(?<=\S)\s-\s(?=\S)")
+
 
 def _classify_register(text: str) -> str:
     """
@@ -1897,6 +1911,7 @@ def score_ai_tells(text: str) -> dict:
     working without modification.
     """
     em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
+    spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = list(_AI_TELL_PHRASES.findall(text))
 
     register = _classify_register(text)
@@ -1910,15 +1925,21 @@ def score_ai_tells(text: str) -> dict:
     flagged = []
     if em_dash_hits:
         flagged.append(f"{em_dash_hits} em dash(es) survived the sweep")
+    if spaced_hyphen_hits:
+        flagged.append(
+            f"{spaced_hyphen_hits} spaced hyphen(s) used as a dash substitute "
+            f"(the sweep converts em dashes to ' - ' — that's still the tell)"
+        )
     if all_hits:
         unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in all_hits))
         flagged.append(f"AI-typical phrasing found: {', '.join(unique_phrases[:5])}")
 
-    clean = em_dash_hits == 0 and len(all_hits) == 0
+    clean = em_dash_hits == 0 and spaced_hyphen_hits == 0 and len(all_hits) == 0
 
     return {
         "clean": clean,
         "em_dash_count": em_dash_hits,
+        "spaced_hyphen_count": spaced_hyphen_hits,
         "phrase_hit_count": len(all_hits),
         "flagged": flagged,
         "register": register,
