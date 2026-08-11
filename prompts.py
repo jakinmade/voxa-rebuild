@@ -22,6 +22,7 @@ from voice_engine import (
     _extract_function_patterns,
     _format_function_patterns,
     _classify_register,
+    compute_baseline_metrics,
 )
 
 def _detect_mode(text: str) -> str:
@@ -206,7 +207,7 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
             lines.append(pattern_block)
 
     return "\n".join(lines)
-def _build_restoration_targets(baseline: dict) -> str:
+def _build_restoration_targets(baseline: dict, input_has_opinion_content: bool = True) -> str:
     """
     Formats the RESTORATION TARGETS block from the baseline fingerprint.
     Only included when baseline exists and input is AI-contaminated.
@@ -215,6 +216,16 @@ def _build_restoration_targets(baseline: dict) -> str:
     - Hedge density floor: 0.5% minimum (section 6.2)
     - Directive ratio: omitted if baseline < 3 directives equivalent (section 6.5)
     - First-person ratio: soft target only (section 6.4)
+
+    input_has_opinion_content: whether THIS input (not the user's baseline
+    corpus) has any first-person/opinion content of its own to convert.
+    A caveat on the Ownership line alone wasn't enough - tested against
+    a third-party informational rewrite, the model still followed the
+    numeric target over the caveat and invented opinion ("I think that
+    atmosphere might be the hardest thing to replicate") that wasn't in
+    the source. When False, the Ownership line is dropped from the
+    prompt entirely rather than softened, so there's no percentage
+    target competing with the "don't invent claims" instruction.
     """
     hedge = max(baseline["hedge_density"], 0.5)
     sd = baseline["sentence_length_sd"]
@@ -229,15 +240,23 @@ def _build_restoration_targets(baseline: dict) -> str:
         "RESTORATION TARGETS — from your baseline writing:",
         f"  Hedge density: {hedge:.1f}% per 100 words — match this rate, do not go lower",
         f"  Sentence rhythm: SD {sd:.1f} words — mix sentence lengths, do not flatten to uniform short",
-        f"  Ownership: {fp:.0%} of sentences use first-person — where the input ALREADY contains "
-        f"a claim, observation, or opinion of yours (stated directly, hedged, or in passive voice), "
-        f"phrase it as first-person ownership at this rate. Do NOT use this target to add opinion, "
-        f"stance, or claims to input that is purely factual or third-party reporting with nothing "
-        f"of yours to own — that is manufacturing a claim, which breaks rule 8 above regardless of "
-        f"ratio. Never reassign credit for a point, idea, or argument that belongs to someone else "
-        f"in the conversation (e.g. do not turn \"your point\" into \"my point\") — this is a "
-        f"meaning change, not a voice adjustment.",
     ]
+
+    if input_has_opinion_content:
+        lines.append(
+            f"  Ownership: {fp:.0%} of sentences use first-person — where the input ALREADY "
+            f"contains a claim, observation, or opinion of yours (stated directly, hedged, or in "
+            f"passive voice), phrase it as first-person ownership at this rate. Never reassign "
+            f"credit for a point, idea, or argument that belongs to someone else in the "
+            f"conversation (e.g. do not turn \"your point\" into \"my point\") — this is a meaning "
+            f"change, not a voice adjustment."
+        )
+    else:
+        lines.append(
+            "  Ownership: this input has no first-person claims, opinions, or reactions of the "
+            "writer's own — it is factual or third-party reporting. Do not add any. No 'I think', "
+            "no personal stance, no opinion not present in the source. Leave attribution as-is."
+        )
 
     # Only include directive target if signal is meaningful
     # Threshold: ~3 directives in a 500-word sample ≈ 0.06 ratio
@@ -262,16 +281,26 @@ def _build_system_prompt(
     word_count_input: int,
     ai_score: float,
     baseline: dict | None = None,
+    input_text: str = "",
 ) -> str:
     """
     Builds the full system prompt.
     Two paths: AI-contaminated input vs clean human input.
     Both use the same voice DNA. The AI path adds aggressive stripping instructions.
+
+    input_text: the actual text being rewritten this render (not the user's
+    baseline corpus). Used to check whether THIS input has any first-person
+    content of its own before the Ownership restoration target is included -
+    see _build_restoration_targets. Optional/backward-compatible: if omitted,
+    defaults to permissive (target included) rather than silently changing
+    behaviour for any caller not yet passing it.
     """
 
     base_rules = (
         "ABSOLUTE RULES — never break these:\n"
-        "1. No em dashes. Replace every — or – with a hyphen or rewrite the sentence.\n"
+        "1. No em dashes. Rewrite the sentence without one — split it into two sentences or "
+        "join with a comma. Do not substitute a hyphen or spaced hyphen for a dash; that reads "
+        "as the same tell.\n"
         "2. No verbose openers: no 'it is important to note', no 'in today's landscape', "
         "no 'it goes without saying', no 'with that in mind', no 'to that end'.\n"
         "3. No filler transitions: no 'furthermore', no 'moreover', no 'in conclusion', "
@@ -290,8 +319,12 @@ def _build_system_prompt(
 
     if ai_score >= 0.25:
         # AI-contaminated path — stripping + restoration
+        input_has_opinion_content = True
+        if input_text:
+            input_metrics = compute_baseline_metrics(input_text)
+            input_has_opinion_content = input_metrics["first_person_ratio"] > 0
         restoration_block = (
-            f"\n\n{_build_restoration_targets(baseline)}"
+            f"\n\n{_build_restoration_targets(baseline, input_has_opinion_content)}"
             if baseline else ""
         )
         # Register instruction — match the source register, not an elevated version
@@ -849,12 +882,21 @@ def merge_starter_evidence(blended_delta: dict, starter_delta: dict | None) -> d
     return merged
 
 
-def build_correction_prompt(delta: dict, semantic: dict | None = None) -> str | None:
+def build_correction_prompt(
+    delta: dict, semantic: dict | None = None, input_has_opinion_content: bool = True
+) -> str | None:
     """
     Builds the targeted, surgical correction prompt for whatever the
     initial render missed — voice dimensions (proven logic, unchanged)
     and, new in v4, dropped entities/facts caught by score_semantic_drift.
     Returns None if nothing needs correcting.
+
+    input_has_opinion_content: same signal as _build_restoration_targets -
+    whether the input being rewritten has any first-person content of its
+    own to convert. When False, the first_person_ratio correction is
+    skipped outright rather than instructed-with-a-caveat: a caveat next
+    to a numeric target still lost to the target in testing (see the
+    Ownership fix in this same commit's history).
     """
     correction_instructions = []
 
@@ -883,16 +925,18 @@ def build_correction_prompt(delta: dict, semantic: dict | None = None) -> str | 
                     f"Sentence rhythm is too varied (SD {o_val:.1f}, target {b_val:.1f}). "
                     f"Bring the lengths closer together. More consistent pacing.")
         elif key == "first_person_ratio":
-            if o_val < b_val:
+            if o_val < b_val and input_has_opinion_content:
                 correction_instructions.append(
                     f"Ownership is too low ({o_val:.0%} first-person, target {b_val:.0%}). "
                     f"Replace passive or third-person constructions with direct first-person "
                     f"statements — but ONLY for the writer's own claims and reactions that are "
-                    f"already present in the input. If the input has no claims, opinions, or "
-                    f"reactions of the writer's own to convert (e.g. it is factual or third-party "
-                    f"reporting), leave the ratio short — do not manufacture a claim just to hit "
-                    f"the target. Never reassign credit for a point, idea, or argument that belongs "
-                    f"to someone else in the conversation (e.g. do not turn 'your point' into 'my point').")
+                    f"already present in the input. Never reassign credit for a point, idea, or "
+                    f"argument that belongs to someone else in the conversation (e.g. do not turn "
+                    f"'your point' into 'my point').")
+            # else: input has nothing of the writer's own to convert (or
+            # this is a factual/third-party rewrite) - skip the correction
+            # entirely rather than nudge with a caveat that can lose to
+            # the numeric target.
         elif key == "directive_ratio" and b_val >= 0.06:
             if o_val < b_val:
                 correction_instructions.append(

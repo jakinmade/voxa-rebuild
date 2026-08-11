@@ -677,9 +677,17 @@ def _run_render(input_text: str):
     # doesn't have them either.
     keep_contractions = uses_contractions(fingerprint_corpus) if fingerprint_corpus else False
 
+    # Same signal used to gate the Ownership restoration target and its
+    # correction-pass counterpart: does THIS input (not the user's
+    # baseline corpus) have any first-person content of its own to
+    # convert? Computed once, reused at both gates so they can't drift
+    # apart on the same render.
+    input_has_opinion_content = compute_baseline_metrics(input_text)["first_person_ratio"] > 0
+
     system = _build_system_prompt(
         voice_dna=voice_dna, mode_instruction=mode_instruction,
         word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
+        input_text=input_text,
     )
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -708,7 +716,9 @@ def _run_render(input_text: str):
             starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
             correction_delta = merge_starter_evidence(delta, starter_delta)
 
-            correction_prompt = build_correction_prompt(correction_delta, semantic)
+            correction_prompt = build_correction_prompt(
+                correction_delta, semantic, input_has_opinion_content
+            )
             if correction_prompt:
                 try:
                     correction_response = client.messages.create(
