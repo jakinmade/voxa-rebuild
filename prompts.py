@@ -207,7 +207,11 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
             lines.append(pattern_block)
 
     return "\n".join(lines)
-def _build_restoration_targets(baseline: dict, input_has_opinion_content: bool = True) -> str:
+def _build_restoration_targets(
+    baseline: dict,
+    input_has_opinion_content: bool = True,
+    input_has_directive_content: bool = True,
+) -> str:
     """
     Formats the RESTORATION TARGETS block from the baseline fingerprint.
     Only included when baseline exists and input is AI-contaminated.
@@ -226,6 +230,14 @@ def _build_restoration_targets(baseline: dict, input_has_opinion_content: bool =
     the source. When False, the Ownership line is dropped from the
     prompt entirely rather than softened, so there's no percentage
     target competing with the "don't invent claims" instruction.
+
+    input_has_directive_content: same shape of check for directness. The
+    old floor only asked whether the WRITER'S baseline uses enough
+    imperatives to be worth matching - it never asked whether THIS input
+    has anything actionable to convert. Live-tested: a purely descriptive
+    input got a fabricated call to action ("Watch a few matches...") to
+    hit the directive ratio. When False, the target is dropped the same
+    way Ownership is.
     """
     hedge = max(baseline["hedge_density"], 0.5)
     sd = baseline["sentence_length_sd"]
@@ -238,7 +250,12 @@ def _build_restoration_targets(baseline: dict, input_has_opinion_content: bool =
 
     lines = [
         "RESTORATION TARGETS — from your baseline writing:",
-        f"  Hedge density: {hedge:.1f}% per 100 words — match this rate, do not go lower",
+        f"  Hedge density: {hedge:.1f}% per 100 words — match this rate, do not go lower. "
+        f"Exception: never add hedging to a sentence carrying an absolute or superlative claim "
+        f"(e.g. 'unmatched', 'the best', 'guaranteed', 'always', 'never', 'only', 'unparalleled'). "
+        f"Hedging a claim like that doesn't soften the tone, it changes what's being claimed - "
+        f"'unmatched' and 'hard to match, though it might vary' are different statements. Add "
+        f"hedges elsewhere in the piece to hit the rate instead.",
         f"  Sentence rhythm: SD {sd:.1f} words — mix sentence lengths, do not flatten to uniform short",
     ]
 
@@ -258,11 +275,21 @@ def _build_restoration_targets(baseline: dict, input_has_opinion_content: bool =
             "no personal stance, no opinion not present in the source. Leave attribution as-is."
         )
 
-    # Only include directive target if signal is meaningful
+    # Only include directive target if the baseline signal is meaningful
+    # AND the input actually has something actionable to convert.
     # Threshold: ~3 directives in a 500-word sample ≈ 0.06 ratio
-    if directive >= 0.06:
+    if directive >= 0.06 and input_has_directive_content:
         lines.append(
-            f"  Directness: {directive:.0%} of sentences are action statements — match this proportion"
+            f"  Directness: {directive:.0%} of sentences are action statements — where the input "
+            f"already implies a suggestion, recommendation, or action, phrase it directly at this "
+            f"rate. Do not invent a new suggestion or call to action that is not in the input just "
+            f"to hit the ratio - that is adding content, not restoring voice."
+        )
+    elif directive >= 0.06 and not input_has_directive_content:
+        lines.append(
+            "  Directness: this input is purely descriptive - it has no suggestions, "
+            "recommendations, or actionable content of its own. Do not invent any to hit your "
+            "usual directive rate. Leave it descriptive."
         )
     else:
         lines.append(
@@ -320,11 +347,13 @@ def _build_system_prompt(
     if ai_score >= 0.25:
         # AI-contaminated path — stripping + restoration
         input_has_opinion_content = True
+        input_has_directive_content = True
         if input_text:
             input_metrics = compute_baseline_metrics(input_text)
             input_has_opinion_content = input_metrics["first_person_ratio"] > 0
+            input_has_directive_content = input_metrics["directive_ratio"] > 0
         restoration_block = (
-            f"\n\n{_build_restoration_targets(baseline, input_has_opinion_content)}"
+            f"\n\n{_build_restoration_targets(baseline, input_has_opinion_content, input_has_directive_content)}"
             if baseline else ""
         )
         # Register instruction — match the source register, not an elevated version
@@ -489,6 +518,22 @@ def _apply_uk_english(text: str) -> str:
     # Broader: "issues like X" -> "issues such as X"
     text = _re_like.sub(r"\b(issues|problems|areas|things|factors|topics)\s+like\b",
                         lambda m: m.group(1) + " such as", text)
+
+    # Grammar guardrail: the model sometimes over-generalises "UK English
+    # throughout" into swapping idiomatic "like" for "such as" after verbs
+    # of comparison/perception (feel/sound/look/seem/taste/smell), which is
+    # never correct - "feel such as survival" isn't a register choice, it's
+    # a grammar error. This didn't come from the substitutions above (they
+    # require a list pattern this doesn't match); it's the model's own raw
+    # output. Deterministic revert, not a register preference either way.
+    text = _re_like.sub(
+        r"\b(feel|feels|felt|sound|sounds|sounded|look|looks|looked|"
+        r"seem|seems|seemed|taste|tastes|tasted|smell|smells|smelled)\s+"
+        r"such as\b",
+        lambda m: m.group(1) + " like",
+        text,
+        flags=_re_like.IGNORECASE,
+    )
     return text
 
 
@@ -883,7 +928,10 @@ def merge_starter_evidence(blended_delta: dict, starter_delta: dict | None) -> d
 
 
 def build_correction_prompt(
-    delta: dict, semantic: dict | None = None, input_has_opinion_content: bool = True
+    delta: dict,
+    semantic: dict | None = None,
+    input_has_opinion_content: bool = True,
+    input_has_directive_content: bool = True,
 ) -> str | None:
     """
     Builds the targeted, surgical correction prompt for whatever the
@@ -897,6 +945,12 @@ def build_correction_prompt(
     skipped outright rather than instructed-with-a-caveat: a caveat next
     to a numeric target still lost to the target in testing (see the
     Ownership fix in this same commit's history).
+
+    input_has_directive_content: same shape of check for directness. Live
+    test: a purely descriptive input got a fabricated call to action
+    ("Watch a few matches...") from this correction pass alone, added
+    after the initial render had already (correctly) stayed descriptive.
+    When False, the directive_ratio correction is skipped the same way.
     """
     correction_instructions = []
 
@@ -909,7 +963,10 @@ def build_correction_prompt(
                 correction_instructions.append(
                     f"Hedge density is {o_val:.1f}% but should be {b_val:.1f}%. "
                     f"Add natural uncertainty in 2-3 places using words like 'might', 'could', 'perhaps'. "
-                    f"Only where the writer would genuinely be uncertain. Do not force it.")
+                    f"Only where the writer would genuinely be uncertain. Do not force it. Never add "
+                    f"a hedge to a sentence carrying an absolute or superlative claim (e.g. "
+                    f"'unmatched', 'the best', 'guaranteed', 'always', 'never', 'only') - that changes "
+                    f"the claim, not just the tone. Find 2-3 other sentences to hedge instead.")
             else:
                 correction_instructions.append(
                     f"Hedge density is {o_val:.1f}% but should be {b_val:.1f}%. "
@@ -938,10 +995,14 @@ def build_correction_prompt(
             # entirely rather than nudge with a caveat that can lose to
             # the numeric target.
         elif key == "directive_ratio" and b_val >= 0.06:
-            if o_val < b_val:
+            if o_val < b_val and input_has_directive_content:
                 correction_instructions.append(
                     f"Directive pattern is missing ({o_val:.0%} action statements, target {b_val:.0%}). "
-                    f"Convert 1-2 suggestions into direct action statements. No 'please', no 'could you'.")
+                    f"Convert 1-2 EXISTING suggestions or recommendations in the input into direct "
+                    f"action statements. No 'please', no 'could you'. Do not invent a new suggestion "
+                    f"or call to action that is not already implied by the input just to hit the ratio.")
+            # else: input has nothing actionable of its own to convert -
+            # skip rather than risk fabricating a suggestion.
 
     # New in v4 — semantic correction targets, parallel to voice correction
     dropped = (semantic or {}).get("dropped_entities", [])

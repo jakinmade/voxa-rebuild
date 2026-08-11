@@ -677,12 +677,14 @@ def _run_render(input_text: str):
     # doesn't have them either.
     keep_contractions = uses_contractions(fingerprint_corpus) if fingerprint_corpus else False
 
-    # Same signal used to gate the Ownership restoration target and its
-    # correction-pass counterpart: does THIS input (not the user's
-    # baseline corpus) have any first-person content of its own to
-    # convert? Computed once, reused at both gates so they can't drift
-    # apart on the same render.
-    input_has_opinion_content = compute_baseline_metrics(input_text)["first_person_ratio"] > 0
+    # Same signal used to gate the Ownership/Directness restoration targets
+    # and their correction-pass counterparts: does THIS input (not the
+    # user's baseline corpus) have any first-person or directive content
+    # of its own to convert? Computed once, reused at both gates each so
+    # they can't drift apart on the same render.
+    input_metrics_signal = compute_baseline_metrics(input_text)
+    input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
+    input_has_directive_content = input_metrics_signal["directive_ratio"] > 0
 
     system = _build_system_prompt(
         voice_dna=voice_dna, mode_instruction=mode_instruction,
@@ -717,7 +719,7 @@ def _run_render(input_text: str):
             correction_delta = merge_starter_evidence(delta, starter_delta)
 
             correction_prompt = build_correction_prompt(
-                correction_delta, semantic, input_has_opinion_content
+                correction_delta, semantic, input_has_opinion_content, input_has_directive_content
             )
             if correction_prompt:
                 try:
