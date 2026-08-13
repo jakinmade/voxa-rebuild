@@ -36,13 +36,17 @@
 // value back to Python on every keystroke via setComponentValue, and
 // hard-blocks paste (preventDefault), not just a soft warning.
 //
-// NOTE FOR JA: this is the one piece of the rebuild I cannot verify
-// end-to-end without a live browser session against a running Streamlit
-// app — I don't have a browser in this environment. The protocol below
-// is implemented to Streamlit's documented spec, but treat this
-// specific file as needing a real smoke test on Railway before you
-// trust it, not as already proven the way everything else in this
-// rebuild is.
+// VERIFIED (August 2026): the note that used to be here said this
+// component couldn't be checked end-to-end without a live browser
+// session. It has now been tested against a real running Streamlit
+// instance with a headless browser (Playwright): typed input correctly
+// round-trips to the Python backend (word counter updates live), a
+// genuine Ctrl+V paste with real clipboard content is fully blocked
+// (event.preventDefault() confirmed, zero pasted text reaches the
+// value), and a synthetic drop event is confirmed defaultPrevented
+// with zero dropped text reaching the value. All three claims this
+// file makes about itself are now backed by evidence, not just
+// read and trusted. See tests/browser/test_paste_guard_live.py.
 
 const ta = document.getElementById("ta");
 const hint = document.getElementById("hint");

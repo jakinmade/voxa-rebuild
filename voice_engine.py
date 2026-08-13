@@ -1703,28 +1703,228 @@ _DIMENSION_LABELS = {
 }
 
 
-def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str) -> dict:
-    """
-    Assembles the Voice Report — the actual differentiated output, per
-    the v4 spec. Not just rewritten text: Voice Match, Semantic Match,
-    Confidence, Risk, and the biggest changes, all built from data
-    already computed by score_render_delta() and score_semantic_drift().
-    """
-    biggest_changes = []
-    for key, d in sorted(delta.items(), key=lambda kv: kv[1]["pct_diff"], reverse=True):
-        if d["verdict"] == "HIT":
-            continue
-        label = _DIMENSION_LABELS.get(key, key)
-        direction = "+" if d["delta"] > 0 else ""
-        pct = round(d["pct_diff"] * 100)
-        biggest_changes.append(f"{label} {direction}{pct}%")
+# ============================================================
+# Burrows' Delta — function-word frequency distance
+# ============================================================
+#
+# Gap this closes: the existing voice-match signal (score_render_delta,
+# above) rests on four hand-picked heuristics, and _extract_vocabulary_
+# fingerprint (elsewhere in this file) explicitly EXCLUDES function
+# words, keeping only content/topic vocabulary. That's backwards from
+# the field's actual gold standard. Burrows' Delta (Burrows, 2002,
+# "'Delta': A Measure of Stylistic Difference and a Guide to Likely
+# Authorship", Literary and Linguistic Computing 17(3):267-287) remains,
+# per multiple 2025/2026 replications, the most-cited and most robust
+# method in forensic and literary stylometry — precisely because it
+# fingerprints the MOST FREQUENT words in a corpus, which are
+# overwhelmingly function words (the, of, and, but, I, to). These are
+# used unconsciously and are topic-independent, which is exactly why
+# they're reliable style signals where content words aren't.
+#
+# Important methodological note, stated plainly rather than glossed
+# over: true Burrows' Delta does NOT use a fixed, pre-defined function-
+# word list. The most-frequent-words (MFW) set is computed dynamically
+# from the corpus under study — for any normal amount of English text
+# this naturally resolves to being almost entirely function words,
+# without needing to hardcode which ones, and it lets each user's own
+# distinguishing habitual words (not just classic function words) show
+# up if they're genuinely frequent for that person. This implementation
+# follows that: the MFW set is derived from the user's own baseline
+# corpus, not a hardcoded list.
+#
+# Second honest limitation: classic Delta z-scores each MFW's frequency
+# against the mean/SD of many candidate-author texts. This implementation
+# requires at least 2 of the user's own baseline writing samples for the
+# same reason — one sample has no variance to measure against. Per-word
+# mean/SD are computed across those baseline samples independently, and
+# the single rendered output is then z-scored against that established
+# distribution. See compute_burrows_delta's docstring for a worked
+# example of why the naive alternative (z-scoring baseline vs output as
+# a single pair) is mathematically degenerate and was caught and fixed
+# during testing, not shipped.
 
-def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, ai_tells: dict | None = None) -> dict:
+_DELTA_MFW_COUNT = 100
+
+
+def compute_mfw_profile(text: str, n: int = _DELTA_MFW_COUNT) -> dict:
+    """
+    Most-frequent-words profile — the actual Burrows' Delta input.
+    Unlike _extract_vocabulary_fingerprint (elsewhere in this file),
+    this does NOT exclude stopwords/function words. It keeps every
+    word, because function words are the signal here, not noise to
+    filter out. Returns {word: relative_frequency_per_1000_words}.
+    """
+    words = re.findall(r"\b[a-zA-Z']+\b", text.lower())
+    total = len(words)
+    if total == 0:
+        return {}
+
+    counts = Counter(words)
+    top_words = [w for w, _ in counts.most_common(n)]
+    return {w: round((counts[w] / total) * 1000, 4) for w in top_words}
+
+
+def compute_burrows_delta(baseline_samples: list[str], output_text: str, n: int = _DELTA_MFW_COUNT) -> dict:
+    """
+    Burrows' Delta between a user's established baseline and a rendered
+    output. Lower delta means the output's function-word habits sit
+    closer to the baseline's; this is a genuinely different signal from
+    voice_match_pct (four hand-picked heuristics) and semantic_match
+    (content-word overlap) — it measures the unconscious, topic-
+    independent word-choice habits stylometry research treats as the
+    most reliable style fingerprint available.
+
+    CORRECTED DESIGN — read before changing this function:
+    An earlier version of this function took a single baseline string
+    and z-scored it pairwise against the single output string, using
+    the mean/SD of just those two values. That is mathematically
+    degenerate: for any two unequal numbers a and b, z-scoring each
+    against their own shared pairwise mean/SD always produces
+    |z_a - z_b| = 2, regardless of how far apart a and b actually are.
+    Verified directly: (10, 12), (10, 50), and (10, 500) all produced
+    exactly delta 2.0. That version could not distinguish a near-
+    identical register from a wildly different one — caught in testing
+    before this shipped, not after.
+
+    The fix: this function requires baseline_samples as a LIST of the
+    user's own distinct writing samples (matching the list[dict] pattern
+    compute_dimension_stability already uses elsewhere in this module,
+    which exists for the same underlying reason — a single blended
+    baseline has no variance to measure against). Per-word mean and SD
+    are computed ACROSS the baseline samples independently, THEN the
+    output is z-scored against that established reference distribution.
+    The output is not one of the points used to compute the SD, so the
+    two-point degeneracy above does not recur. This mirrors the
+    conventional application of Delta: a known-author reference corpus
+    defines the distribution, and a disputed/candidate text is measured
+    against it, not folded into computing it.
+
+    Requires at least 2 baseline samples for the same reason
+    compute_dimension_stability does — one sample has no variance to
+    measure. With fewer than 2, returns tier="Insufficient baseline
+    samples" rather than a fabricated score. See module-level note on
+    the MFW set being corpus-derived (from the baseline), not a fixed
+    universal word list — that part of the original design was correct
+    and is unchanged.
+
+    Returns:
+        delta          — mean |z-score| of the output's per-word
+                          frequencies against the baseline distribution.
+                          0.0 for a perfect match; no fixed upper bound.
+        word_count     — MFW pairs actually compared
+        biggest_divergences — up to 3 words contributing most to the
+                          score
+        tier           — qualitative read; see module docstring on why
+                          these bands are a starting point, not gospel
+    """
+    if len(baseline_samples) < 2:
+        return {
+            "delta": None, "word_count": 0,
+            "biggest_divergences": [], "tier": "Insufficient baseline samples",
+        }
+
+    combined_baseline = " ".join(baseline_samples)
+    mfw_set = compute_mfw_profile(combined_baseline, n=n)
+    if not mfw_set:
+        return {
+            "delta": None, "word_count": 0,
+            "biggest_divergences": [], "tier": "Insufficient baseline",
+        }
+
+    output_words = re.findall(r"\b[a-zA-Z']+\b", output_text.lower())
+    output_total = len(output_words)
+    if output_total == 0:
+        return {
+            "delta": None, "word_count": 0,
+            "biggest_divergences": [], "tier": "Insufficient output",
+        }
+    output_counts = Counter(output_words)
+
+    # Per-word frequency in EACH baseline sample separately — this is
+    # what gives a genuine, non-degenerate mean/SD with sample_count
+    # independent points, not just the 2 values (baseline, output)
+    # being compared against each other.
+    per_sample_freqs = []
+    for sample in baseline_samples:
+        sample_words = re.findall(r"\b[a-zA-Z']+\b", sample.lower())
+        sample_total = len(sample_words)
+        sample_counts = Counter(sample_words)
+        if sample_total == 0:
+            continue
+        per_sample_freqs.append(
+            {w: (sample_counts.get(w, 0) / sample_total) * 1000 for w in mfw_set}
+        )
+
+    if len(per_sample_freqs) < 2:
+        return {
+            "delta": None, "word_count": 0,
+            "biggest_divergences": [], "tier": "Insufficient baseline samples",
+        }
+
+    z_scores = []
+    per_word = []
+    for word in mfw_set:
+        values = [sf[word] for sf in per_sample_freqs]
+        mean = sum(values) / len(values)
+        variance = sum((v - mean) ** 2 for v in values) / len(values)
+        sd = math.sqrt(variance)
+
+        output_freq = round((output_counts.get(word, 0) / output_total) * 1000, 4)
+
+        if sd == 0:
+            # Every baseline sample used this word at exactly the same
+            # rate — a genuinely stable habit. If the output matches it,
+            # zero divergence; if not, treat any deviation from a
+            # zero-variance reference as maximally divergent for this
+            # word rather than dividing by zero.
+            z = 0.0 if output_freq == mean else 3.0
+        else:
+            z = abs((output_freq - mean) / sd)
+
+        z_scores.append(z)
+        per_word.append((word, z, mean, output_freq))
+
+    delta = round(sum(z_scores) / len(z_scores), 3) if z_scores else 0.0
+
+    per_word.sort(key=lambda t: t[1], reverse=True)
+    biggest_divergences = [
+        {"word": w, "baseline_freq": round(bf, 4), "output_freq": of}
+        for w, z, bf, of in per_word[:3] if z > 0
+    ]
+
+    # Bands are a documented starting point, not a settled field
+    # standard — see module docstring. Calibrate against real user data
+    # once available; these are wider than published literary-Delta
+    # thresholds (typically <1.0 = same-author-likely on much larger
+    # corpora) since this runs on far less reference data per user.
+    if delta <= 1.5:
+        tier = "Close"
+    elif delta <= 3.0:
+        tier = "Moderate"
+    else:
+        tier = "Wide"
+
+    return {
+        "delta": delta,
+        "word_count": len(mfw_set),
+        "biggest_divergences": biggest_divergences,
+        "tier": tier,
+    }
+
+
+def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, ai_tells: dict | None = None, burrows_delta: dict | None = None) -> dict:
     """
     Assembles the Voice Report — the actual differentiated output, per
     the v4 spec. Not just rewritten text: Voice Match, Semantic Match,
     Confidence, Risk, an explicit AI-tell check, and the biggest changes,
     all built from data already computed elsewhere in this module.
+
+    burrows_delta (optional): output of compute_burrows_delta(), a
+    second, independently-grounded voice-match signal alongside the
+    existing four-heuristic voice_match. Additive, not a replacement —
+    see compute_burrows_delta's docstring for why function-word
+    frequency distance is a genuinely different, field-established
+    measurement rather than a restatement of the existing metrics.
     """
     biggest_changes = []
     for key, d in sorted(delta.items(), key=lambda kv: kv[1]["pct_diff"], reverse=True):
@@ -1737,7 +1937,7 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
 
     voice_match = voice_match_label(delta)
 
-    return {
+    report = {
         "voice_match": voice_match["_raw_pct"],  # kept internally, not shown as headline
         "voice_match_tier": voice_match["tier"],
         "voice_match_badge": voice_match["badge"],
@@ -1751,6 +1951,13 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "dropped_entities": semantic.get("dropped_entities", []),
         "attribution_swaps": semantic.get("attribution_swaps", []),
     }
+
+    if burrows_delta is not None:
+        report["function_word_delta"] = burrows_delta.get("delta")
+        report["function_word_delta_tier"] = burrows_delta.get("tier")
+        report["function_word_biggest_divergences"] = burrows_delta.get("biggest_divergences", [])
+
+    return report
 
 # ============================================================
 # New — measured verification of the AI-tell guardrail itself
@@ -1772,6 +1979,53 @@ _CONTRACTION_PATTERN = re.compile(
 # kept here as the measurement side of the same guardrail, so the check
 # and the fix are drawing from a shared understanding of what an AI
 # tell actually is, not two lists that can quietly drift apart.
+# ---------------------------------------------------------------------------
+# Plausibility shields — first-person lexical-verb hedges that attribute a
+# claim to the writer's own judgement rather than stating it as fact:
+# "I think", "I see it as", "in my view". Documented category, not an ad
+# hoc list — Prince, Frader & Bosk (1982) coined "plausibility shield" for
+# exactly this; Hyland's hedging taxonomy (1998), the standard reference
+# in this field, groups the same verbs (think, believe, see, view, take,
+# argue, say) under "lexical verb hedges" alongside modals and epistemic
+# adverbs (which _HEDGE_WORD_PATTERN in prompts.py already covers).
+#
+# Two shapes need different repair, not one blanket strip:
+#   - "I think that X" -> "X" stands alone; the clause after the shield
+#     already has its own subject and verb.
+#   - "I see it as X" -> deleting the shield leaves a fragment with no
+#     verb ("X" has no "is"). These need the shield replaced with a verb,
+#     not removed outright.
+# _PLAUSIBILITY_SHIELD_STRIP (prompts.py) keys off which group matched to
+# apply the right repair. Kept here, not in prompts.py, because prompts.py
+# already imports its shared vocabulary from this module (_classify_register,
+# compute_baseline_metrics etc.) — single source of truth, not a second list
+# to keep in sync.
+# ---------------------------------------------------------------------------
+_PLAUSIBILITY_SHIELD_DROP = re.compile(
+    r"^(I think|I believe|I would argue|I would say|I'd say|My view is|"
+    r"My take is|My sense is|It seems to me)\b,?\s*(that\s+)?",
+    re.IGNORECASE,
+)
+_PLAUSIBILITY_SHIELD_MIDSENTENCE = re.compile(
+    r"(,\s*)?\b(in my view|in my opinion|as I see it|as I view it)\b"
+    r"(\s*,\s*|\s+|(?=[.!?]|$))",
+    re.IGNORECASE,
+)
+_PLAUSIBILITY_SHIELD_REPLACE = re.compile(
+    r"^(I see it as|I see this as|I view it as|I view this as|I take it as)\b\s*",
+    re.IGNORECASE,
+)
+# Combined pattern used only for detection (score_ai_tells) — mirrors the
+# three strip patterns above so "clean" can't mean "the strip regex never
+# ran on this text" the way the em-dash-launder bug did.
+_PLAUSIBILITY_SHIELD_PHRASES = re.compile(
+    r"\b(I think that|I believe that|I would argue that|I would say that|"
+    r"I'd say that|my view is that|my take is that|my sense is that|"
+    r"it seems to me that|in my view|in my opinion|as I see it|as I view it|"
+    r"I see it as|I see this as|I view it as|I view this as|I take it as)\b",
+    re.IGNORECASE,
+)
+
 _AI_TELL_PHRASES = re.compile(
     r"\b(it is (important|worth|essential|crucial|critical|key) to (note|recognise|recognize|understand)|"
     r"in (today's|the current|our) (landscape|world|environment|era)|"
@@ -1913,6 +2167,7 @@ def score_ai_tells(text: str) -> dict:
     em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = list(_AI_TELL_PHRASES.findall(text))
+    shield_hits = list(_PLAUSIBILITY_SHIELD_PHRASES.findall(text))
 
     register = _classify_register(text)
     analytical_hits = []
@@ -1920,7 +2175,7 @@ def score_ai_tells(text: str) -> dict:
         analytical_hits = list(_ANALYTICAL_TELL_PHRASES.findall(text))
         analytical_hits += list(_FRAGMENT_EMPHASIS_PATTERN.findall(text))
 
-    all_hits = phrase_hits + analytical_hits
+    all_hits = phrase_hits + analytical_hits + shield_hits
 
     flagged = []
     if em_dash_hits:

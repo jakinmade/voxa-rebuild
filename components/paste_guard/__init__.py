@@ -2,10 +2,10 @@
 paste_guard — a text input that hard-blocks paste and drag-drop text
 insertion, reporting its value back to Streamlit like a native widget.
 
-Needs a live browser smoke test before this is trusted in production —
-see the note in index.html. Everything else in this rebuild is ported
-from proven, working code; this component is new and unverified outside
-the protocol spec.
+VERIFIED (August 2026): tested end-to-end against a real running
+Streamlit instance with a headless browser (Playwright) — typing
+round-trips correctly, real Ctrl+V paste is blocked, drag-drop insertion
+is blocked. See index.html and tests/browser/test_paste_guard_live.py.
 """
 
 import os

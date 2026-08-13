@@ -109,7 +109,23 @@ class TestCleanRenderOutput:
     def test_em_dashes_removed(self):
         result = clean_render_output("This is one thing—and this is another.")
         assert "—" not in result
-        assert "-" in result
+        # Was previously "assert '-' in result" — that encoded the OLD
+        # cleaner.py behaviour (crude spaced-hyphen substitution), which
+        # is itself an AI tell that score_ai_tells' own spaced-hyphen
+        # check exists to catch. The canonical sweep (voxa_core.
+        # text_guardrail) never substitutes a hyphen — it splits into
+        # two sentences or joins with a comma. A literal " - " surviving
+        # here would mean the em-dash-laundering bug is back.
+        assert " - " not in result
+
+    def test_em_dash_never_becomes_spaced_hyphen(self):
+        # Direct regression guard for the specific bug this replaced:
+        # cleaner.py used to convert every em dash straight to " - ",
+        # which is itself flagged as an AI tell elsewhere in the system.
+        result = clean_render_output(
+            "The team shipped fast—faster than anyone expected."
+        )
+        assert " - " not in result
 
     def test_claude_constructions_replaced(self):
         result = clean_render_output("We will leverage this to deliver a seamless result.")

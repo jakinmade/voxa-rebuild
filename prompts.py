@@ -23,7 +23,78 @@ from voice_engine import (
     _format_function_patterns,
     _classify_register,
     compute_baseline_metrics,
+    _PLAUSIBILITY_SHIELD_DROP,
+    _PLAUSIBILITY_SHIELD_MIDSENTENCE,
+    _PLAUSIBILITY_SHIELD_REPLACE,
 )
+
+
+def _strip_plausibility_shields(text: str) -> str:
+    """
+    Removes first-person plausibility shields (Prince, Frader & Bosk 1982;
+    Hyland's "lexical verb hedges", 1998) — "I think", "I see it as", "in
+    my view" — wherever they fall in the text, not just at the very start.
+
+    Replaces the old opener_hedge / opener_hedge2 / opener_hedge3 regexes,
+    which anchored on (?m)^ — a LINE start, not a SENTENCE start. That only
+    matched if the shield opened the entire text or sat right after a
+    literal newline. A shield buried in sentence two or three of an
+    ordinary paragraph (the common case — see John's Scott Kosch draft,
+    "Timing feels right... I see it as the deterministic proof layer...")
+    was invisible to it regardless of which phrases were on the list.
+    Same failure class as the em-dash-laundering bug: a rule that looks
+    like it covers the whole text but only ever touched the first line.
+
+    Runs per sentence, same split-and-rejoin approach as
+    _strip_hedges_from_absolute_claims, so it fires wherever a shield
+    actually sits.
+
+    Three repair shapes, not one blanket strip, because the shields don't
+    all leave the same thing behind once removed:
+      - Drop shields ("I think that X") — deleting the shield leaves a
+        complete sentence ("X"), since the clause after it already has
+        its own subject and verb.
+      - Mid-sentence shields ("X, in my view, Y") — comma-bounded, can
+        appear anywhere in the sentence, dropped along with one comma.
+      - Replace shields ("I see it as X") — deleting the shield alone
+        leaves a fragment with no verb. These get swapped for "It is"
+        rather than removed, so the sentence still stands on its own.
+    """
+    parts = re.split(r'(?<=[.!?])(\s+)', text)
+
+    for i in range(0, len(parts), 2):
+        sentence = parts[i]
+        if not sentence:
+            continue
+
+        fixed = _PLAUSIBILITY_SHIELD_DROP.sub('', sentence)
+
+        # Mid-sentence shields — comma-bounded ("This, in my view, is X"),
+        # comma-then-word ("and in my view that matters", no comma needed
+        # for the phrase to be grammatical), or sentence-initial ("In my
+        # view, X"). Matched wherever it falls, trailing comma optional,
+        # since "in my view" doesn't require punctuation around it to be
+        # a valid shield. Position decides the join: a match starting at
+        # the front of the sentence (sentence-initial) joins with nothing,
+        # since capitalisation below handles that seam; anywhere else
+        # joins with a single space so words don't concatenate ("This" +
+        # "is" -> "Thisis" was the exact bug this replaced).
+        def _midsentence_repl(m):
+            return '' if m.start() == 0 else ' '
+        fixed = _PLAUSIBILITY_SHIELD_MIDSENTENCE.sub(_midsentence_repl, fixed)
+
+        def _replace_repl(m):
+            return 'It is '
+        fixed = _PLAUSIBILITY_SHIELD_REPLACE.sub(_replace_repl, fixed)
+
+        if fixed != sentence:
+            fixed = re.sub(r'  +', ' ', fixed).strip()
+            fixed = re.sub(r'\s+([,.!?])', r'\1', fixed)
+        if fixed and fixed != sentence:
+            fixed = fixed[0].upper() + fixed[1:]
+        parts[i] = fixed
+
+    return ''.join(parts)
 
 def _detect_mode(text: str) -> str:
     """
@@ -768,7 +839,9 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
        own writing uses them pushes the output away from their voice, not
        towards it.
     3. Claude literary closers stripped from paragraph endings
-    4. Claude default constructions replaced
+    4. Plausibility shields stripped per-sentence ("I think", "I see it
+       as", "in my view" — see _strip_plausibility_shields), then Claude
+       default constructions replaced
     5. Repeated words
     6. Double spaces
     7. Hedges stripped from sentences carrying an absolute/superlative
@@ -845,13 +918,22 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
                 text = '\n\n'.join(paragraphs)
 
     # 4. Claude default constructions
-    # Strip opening hedges — sentence start only, preserve mid-sentence ownership
-    opener_hedge = re.compile(r'(?m)^I think (that )?', re.IGNORECASE)
-    text = opener_hedge.sub('', text)
-    opener_hedge2 = re.compile(r'(?m)^I believe (that )?', re.IGNORECASE)
-    text = opener_hedge2.sub('', text)
-    opener_hedge3 = re.compile(r'(?m)^I would argue (that )?', re.IGNORECASE)
-    text = opener_hedge3.sub('', text)
+    # Strip plausibility shields — runs per sentence throughout the text,
+    # not just at the very start. See _strip_plausibility_shields for why
+    # the old line-anchored version missed anything past sentence one.
+    #
+    # DELIBERATE, DOCUMENTED DUPLICATION — read before editing either side:
+    # This function (root-level, live Railway product) and
+    # packages/voxa-core/src/voxa_core/text_guardrail.py (canonical for
+    # the FastAPI/packages ecosystem) are two intentionally separate
+    # copies, not one accidentally forked twice. Root doesn't depend on
+    # packages/ at all — converting the live deployment to install
+    # packages/ is a separate, higher-risk decision, explicitly scoped
+    # out during the August 2026 guardrail-consolidation fix (see that
+    # module's docstring for the full "Option A vs Option B" note). If
+    # you fix a bug here, mirror it in voxa_core.text_guardrail, or the
+    # gap this consolidation closed reopens on the API side.
+    text = _strip_plausibility_shields(text)
     # "I am genuinely uncertain about" -> "I am not sure"
     text = re.sub(r'I am genuinely uncertain (about|whether)', 'I am not sure', text, flags=re.IGNORECASE)
     text = re.sub(r'I remain (genuinely |deeply )?uncertain', 'I am not sure', text, flags=re.IGNORECASE)

@@ -209,54 +209,30 @@ def _apply_uk_english(text: str) -> str:
 
 
 def _regex_sweep(text: str) -> str:
-    """Ported verbatim from app.py _regex_sweep — deterministic guardrail, no API call."""
-    for dash in ["\u2014", "\u2013", "\u2012", "\u2015"]:
-        text = text.replace(dash, " - ")
-    text = re.sub(r"[\u2012\u2013\u2014\u2015]", " - ", text)
-    text = re.sub(r"  +", " ", text)
+    """
+    Deterministic guardrail sweep. Delegates to voxa_core.text_guardrail,
+    the canonical implementation for the packages/ ecosystem.
 
-    contractions = [
-        ("aren't", "are not"), ("isn't", "is not"), ("wasn't", "was not"),
-        ("weren't", "were not"), ("didn't", "did not"), ("doesn't", "does not"),
-        ("don't", "do not"), ("haven't", "have not"), ("hasn't", "has not"),
-        ("hadn't", "had not"), ("won't", "will not"), ("wouldn't", "would not"),
-        ("couldn't", "could not"), ("shouldn't", "should not"), ("can't", "cannot"),
-        ("it's", "it is"), ("that's", "that is"), ("there's", "there is"),
-        ("they're", "they are"), ("they've", "they have"), ("they'd", "they would"),
-        ("I'm", "I am"), ("I've", "I have"), ("I'd", "I would"), ("I'll", "I will"),
-        ("we're", "we are"), ("we've", "we have"), ("we'd", "we would"),
-        ("you're", "you are"), ("you've", "you have"), ("you'd", "you would"),
-        ("he's", "he is"), ("she's", "she is"), ("who's", "who is"),
-        ("what's", "what is"), ("where's", "where is"),
-    ]
-    for contraction, full in contractions:
-        pattern = re.compile(r'\b' + re.escape(contraction) + r'\b', re.IGNORECASE)
+    DELIBERATE, DOCUMENTED DUPLICATION — read before editing either side:
+    This used to be its own local port of app.py's _regex_sweep, "ported
+    verbatim" at the time — 25 July 2026 — but never kept in sync after
+    that. An August 2026 audit found it had drifted to a 14-entry Claude-
+    construction list against the live app's 46, with no hedge stripping,
+    no plausibility-shield removal, no literary-closer stripping, no
+    tricolon collapse, no editorial-addition stripping, and no AI-tell
+    verification at all. Recalibrated drafts were shipping with
+    materially weaker cleanup than the Streamlit app gave the same input.
 
-        def _repl(m, f=full):
-            return f[0].upper() + f[1:] if m.group(0)[0].isupper() else f
-
-        text = pattern.sub(_repl, text)
-
-    claude_constructions = [
-        (r'\bWhat stood out most was\b', 'What stood out'),
-        (r'\bWhat stood out was\b', 'What stood out'),
-        (r'\bIt is worth noting that\b', 'Note that'),
-        (r'\bIt is important to note that\b', 'Note that'),
-        (r'\bMoving forward\b', 'Going forward'),
-        (r'\bLeverage\b', 'Use'), (r'\bLeveraging\b', 'Using'),
-        (r'\bCircle back\b', 'Return to'), (r'\bTouch base\b', 'Speak'),
-        (r'\bPain points\b', 'Problems'), (r'\bRobust\b', 'Strong'),
-        (r'\bSeamless\b', 'Smooth'), (r'\bHolistic\b', 'Full'),
-        (r'\bSynergies\b', 'Benefits'), (r'\bEcosystem\b', 'Environment'),
-    ]
-    for pattern, replacement in claude_constructions:
-        def _case_preserve(m, r=replacement):
-            return r[0].upper() + r[1:] if m.group(0)[0].isupper() else r[0].lower() + r[1:]
-        text = re.sub(pattern, _case_preserve, text, flags=re.IGNORECASE)
-
-    text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
-    text = re.sub(r'  +', ' ', text)
-    return text.strip()
+    Fixed by delegating to voxa_core.text_guardrail.sweep() — voxa-api
+    already depends on voxa-core (see pyproject.toml), so this adds no
+    new dependency edge. That module is itself a verbatim port of
+    root-level prompts.py's _regex_sweep, NOT automatically kept in sync
+    with it — see voxa_core.text_guardrail's docstring for the full
+    duplication note and why root (the live Railway deployment) isn't
+    part of this dependency graph.
+    """
+    from voxa_core.text_guardrail import sweep as _core_sweep
+    return _core_sweep(text)
 
 
 async def recalibrate_draft(draft_text: str, restoration_metrics: dict) -> dict:

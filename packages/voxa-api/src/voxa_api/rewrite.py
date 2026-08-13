@@ -13,6 +13,12 @@ no web search tool, one call per flagged line.
 Self-check discipline: a suggestion is only returned if it actually
 scores closer to the profile than the original on re-check. If Claude's
 rewrite doesn't improve the match, we say so rather than pretend.
+
+Output cleanup: runs through voxa_core.text_guardrail.sweep() before
+any comparison or self-check. Previously returned raw LLM output with
+no cleanup at all — found during the August 2026 guardrail-
+consolidation audit as the weakest of four independent output paths in
+the codebase. See suggest_rewrite for the specific fix.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import os
 
 import anthropic
 
+from voxa_core.text_guardrail import sweep as _sweep
 from voxa_rendering.fingerprint import _extract_sentences
 
 _MODEL = "claude-sonnet-4-6"
@@ -59,6 +66,16 @@ async def suggest_rewrite(
         rewritten = response.content[0].text.strip().strip('"')
     except Exception as e:
         return None, f"api_error:{type(e).__name__}: {str(e)[:150]}"
+
+    # Deterministic guardrail sweep — this endpoint previously returned
+    # raw LLM output with ZERO cleanup, the only one of four output paths
+    # in the codebase that did (found in the August 2026 guardrail-
+    # consolidation audit: app.py had 12/12 steps, cleaner.py 2/12,
+    # recalibrate.py ~4/12 and stale, this file 0/12). A single flagged
+    # sentence is exactly where an em dash or a "leverage" is most likely
+    # to slip straight through to the user, since nothing else in this
+    # endpoint's path would ever catch it.
+    rewritten = _sweep(rewritten)
 
     if not rewritten or rewritten == sentence:
         return None, "no_change_returned"

@@ -32,6 +32,7 @@ from voice_engine import (
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells,
     compute_dimension_stability, confidence_caveat,
+    compute_burrows_delta,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -301,6 +302,10 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
                 st.session_state.fingerprint_samples = samples
                 st.session_state.dimension_stability = compute_dimension_stability(samples)
 
+                sample_texts = st.session_state.get("fingerprint_sample_texts", [])
+                sample_texts.append(extra)
+                st.session_state.fingerprint_sample_texts = sample_texts
+
                 # If a Voice Report is already on screen (Screen 4),
                 # refresh its Confidence badge in place - the rewritten
                 # text itself doesn't change, only how much to trust the
@@ -315,6 +320,23 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
                     )
                     report["confidence"] = new_confidence
                     st.session_state.confidence = new_confidence
+
+                    # Same reasoning as the Confidence refresh above: the
+                    # rewritten text on screen doesn't change, but the
+                    # extra sample gives function-word Delta a better
+                    # (or its first) reference distribution to score
+                    # against. Re-run it in place rather than leaving a
+                    # stale or "Insufficient baseline samples" reading on
+                    # screen after the user just fixed exactly that.
+                    render_output = st.session_state.get("render_output")
+                    if render_output:
+                        updated_sample_texts = st.session_state.get("fingerprint_sample_texts", [])
+                        new_burrows_delta = compute_burrows_delta(updated_sample_texts, render_output)
+                        st.session_state.function_word_delta = new_burrows_delta
+                        report["function_word_delta"] = new_burrows_delta.get("delta")
+                        report["function_word_delta_tier"] = new_burrows_delta.get("tier")
+                        report["function_word_biggest_divergences"] = new_burrows_delta.get("biggest_divergences", [])
+
                     st.session_state.voice_report = report
 
                 st.success("Added. Your fingerprint just got stronger.")
@@ -367,6 +389,10 @@ def screen_paste():
                 # (Back button), and a stale Screen 3 sample from a
                 # previous pass shouldn't be compared against a new paste.
                 st.session_state.fingerprint_samples = [new_metrics]
+                # Raw text alongside the metrics — same reset-on-repaste
+                # reasoning. Metrics alone can't feed compute_burrows_delta,
+                # which needs the actual words to build a frequency profile.
+                st.session_state.fingerprint_sample_texts = [text]
 
                 fitness = _score_sample_fitness(text)
                 st.session_state.sample_fitness = fitness
@@ -624,6 +650,12 @@ def screen_sample2():
                 st.session_state.fingerprint_samples = samples
                 st.session_state.dimension_stability = compute_dimension_stability(samples)
 
+                sample_texts = st.session_state.get("fingerprint_sample_texts", [])
+                sample_texts.extend(
+                    completions[i].strip() for i in REQUIRED_STARTER_INDICES
+                )
+                st.session_state.fingerprint_sample_texts = sample_texts
+
                 for m in required_metrics:
                     st.session_state.baseline_fingerprint = _merge_baseline(
                         st.session_state.get("baseline_fingerprint"), m
@@ -752,12 +784,27 @@ def _run_render(input_text: str):
                 st.session_state.get("dimension_stability"),
             )
             risk = compute_risk(delta, semantic, ai_tells)
+
+            # Second, independently-grounded voice-match signal alongside
+            # the four-heuristic delta above — see compute_burrows_delta's
+            # docstring for why function-word frequency distance is a
+            # genuinely different measurement, not a restatement. Needs
+            # 2+ raw baseline samples to compute a real reference
+            # distribution; with fewer (most users who haven't gone
+            # through the Screen 3 starters flow), it correctly reports
+            # "Insufficient baseline samples" rather than guessing.
+            baseline_texts = st.session_state.get("fingerprint_sample_texts", [])
+            burrows_delta = compute_burrows_delta(baseline_texts, clean)
+
             st.session_state.render_delta = delta
             st.session_state.semantic_drift = semantic
             st.session_state.confidence = confidence
             st.session_state.risk = risk
             st.session_state.ai_tells = ai_tells
-            st.session_state.voice_report = build_voice_report(delta, semantic, confidence, risk, ai_tells)
+            st.session_state.function_word_delta = burrows_delta
+            st.session_state.voice_report = build_voice_report(
+                delta, semantic, confidence, risk, ai_tells, burrows_delta
+            )
         else:
             st.session_state.render_delta = None
             st.session_state.voice_report = None
