@@ -668,9 +668,21 @@ def screen_sample2():
 # Screen 4 — Render, Voice Report, one refinement
 # ============================================================
 
-def _run_render(input_text: str):
+def _run_render(input_text: str) -> bool:
     """The actual generation pipeline. Kept as one function so the
-    refinement re-render below can call the same path."""
+    refinement re-render below can call the same path.
+
+    Returns True on success, False on failure. Callers must check this
+    before treating the render as having happened (e.g. before marking
+    the one-time refinement as used) — previously that flag was set
+    unconditionally before this ran, so a failed call still burned the
+    user's one refinement. Failure is reported via
+    st.session_state.render_error rather than a direct st.error() call
+    here, because the caller immediately triggers st.rerun() afterwards,
+    which would wipe an error shown before it — session_state survives
+    the rerun, a bare st.error() call does not.
+    """
+    st.session_state.render_error = None
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     try:
         api_key = st.secrets["ANTHROPIC_API_KEY"] or api_key
@@ -678,8 +690,8 @@ def _run_render(input_text: str):
         pass
 
     if not api_key:
-        st.error("API key missing.")
-        return
+        st.session_state.render_error = "API key missing."
+        return False
 
     import anthropic
 
@@ -725,91 +737,98 @@ def _run_render(input_text: str):
     )
 
     client = anthropic.Anthropic(api_key=api_key)
-    with st.spinner("Writing as you..."):
-        response = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=4096,
-            system=system, messages=[{"role": "user", "content": input_text}],
+    try:
+        with st.spinner("Writing as you..."):
+            response = client.messages.create(
+                model="claude-sonnet-4-6", max_tokens=4096,
+                system=system, messages=[{"role": "user", "content": input_text}],
+            )
+            clean = response.content[0].text
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+            if st.session_state.get("locale", "uk") == "uk":
+                clean = _apply_uk_english(clean)
+            clean = _grammar_fix_pass(clean, client)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+    except Exception:
+        st.session_state.render_error = (
+            "That didn't go through — your text is safe, try again."
         )
-        clean = response.content[0].text
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions)
-        if st.session_state.get("locale", "uk") == "uk":
-            clean = _apply_uk_english(clean)
-        clean = _grammar_fix_pass(clean, client)
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+        return False
 
-        if baseline:
-            delta = score_render_delta(baseline, clean)
-            semantic = score_semantic_drift(input_text, clean)
+    if baseline:
+        delta = score_render_delta(baseline, clean)
+        semantic = score_semantic_drift(input_text, clean)
 
-            # Second, independent check against the starter-only baseline
-            # (unblended with sample1) - catches drift the blended average
-            # can dilute below the correction threshold. Rule-based, no
-            # extra API call: reuses score_render_delta, only widens what
-            # feeds the one correction call that already fires conditionally.
-            starter_baseline = st.session_state.get("starter_baseline")
-            starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
-            correction_delta = merge_starter_evidence(delta, starter_delta)
+        # Second, independent check against the starter-only baseline
+        # (unblended with sample1) - catches drift the blended average
+        # can dilute below the correction threshold. Rule-based, no
+        # extra API call: reuses score_render_delta, only widens what
+        # feeds the one correction call that already fires conditionally.
+        starter_baseline = st.session_state.get("starter_baseline")
+        starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
+        correction_delta = merge_starter_evidence(delta, starter_delta)
 
-            correction_prompt = build_correction_prompt(
-                correction_delta, semantic, input_has_opinion_content, input_has_directive_content
-            )
-            if correction_prompt:
-                try:
-                    correction_response = client.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=4096,
-                        system=correction_prompt, messages=[{"role": "user", "content": clean}],
-                    )
-                    corrected = correction_response.content[0].text
-                    corrected = _regex_sweep(corrected, keep_contractions=keep_contractions)
-                    if st.session_state.get("locale", "uk") == "uk":
-                        corrected = _apply_uk_english(corrected)
-                    clean = corrected
-                    delta = score_render_delta(baseline, clean)
-                    semantic = score_semantic_drift(input_text, clean)
-                except Exception:
-                    pass  # correction pass failed — keep the original render
+        correction_prompt = build_correction_prompt(
+            correction_delta, semantic, input_has_opinion_content, input_has_directive_content
+        )
+        if correction_prompt:
+            try:
+                correction_response = client.messages.create(
+                    model="claude-sonnet-4-6", max_tokens=4096,
+                    system=correction_prompt, messages=[{"role": "user", "content": clean}],
+                )
+                corrected = correction_response.content[0].text
+                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions)
+                if st.session_state.get("locale", "uk") == "uk":
+                    corrected = _apply_uk_english(corrected)
+                clean = corrected
+                delta = score_render_delta(baseline, clean)
+                semantic = score_semantic_drift(input_text, clean)
+            except Exception:
+                pass  # correction pass failed — keep the original render
 
-            # Measured verification gate, not a trusted fix-and-hope step.
-            # If anything survived the sweeps, run one more deterministic
-            # pass (free, no API call) and re-measure. If it's still not
-            # clean after that, say so honestly in the report rather than
-            # shipping AI-tell contaminated text as if it were verified.
+        # Measured verification gate, not a trusted fix-and-hope step.
+        # If anything survived the sweeps, run one more deterministic
+        # pass (free, no API call) and re-measure. If it's still not
+        # clean after that, say so honestly in the report rather than
+        # shipping AI-tell contaminated text as if it were verified.
+        ai_tells = score_ai_tells(clean)
+        if not ai_tells["clean"]:
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
             ai_tells = score_ai_tells(clean)
-            if not ai_tells["clean"]:
-                clean = _regex_sweep(clean, keep_contractions=keep_contractions)
-                ai_tells = score_ai_tells(clean)
 
-            confidence = compute_confidence(
-                st.session_state.get("sample_fitness"), baseline, len(observations),
-                st.session_state.get("dimension_stability"),
-            )
-            risk = compute_risk(delta, semantic, ai_tells)
+        confidence = compute_confidence(
+            st.session_state.get("sample_fitness"), baseline, len(observations),
+            st.session_state.get("dimension_stability"),
+        )
+        risk = compute_risk(delta, semantic, ai_tells)
 
-            # Second, independently-grounded voice-match signal alongside
-            # the four-heuristic delta above — see compute_burrows_delta's
-            # docstring for why function-word frequency distance is a
-            # genuinely different measurement, not a restatement. Needs
-            # 2+ raw baseline samples to compute a real reference
-            # distribution; with fewer (most users who haven't gone
-            # through the Screen 3 starters flow), it correctly reports
-            # "Insufficient baseline samples" rather than guessing.
-            baseline_texts = st.session_state.get("fingerprint_sample_texts", [])
-            burrows_delta = compute_burrows_delta(baseline_texts, clean)
+        # Second, independently-grounded voice-match signal alongside
+        # the four-heuristic delta above — see compute_burrows_delta's
+        # docstring for why function-word frequency distance is a
+        # genuinely different measurement, not a restatement. Needs
+        # 2+ raw baseline samples to compute a real reference
+        # distribution; with fewer (most users who haven't gone
+        # through the Screen 3 starters flow), it correctly reports
+        # "Insufficient baseline samples" rather than guessing.
+        baseline_texts = st.session_state.get("fingerprint_sample_texts", [])
+        burrows_delta = compute_burrows_delta(baseline_texts, clean)
 
-            st.session_state.render_delta = delta
-            st.session_state.semantic_drift = semantic
-            st.session_state.confidence = confidence
-            st.session_state.risk = risk
-            st.session_state.ai_tells = ai_tells
-            st.session_state.function_word_delta = burrows_delta
-            st.session_state.voice_report = build_voice_report(
-                delta, semantic, confidence, risk, ai_tells, burrows_delta
-            )
-        else:
-            st.session_state.render_delta = None
-            st.session_state.voice_report = None
+        st.session_state.render_delta = delta
+        st.session_state.semantic_drift = semantic
+        st.session_state.confidence = confidence
+        st.session_state.risk = risk
+        st.session_state.ai_tells = ai_tells
+        st.session_state.function_word_delta = burrows_delta
+        st.session_state.voice_report = build_voice_report(
+            delta, semantic, confidence, risk, ai_tells, burrows_delta
+        )
+    else:
+        st.session_state.render_delta = None
+        st.session_state.voice_report = None
 
-        st.session_state.render_output = clean
+    st.session_state.render_output = clean
+    return True
 
 
 def screen_render():
@@ -833,6 +852,9 @@ def screen_render():
             st.session_state.refinement_used = False
             _run_render(input_text)
             st.rerun()
+
+    if st.session_state.get("render_error"):
+        st.error(st.session_state.render_error)
 
     output = st.session_state.get("render_output", "")
     if output:
@@ -937,7 +959,6 @@ def screen_render():
                 height=80, key="refine_freetext",
             )
             if st.button("Refine \u2192", use_container_width=True):
-                st.session_state.refinement_used = True
                 st.session_state.refinement_tags = chosen_tags
                 st.session_state.refinement_freetext = freetext
                 refinement_note = ", ".join(chosen_tags)
@@ -947,7 +968,12 @@ def screen_render():
                     f"{st.session_state.render_input_text}\n\n"
                     f"[Refinement requested: {refinement_note}]"
                 ) if refinement_note else st.session_state.render_input_text
-                _run_render(refined_input)
+                # Only mark the one-time refinement as used if it actually
+                # succeeded — previously this flag was set unconditionally
+                # before the call, so a failed render still burned the
+                # user's one refinement with nothing to show for it.
+                if _run_render(refined_input):
+                    st.session_state.refinement_used = True
                 st.rerun()
 
         st.markdown("")

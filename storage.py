@@ -21,6 +21,7 @@ def init_state():
         "intent_mode": "GET_IT_DONE",
         "render_output": "",
         "render_input_text": "",
+        "render_error": None,
         "session_start": datetime.now().strftime("%d %B %Y, %H:%M"),
         "word_count": 0,
         "locale": "uk",
