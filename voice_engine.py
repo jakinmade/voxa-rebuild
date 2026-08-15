@@ -1030,43 +1030,68 @@ def _format_function_patterns(patterns: dict, input_genre: str = "email") -> str
         lines.append(f"  NOTE: this person's email closers ('Hopefully', 'Pls let me know') are email-specific. Do NOT use them to end articles or pieces.")
 
     return "\n".join(lines)
-def _pick_anchor_sentences(sentences: list[str]) -> list[str]:
-    """
-    Selects 2-3 sentences most distinctive to this writer.
-    Prioritises short declarative, direct denial, imperatives, verb-driven.
-    Ensures variety in length. Falls back gracefully.
-    """
-    import re
+_ANCHOR_SENTENCE_CAP = 5
 
-    hedge = re.compile(r"(might|could|perhaps|possibly|maybe|somewhat|quite|rather|potentially)", re.I)
-    denial = re.compile(r"(I do not|I am not|I don't|I'm not|That is not|This is not)", re.I)
-    imperative = re.compile(
-        r"^(Fix|Send|Call|Build|Close|Check|Review|Do|Make|Take|Stop|Start|Deploy|Ship|Run|Get|Go|"
-        r"Ensure|Define|Test|Pull|Explore|Draft|Share|Note|Consider|Find|Use|Add|Remove|Update|Create|Set|Move|Push)", re.I
-    )
-    adjective = re.compile(
-        r"(very|really|extremely|quite|rather|somewhat|highly|deeply|absolutely|completely|"
-        r"totally|incredibly|amazing|excellent|great|good|bad|significant|important|critical|key|major)", re.I
-    )
+
+def _pick_anchor_sentences(sentences: list[str], corpus_text: str = "") -> list[str]:
+    """
+    Selects the sentences most representative of this writer's actual
+    function-word habits, scored via the same MFW machinery
+    compute_burrows_delta already uses to grade a render after the
+    fact (per that function's own docstring: function-word frequency
+    is the field's most-cited, most robust style signal). This reuses
+    it to SELECT anchors going INTO the prompt, closing a gap where
+    two disconnected signals existed for the same underlying question
+    -- one used to check whether a render sounds like the person
+    afterward, a different, weaker one used to decide what to show
+    the model beforehand.
+
+    Replaces an earlier hand-rolled heuristic (rewarded short
+    declarative sentences, denial phrasing, and imperative verbs;
+    penalised hedges and adjectives unconditionally). That heuristic
+    hardcoded an assumption about what "sounds like someone" rather
+    than measuring it against their own writing -- a writer whose
+    actual baseline hedges frequently would have every one of their
+    most characteristic sentences penalised by it, precisely
+    backwards. The MFW approach is corpus-driven instead: a sentence
+    using this person's own most-frequent words scores higher,
+    whatever those words happen to be, hedges included if that's
+    genuinely their pattern.
+
+    corpus_text: the fuller corpus to build the MFW profile from.
+    Callers already have this available (raw_text as passed to
+    _build_voice_dna is the blended Screen 1 + starters corpus, not
+    just the initial paste) -- falls back to scoring against the
+    sentence pool itself if not supplied, so this stays backward
+    compatible with any caller not yet passing it.
+    """
+    if not sentences:
+        return []
+
+    profile_source = corpus_text if corpus_text.strip() else " ".join(sentences)
+    profile = compute_mfw_profile(profile_source)
+    if not profile:
+        return sentences[:3]
 
     scored = []
     for s in sentences:
-        score = 0
-        words = s.split()
-        if 4 <= len(words) <= 12 and not hedge.search(s):
-            score += 3
-        if denial.search(s):
-            score += 4
-        if imperative.match(s.strip()):
-            score += 2
-        if len(adjective.findall(s)) == 0 and len(words) >= 5:
-            score += 1
-        if hedge.search(s):
-            score -= 2
-        scored.append((score, s))
+        words = re.findall(r"[a-zA-Z']+", s.lower())
+        if not words:
+            continue
+        # Average per-word typicality, not a raw sum -- otherwise
+        # longer sentences would win just by containing more matches
+        # rather than by being made of genuinely characteristic words.
+        typicality = sum(profile.get(w, 0.0) for w in words) / len(words)
+        scored.append((typicality, s))
+
+    if not scored:
+        return sentences[:3]
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
+    # Length variety preserved from the original design: don't return
+    # several sentences that all happen to be the same length just
+    # because they scored highest.
     selected = []
     lengths_used = set()
     for score, s in scored:
@@ -1074,18 +1099,13 @@ def _pick_anchor_sentences(sentences: list[str]) -> list[str]:
         if bucket not in lengths_used or len(selected) == 0:
             selected.append(s)
             lengths_used.add(bucket)
-        if len(selected) >= 3:
+        if len(selected) >= _ANCHOR_SENTENCE_CAP:
             break
 
     if len(selected) < 2:
-        selected = [s for _, s in scored[:3]]
+        selected = [s for _, s in scored[:_ANCHOR_SENTENCE_CAP]]
 
-    # Quality gate — only sentences that scored above 0 are peak sentences
-    peak = [s for s in selected if any(sc > 0 and sent == s for sc, sent in scored)]
-    if len(peak) >= 2:
-        selected = peak
-
-    return selected[:3]
+    return selected[:_ANCHOR_SENTENCE_CAP]
 def _score_thought_density(text: str) -> dict:
     """
     Measures thought density — how many distinct ideas per sentence.

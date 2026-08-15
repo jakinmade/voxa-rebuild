@@ -247,7 +247,7 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     # Not the first three. The ones that sound most like them.
     usable = [s for s in sentences if 5 <= len(s.split()) <= 20]
     if usable:
-        samples = _pick_anchor_sentences(usable)
+        samples = _pick_anchor_sentences(usable, corpus_text=raw_text)
         lines.append("\nANCHOR SENTENCES — their most distinctive sentences (calibrate against these, do not copy):")
         for s in samples:
             lines.append(f'  "{s}"')
