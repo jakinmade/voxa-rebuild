@@ -31,8 +31,6 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from streamlit.testing.v1 import AppTest
 from voice_engine import compute_baseline_metrics, analyse_writing, _score_sample_fitness
 

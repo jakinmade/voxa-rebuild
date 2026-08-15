@@ -253,7 +253,7 @@ def progress_dots(current: int, total: int = 4):
     dots = ""
     for i in range(1, total + 1):
         if i == current:
-            dots += f'<span class="active">\u25CF</span> '
+            dots += '<span class="active">\u25CF</span> '
         else:
             dots += "\u25CB "
     st.markdown(f'<div class="progress">{dots}</div>', unsafe_allow_html=True)

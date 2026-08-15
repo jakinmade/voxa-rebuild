@@ -3,27 +3,27 @@ deterministic_fixers.py — rule-based correction functions for the four
 voice_render_delta dimensions (hedge_density, sentence_length_sd,
 first_person_ratio, directive_ratio).
 
-STATUS: covered by tests/unit/test_deterministic_fixers.py. NOT YET
-wired into app.py's correction pass — that pass still calls
-build_correction_prompt() + a Claude API call (see app.py ~line 750).
-Swapping the two is a separate, explicit change once this file has
-been reviewed, per standing scope discipline.
+Wired into app.py's correction pass at two points: before the LLM
+correction call (runs first, cheapest possible fix), and again in the
+post-correction verify loop (catches whatever the LLM call missed or
+only partially applied). No LLM calls anywhere in this module — every
+function takes and returns plain text plus a bool for whether it
+fired, so a caller can log which rule applied, same evidence-trail
+principle as score_render_delta.
 
 Design rule, carried through every function here: fix only in the
 direction that's mechanically safe, decline everywhere else rather than
-guess. Four of the eight possible directions (one over/under per
-dimension) are handled; the other four stay flagged on purpose — see
-each function's docstring for why. This is not partial coverage papering
-over gaps; each declined direction was evaluated and rejected as a
-meaning-risk, same standard as the two that shipped.
-
-No LLM calls anywhere in this module. Every function takes and returns
-plain text plus a bool for whether it fired, so a caller can log which
-rule applied — same evidence-trail principle as score_render_delta.
+guess. Five of the eight possible directions (one over/under per
+dimension) are handled — hedge_density over-hedged, sentence_length_sd
+under-varied, first_person_ratio both over- and under-owned, and
+directive_ratio under-directive. The other three stay flagged on
+purpose — see each function's docstring for why. This is not partial
+coverage papering over gaps; each declined direction was evaluated and
+rejected as a meaning-risk, same standard as the ones that shipped.
 """
 
 import re
-from voice_engine import _extract_sentences, _protect_abbreviations, _imperative_pattern, _HEDGE_PATTERN
+from voice_engine import _extract_sentences, _imperative_pattern, _HEDGE_PATTERN
 
 # Single source of truth, imported from voice_engine.py rather than
 # duplicated here — this file previously kept its own hand-copied word

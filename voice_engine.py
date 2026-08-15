@@ -672,10 +672,8 @@ def _score_sample_fitness(text: str) -> dict:
     3. OWNERSHIP — first-person, accountable, self-authored
     """
     import re, math
-    from collections import Counter
 
     words = text.split()
-    total_words = max(len(words), 1)
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip() and len(s.split()) >= 2]
     total_sents = max(len(sentences), 1)
 
@@ -1088,14 +1086,14 @@ def _format_function_patterns(patterns: dict, input_genre: str = "email") -> str
         if words_list:
             words = ', '.join(f"'{w}'" for w in words_list)
             lines.append(f"  Words they actually use: {words}")
-            lines.append(f"  Use these naturally where they fit — they are part of their voice.")
+            lines.append("  Use these naturally where they fit — they are part of their voice.")
 
     if patterns.get('avoided_ai_connectors'):
         avoided = ', '.join(f"'{w}'" for w in patterns['avoided_ai_connectors'][:4])
         lines.append(f"  Words they never use (do not introduce): {avoided}")
 
     if patterns.get('subject_drop_ratio', 0) > 0.05:
-        lines.append(f"  They omit the subject and lead with the verb.")
+        lines.append("  They omit the subject and lead with the verb.")
         examples = patterns.get('subject_drop_examples', [])
         if examples:
             lines.append(f'    e.g. "{examples[0]}"')
@@ -1105,13 +1103,13 @@ def _format_function_patterns(patterns: dict, input_genre: str = "email") -> str
         lines.append(f'  They introduce new points with topic phrases: e.g. "{tp}"')
 
     if patterns.get('colon_rate', 0) > 0.1:
-        lines.append(f"  They use colons to introduce context — match this pattern.")
+        lines.append("  They use colons to introduce context — match this pattern.")
 
     # Only include email closers when rendering email-genre content
     if is_email and patterns.get('soft_ender_count', 0) > 0:
-        lines.append(f"  In emails they close with soft acknowledgements ('Hopefully this clarifies', 'Pls let me know').")
+        lines.append("  In emails they close with soft acknowledgements ('Hopefully this clarifies', 'Pls let me know').")
     elif not is_email:
-        lines.append(f"  NOTE: this person's email closers ('Hopefully', 'Pls let me know') are email-specific. Do NOT use them to end articles or pieces.")
+        lines.append("  NOTE: this person's email closers ('Hopefully', 'Pls let me know') are email-specific. Do NOT use them to end articles or pieces.")
 
     return "\n".join(lines)
 _ANCHOR_SENTENCE_CAP = 5
@@ -1354,11 +1352,11 @@ def _format_vocabulary_fingerprint(vocab: dict, input_genre: str = "article") ->
         # Show most frequent words — these are their natural vocabulary
         words_str = ', '.join(f"'{w}'" for w in vocab['top_words'][:20])
         lines.append(f"  Words they actually reach for: {words_str}")
-        lines.append(f"  Use these where they fit. Do not substitute elevated synonyms.")
+        lines.append("  Use these where they fit. Do not substitute elevated synonyms.")
 
     if vocab.get('avoided_ai_words'):
         # Show specific substitutions
-        lines.append(f"  SUBSTITUTIONS — words they never write and what to use instead:")
+        lines.append("  SUBSTITUTIONS — words they never write and what to use instead:")
         for ai_word, replacement in list(vocab['avoided_ai_words'].items())[:8]:
             lines.append(f"    '{ai_word}' → '{replacement}'")
 
@@ -1371,8 +1369,8 @@ def _format_vocabulary_fingerprint(vocab: dict, input_genre: str = "article") ->
             lines.append(f"  REGISTER: moderate word length (avg {avg_len:.1f} chars). "
                         f"Match this level.")
 
-    lines.append(f"  KEY PRINCIPLE: write about the thing, not the description of the thing. "
-                f"Not 'a narrative that X was Y' — just 'X was Y'.")
+    lines.append("  KEY PRINCIPLE: write about the thing, not the description of the thing. "
+                "Not 'a narrative that X was Y' — just 'X was Y'.")
 
     return "\n".join(lines)
 # ============================================================

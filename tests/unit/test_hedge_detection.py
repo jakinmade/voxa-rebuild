@@ -133,4 +133,4 @@ def test_safe_to_delete_hedges_does_not_include_clause_level_hedges():
     restructuring the sentence, not a clean word removal, same
     reasoning already applied to modal verbs in this module."""
     text = "I wonder if we should reconsider this."
-    assert not df._SAFE_TO_DELETE_HEDGES.search("I wonder if")
+    assert not df._SAFE_TO_DELETE_HEDGES.search(text)
