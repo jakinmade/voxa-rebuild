@@ -363,7 +363,16 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
                 # persistence.py.
                 save_profile_if_available()
 
-                st.success("Added. Your fingerprint just got stronger.")
+                # Same pattern already used for render_error: a bare
+                # st.success() call here is wiped by the st.rerun()
+                # immediately below before the browser ever paints it —
+                # the person clicks Add, the page reruns, and nothing
+                # visibly confirms anything happened, even though the
+                # sample genuinely was added (confirmed directly: word
+                # count, baseline, and dimension_stability all update
+                # correctly). session_state survives the rerun; a bare
+                # UI call does not.
+                st.session_state.deepen_success_message = "Added. Your fingerprint just got stronger."
                 st.rerun()
             else:
                 st.error("A bit more — at least a sentence or two.")
@@ -463,8 +472,27 @@ def screen_paste():
 # Screen 2 — Fingerprint reveal, as a checklist ("Your Voice")
 # ============================================================
 
+def _show_deepen_success_if_pending():
+    """Displays and clears the deepen-fingerprint success message left
+    in session_state by _deepen_fingerprint_panel's submit handler.
+    Called at the top of any screen that can host that panel — the
+    message has to survive the st.rerun() the handler triggers right
+    after setting it, and st.success() called before a rerun is wiped
+    before the browser ever paints it. Session state survives the
+    rerun; a bare UI call does not. Placed at the TOP of each caller
+    deliberately, not inside the panel itself, because after adding a
+    sample the caveat that gates the panel on Screen 4 may no longer
+    fire (that's the whole point of adding the sample) — the message
+    still needs to show even when the panel that produced it is gone.
+    """
+    if st.session_state.get("deepen_success_message"):
+        st.success(st.session_state.deepen_success_message)
+        st.session_state.deepen_success_message = None
+
+
 def screen_reveal():
     progress_dots(2)
+    _show_deepen_success_if_pending()
 
     st.markdown('<div class="headline">Your voice.</div>', unsafe_allow_html=True)
     st.markdown(
@@ -982,6 +1010,7 @@ def _run_render(input_text: str, is_refinement: bool = False) -> bool:
 
 def screen_render():
     progress_dots(4)
+    _show_deepen_success_if_pending()
 
     st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
