@@ -93,9 +93,27 @@ def _protect_abbreviations(text: str) -> str:
 
 
 def _extract_sentences(text: str) -> list[str]:
-    """Split into sentences. Returns non-empty sentences only."""
-    text = re.sub(r'\n+', '. ', text)
-    protected = _protect_abbreviations(text)
+    """Split into sentences. Returns non-empty sentences only.
+
+    Paragraph breaks are normalised to a single space between
+    sentence-ending punctuation, not unconditionally appended with a
+    fresh period — the previous version did text = re.sub(r'\n+', '. ',
+    text) regardless of what the paragraph already ended with, which
+    produced literal double punctuation ("?." , "..") whenever a
+    paragraph already ended in terminal punctuation. That corrupted
+    real rendered output, not just internal tokenisation: every
+    deterministic fixer in deterministic_fixers.py rebuilds its output
+    text from this function's sentence list via " ".join(...), so the
+    artifact shipped straight through to what a person actually saw.
+    Confirmed directly against a real render before this was fixed,
+    not a hypothetical edge case.
+    """
+    paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
+    normalised = ' '.join(
+        p if p.endswith(('.', '!', '?', ':')) else p + '.'
+        for p in paragraphs
+    )
+    protected = _protect_abbreviations(normalised)
     sentences = re.split(r"(?<=[.!?])\s+", protected.strip())
     sentences = [s.replace('\u0000', '.') for s in sentences]
     return [s.strip() for s in sentences if s.strip() and len(s.split()) >= 2]
@@ -128,10 +146,34 @@ _IMPERATIVE_VERBS = (
 )
 _imperative_pattern = re.compile(rf"^({_IMPERATIVE_VERBS})\b", re.I)
 
+# Narrow, evidence-based exclusion: "Report in minutes", "Response in
+# hours", "Delivery in days" are noun-phrase fragments common in
+# sales/marketing copy (implicitly "[A] report, in minutes"), not
+# commands, even though the sentence opens with a word from
+# _IMPERATIVE_VERBS. Confirmed as a real false positive against a live
+# render this session -- "Report in minutes, no build required on your
+# side" was scored as a directive sentence purely because "Report"
+# opens the imperative-verb list, which inflated directive_ratio and
+# in turn produced a wildly exaggerated percentage-drift reading given
+# how close to zero this dimension's baseline typically sits.
+# Deliberately narrow to this one demonstrated shape rather than a
+# general grammatical fix -- true part-of-speech disambiguation
+# (verb vs. noun) is out of scope for a regex-level check, same
+# standard already applied elsewhere in this codebase for similarly
+# ambiguous cases (see deterministic_fixers.py's note on why POS
+# tagging is deferred rather than guessed at).
+_NOUN_PHRASE_FRAGMENT = re.compile(
+    r"^\w+\s+in\s+(a\s+)?(minute|minutes|hour|hours|day|days|week|weeks|"
+    r"month|months|second|seconds|no\s+time)\b", re.I
+)
+
 
 def _imperative_sentences(sentences: list[str]) -> list[str]:
     """Sentences that start with an imperative verb."""
-    return [s for s in sentences if _imperative_pattern.match(s)]
+    return [
+        s for s in sentences
+        if _imperative_pattern.match(s) and not _NOUN_PHRASE_FRAGMENT.match(s.strip())
+    ]
 def _hedge_sentences(sentences: list[str]) -> list[str]:
     """Sentences containing hedge words."""
     hedges = re.compile(

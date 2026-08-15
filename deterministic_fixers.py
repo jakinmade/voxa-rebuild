@@ -107,6 +107,66 @@ def _clean_after_delete(s: str) -> str:
     return s
 
 
+def _split_into_paragraphs(text: str) -> list[str]:
+    """Splits raw text into paragraphs by run(s) of newlines, preserving
+    each paragraph's own content exactly. Exists so a fixer can process
+    sentence-by-sentence WITHIN a paragraph and rejoin with the
+    paragraph breaks restored afterward, rather than flattening a
+    multi-paragraph email into one continuous block — the bug every
+    fixer in this file had before this function existed: each one ran
+    _extract_sentences(text) on the FULL text at once, which discards
+    paragraph boundaries, then rejoined every sentence with a single
+    " ".join(...), collapsing however many paragraphs the input had
+    into one. Confirmed against a real multi-paragraph render this
+    session, not a hypothetical."""
+    return [p.strip() for p in re.split(r"\n+", text) if p.strip()]
+
+
+def _apply_across_paragraphs(text: str, per_sentence_fn, max_conversions: int | None = None) -> tuple[str, bool]:
+    """
+    Shared harness for the common fixer shape: decide independently,
+    sentence by sentence, whether to change it, then rejoin — but
+    rejoining WITHIN a paragraph (single space) and BETWEEN paragraphs
+    (blank line), instead of flattening everything the way a single
+    " ".join(_extract_sentences(text)) call over the whole text does.
+
+    per_sentence_fn(sentence) -> (new_sentence, changed: bool) is called
+    for each sentence across every paragraph, in order.
+
+    max_conversions, if given, caps how many sentences per_sentence_fn
+    is allowed to actually change GLOBALLY across the whole text (not
+    per paragraph) — once the cap is hit, remaining sentences pass
+    through unchanged without even being offered to per_sentence_fn,
+    preserving each caller's existing _MAX_CONVERSIONS_PER_PASS
+    semantics exactly as before this harness existed.
+    """
+    paragraphs = _split_into_paragraphs(text)
+    if not paragraphs:
+        return text, False
+
+    changed_any = False
+    conversions = 0
+    new_paragraphs = []
+    for para in paragraphs:
+        sentences = _extract_sentences(para)
+        if not sentences:
+            new_paragraphs.append(para)
+            continue
+        new_sentences = []
+        for s in sentences:
+            if max_conversions is not None and conversions >= max_conversions:
+                new_sentences.append(s)
+                continue
+            new_s, did_change = per_sentence_fn(s)
+            new_sentences.append(new_s)
+            if did_change:
+                changed_any = True
+                conversions += 1
+        new_paragraphs.append(" ".join(new_sentences))
+
+    return "\n\n".join(new_paragraphs), changed_any
+
+
 def _fix_hedge_density(text: str, target: float, current: float) -> tuple[str, bool]:
     """
     Deterministic hedge correction, over-hedged direction only
@@ -130,19 +190,12 @@ def _fix_hedge_density(text: str, target: float, current: float) -> tuple[str, b
     if current <= target:
         return text, False
 
-    sentences = _extract_sentences(text)
-    changed_any = False
-    fixed_sentences = []
-    for s in sentences:
+    def _fix_one(s: str) -> tuple[str, bool]:
         if _SAFE_TO_DELETE_HEDGES.search(s):
-            new_s = _SAFE_TO_DELETE_HEDGES.sub("", s)
-            new_s = _clean_after_delete(new_s)
-            fixed_sentences.append(new_s)
-            changed_any = True
-        else:
-            fixed_sentences.append(s)
+            return _clean_after_delete(_SAFE_TO_DELETE_HEDGES.sub("", s)), True
+        return s, False
 
-    return " ".join(fixed_sentences), changed_any
+    return _apply_across_paragraphs(text, _fix_one)
 
 
 def _fix_sentence_length_sd(text: str, target: float, current: float) -> tuple[str, bool]:
@@ -164,12 +217,27 @@ def _fix_sentence_length_sd(text: str, target: float, current: float) -> tuple[s
     if current >= target:
         return text, False
 
-    sentences = _extract_sentences(text)
-    if len(sentences) < 2:
+    paragraphs = _split_into_paragraphs(text)
+    if not paragraphs:
         return text, False
 
-    longest_idx = max(range(len(sentences)), key=lambda i: len(sentences[i].split()))
-    longest = sentences[longest_idx]
+    # Flat index across all paragraphs so "the single longest sentence
+    # in the whole text" still means the whole text, not just one
+    # paragraph — same selection behaviour as before this was made
+    # paragraph-aware, just tracking which paragraph each sentence
+    # came from so the split can be written back into the right place
+    # instead of flattening every paragraph into one on rejoin.
+    para_sentences = [_extract_sentences(p) for p in paragraphs]
+    flat = [
+        (pi, si, s)
+        for pi, sents in enumerate(para_sentences)
+        for si, s in enumerate(sents)
+    ]
+    if len(flat) < 2:
+        return text, False
+
+    longest_flat_idx = max(range(len(flat)), key=lambda i: len(flat[i][2].split()))
+    para_idx, sent_idx, longest = flat[longest_flat_idx]
 
     match = _COORD_SPLIT.search(longest)
     if not match:
@@ -193,8 +261,9 @@ def _fix_sentence_length_sd(text: str, target: float, current: float) -> tuple[s
     if not second_half.endswith((".", "!", "?")):
         second_half += "."
 
-    sentences[longest_idx:longest_idx + 1] = [first_half, second_half]
-    return " ".join(sentences), True
+    para_sentences[para_idx][sent_idx:sent_idx + 1] = [first_half, second_half]
+    new_paragraphs = [" ".join(sents) for sents in para_sentences]
+    return "\n\n".join(new_paragraphs), True
 
 
 
@@ -254,22 +323,16 @@ def _fix_first_person_ratio(text: str, target: float, current: float,
     if current >= target or not input_has_opinion_content:
         return text, False
 
-    sentences = _extract_sentences(text)
-    converted = 0
-    fixed_sentences = []
-    for s in sentences:
-        if (converted < _MAX_CONVERSIONS_PER_PASS
-                and _IMPERSONAL_OPENER.match(s)
+    def _fix_one(s: str) -> tuple[str, bool]:
+        if (_IMPERSONAL_OPENER.match(s)
                 and not _OTHER_ATTRIBUTION.search(s)
                 and not _HAS_QUOTE.search(s)):
             new_s = _IMPERSONAL_OPENER.sub("", s)
             new_s = "I think " + new_s[0].lower() + new_s[1:] if new_s else new_s
-            fixed_sentences.append(new_s)
-            converted += 1
-        else:
-            fixed_sentences.append(s)
+            return new_s, True
+        return s, False
 
-    return " ".join(fixed_sentences), converted > 0
+    return _apply_across_paragraphs(text, _fix_one, max_conversions=_MAX_CONVERSIONS_PER_PASS)
 
 
 # ------------------------------------------------------------------
@@ -314,23 +377,17 @@ def _fix_directive_ratio(text: str, target: float, current: float,
     if current >= target or not input_has_directive_content:
         return text, False
 
-    sentences = _extract_sentences(text)
-    converted = 0
-    fixed_sentences = []
-    for s in sentences:
+    def _fix_one(s: str) -> tuple[str, bool]:
         stripped = _POLITE_WRAPPER.sub("", s).strip().rstrip("?")
         candidate = (stripped[0].upper() + stripped[1:]) if stripped else stripped
-        if (converted < _MAX_CONVERSIONS_PER_PASS
-                and stripped != s.rstrip("?").strip()   # wrapper actually matched
+        if (stripped != s.rstrip("?").strip()   # wrapper actually matched
                 and _imperative_pattern.match(candidate)):
             if not candidate.endswith((".", "!", "?")):
                 candidate += "."
-            fixed_sentences.append(candidate)
-            converted += 1
-        else:
-            fixed_sentences.append(s)
+            return candidate, True
+        return s, False
 
-    return " ".join(fixed_sentences), converted > 0
+    return _apply_across_paragraphs(text, _fix_one, max_conversions=_MAX_CONVERSIONS_PER_PASS)
 
 
 # ------------------------------------------------------------------
