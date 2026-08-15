@@ -66,8 +66,19 @@ _HEDGE_WORDS = _HEDGE_PATTERN
 # auto-corrected, same standard as everywhere else in this module: a
 # regex-level fixer should never be less conservative than the
 # structural risk actually requires.
+# "rather" carries a negative lookahead the other words here don't
+# need, because it has a second, non-hedge grammatical role none of
+# its neighbours do: half of the comparative construction "rather
+# than" ("found the gap rather than a subdivision"). Deleting it there
+# doesn't tighten a claim, it strips the comparative's second term
+# away from its connector and leaves a fragment ("found the gap than a
+# subdivision"). Confirmed against a real render where this fired
+# twice and shipped two broken sentences before this exclusion existed
+# — "rather" alone, deleted correctly as a hedge, and "rather than",
+# where the same deletion is a grammar break, are not the same case
+# and this function must not treat them as one.
 _SAFE_TO_DELETE_HEDGES = re.compile(
-    r"\b(perhaps|possibly|maybe|somewhat|quite|rather|potentially|arguably|"
+    r"\b(perhaps|possibly|maybe|somewhat|quite|rather(?!\s+than)|potentially|arguably|"
     r"presumably|apparently|allegedly|seemingly|supposedly)\b[ ]?",
     re.I
 )

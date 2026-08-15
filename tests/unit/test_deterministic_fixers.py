@@ -68,6 +68,41 @@ def test_hedge_density_never_touches_absolute_claim_wording():
     assert "possibly" not in fixed
 
 
+def test_hedge_density_leaves_rather_than_intact():
+    """Regression: 'rather' is on the safe-to-delete list as a hedge
+    adverb ('that's rather good'), but 'rather than' is a comparative
+    construction, not a hedge — deleting 'rather' there strips the
+    connector and leaves a fragment. Confirmed against a real render
+    that shipped 'found the gap than a subdivision of one' before this
+    exclusion existed. Must decline entirely here since there's nothing
+    else in the sentence for this function to safely fix."""
+    text = "I think you have found the gap rather than a subdivision of one."
+    before = compute_baseline_metrics(text)["hedge_density"]
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=max(before, 1.0))
+    assert applied is False
+    assert fixed == text
+    assert "rather than" in fixed
+
+
+def test_hedge_density_leaves_rather_than_intact_mid_sentence():
+    """Same construction, different position in the sentence — the
+    other broken line from the same real render."""
+    text = "Tied to change in the agent's surface rather than to a calendar."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert "rather than to a calendar" in fixed
+
+
+def test_hedge_density_still_deletes_plain_rather():
+    """The exclusion must be narrow — bare 'rather' used as a hedge
+    adverb, with no following 'than', still deletes normally."""
+    text = "The result was rather good, all things considered."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is True
+    assert "rather" not in fixed
+    assert fixed == "The result was good, all things considered."
+
+
 def test_hedge_density_refuses_when_already_under_target():
     text = "It is somewhat unclear."
     fixed, applied = df._fix_hedge_density(text, target=10.0, current=5.0)
