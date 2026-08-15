@@ -42,6 +42,17 @@ def test_surface_as_genuine_verb_still_flagged():
     assert ve._ANALYTICAL_TELL_PHRASES.search("Concerns surfaced during the review.")
 
 
+def test_surface_as_determiner_noun_not_flagged():
+    """Regression guard: the original fix only excluded possessive forms
+    ('s, its). A determiner-led noun usage with the same grammar ("the
+    surface is...") was still a false positive — found against a real
+    render, same false-positive class as the possessive case above."""
+    text = "It is harder, but the surface is at least more legible."
+    assert ve._ANALYTICAL_TELL_PHRASES.search(text) is None
+    assert ve._ANALYTICAL_TELL_PHRASES.search("This surface needs monitoring.") is None
+    assert ve._ANALYTICAL_TELL_PHRASES.search("A surface reading misses it.") is None
+
+
 def test_surface_area_exclusion_still_works():
     """Pre-existing exclusion, must survive the new one."""
     assert ve._ANALYTICAL_TELL_PHRASES.search("Its surface area is large.") is None

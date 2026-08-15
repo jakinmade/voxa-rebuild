@@ -2183,7 +2183,16 @@ _ANALYTICAL_TELL_PHRASES = re.compile(
     # this session: "tied to change in the agent's surface" was
     # flagged even though "surface" there is unambiguously a noun, the
     # person's own genuine phrasing, not an AI tell.
-    r"(?<!'s )(?<!its )surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
+    # Earlier fix (this session, commit 4cd10c7) only excluded possessive
+    # forms before "surface" ("agent's surface", "its surface"). Gap found
+    # against a real render just now: plain-determiner noun usage ("the
+    # surface is at least more legible") was still flagged, same false-
+    # positive class, just a different word in front. Each lookbehind must
+    # stay individually fixed-width (Python re constraint), so determiners
+    # are listed separately rather than as one alternation.
+    r"(?<!'s )(?<!its )(?<!the )(?<!this )(?<!that )(?<!any )(?<!our )"
+    r"(?<!her )(?<!his )(?<!each )(?<!a )(?<!an )(?<!no )"
+    r"surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
     r"unpack(s|ed|ing)?|gestur(e|es|ed|ing) (at|toward|towards)|"
     r"sit(s)? with|push back (on|against)|"
     r"worth noting|to be fair|on reflection|"
