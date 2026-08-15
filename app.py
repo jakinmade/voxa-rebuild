@@ -39,6 +39,7 @@ from prompts import (
     _detect_mode, apply_intent_mode, _detect_locale,
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
     build_correction_prompt, merge_starter_evidence,
+    build_voice_profile_summary_prompt,
 )
 from components.paste_guard import paste_guard
 from deterministic_fixers import (
@@ -721,9 +722,73 @@ def screen_sample2():
 # Screen 4 — Render, Voice Report, one refinement
 # ============================================================
 
-def _run_render(input_text: str, is_refinement: bool = False) -> bool:
+def _generate_voice_profile_summary(corpus_text: str) -> str | None:
+    """
+    One-time distillation call: condenses a person's raw writing corpus
+    into a short natural-language profile of their distinctive habits.
+    See build_voice_profile_summary_prompt's own docstring for the
+    research basis — generating from a distilled profile measurably
+    outperforms generating from raw context directly.
+
+    Generated lazily on the FIRST render call after a baseline exists,
+    not at Screen 3 completion — deliberately. An earlier version of
+    this called it synchronously right before the Screen 3 -> 4
+    transition, which would have added a real API round-trip's worth
+    of latency to the exact "zero friction" onboarding flow this
+    product has been built around. Generating on first render instead
+    means onboarding completion stays instant; the one-time cost is
+    paid at the point where the person is already waiting on an API
+    call anyway (the render itself), not added as a new wait on top of
+    a step that was previously instant. Cached in session_state
+    (voice_profile_summary) from then on — subsequent renders and the
+    deepen-fingerprint panel both check for an existing value before
+    calling this again.
+
+    Cost guardrail, per standing rule, checked before this was built:
+    minimum viable max_tokens (200 — this only needs to hold 3-5
+    sentences), no auto-retry on failure, cached rather than
+    regenerated on every render.
+
+    Returns None on any failure — this is a quality enhancement, not
+    a required part of the pipeline. A render with no distilled
+    profile falls back to exactly what already existed before this
+    feature: anchor sentences and numeric targets alone.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    try:
+        api_key = st.secrets["ANTHROPIC_API_KEY"] or api_key
+    except Exception:
+        pass
+    if not api_key or not corpus_text or not corpus_text.strip():
+        return None
+
+    import anthropic
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=200,
+            system=build_voice_profile_summary_prompt(),
+            messages=[{"role": "user", "content": corpus_text}],
+        )
+        summary = response.content[0].text.strip()
+        log.info("voice_profile_summary_generated", summary_length=len(summary))
+        return summary
+    except Exception:
+        log.error("voice_profile_summary_generation_failed", exc_info=True)
+        return None
+
+
+def _run_render(input_text: str, is_refinement: bool = False, render_context: str = "") -> bool:
     """The actual generation pipeline. Kept as one function so the
     refinement re-render below can call the same path.
+
+    render_context: optional, per-render audience/purpose text ("who's
+    this for, what's it for") from the field above the paste box on
+    Screen 4. Steers generation only — deliberately never touches the
+    numeric baseline targets (hedge_density, ownership, etc.), which
+    stay verifying against the person's own blended voice regardless
+    of register. See the field's own comment in screen_render() for
+    why these are kept as two separate signals.
 
     Returns True on success, False on failure. Callers must check this
     before treating the render as having happened (e.g. before marking
@@ -779,6 +844,19 @@ def _run_render(input_text: str, is_refinement: bool = False) -> bool:
     fingerprint_corpus = raw_text + " " + " ".join(st.session_state.get("sample2_completions", []))
     fingerprint_corpus = fingerprint_corpus.strip()
 
+    # Lazy, cached distillation call — see _generate_voice_profile_summary's
+    # docstring for why this happens here (first render) rather than at
+    # Screen 3 completion (would add latency to what's meant to be an
+    # instant onboarding step). Only fires once per baseline; a render
+    # while it's still None just proceeds without it (fail-open, same
+    # standard as everywhere else new this session — this is a quality
+    # enhancement, never a blocker).
+    if baseline and not st.session_state.get("voice_profile_summary"):
+        summary = _generate_voice_profile_summary(fingerprint_corpus or raw_text)
+        if summary:
+            st.session_state.voice_profile_summary = summary
+            save_profile_if_available()
+
     voice_dna = _build_voice_dna(observations, fingerprint_corpus or raw_text, baseline, ai_score)
     mode_instruction = apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
@@ -800,7 +878,8 @@ def _run_render(input_text: str, is_refinement: bool = False) -> bool:
     system = _build_system_prompt(
         voice_dna=voice_dna, mode_instruction=mode_instruction,
         word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
-        input_text=input_text,
+        input_text=input_text, render_context=render_context,
+        voice_profile_summary=st.session_state.get("voice_profile_summary", ""),
     )
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -1015,6 +1094,23 @@ def screen_render():
     st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
 
+    # Optional, skippable, per-render — not onboarding. Register/audience
+    # is a genuinely separate axis from personal voice (the field's own
+    # theory of style splits these into two distinct groups: registers/
+    # genres people modulate deliberately by situation, versus the
+    # unintentional style that comes from who someone is as a writer).
+    # The baseline fingerprint only ever measures the second. This gives
+    # the render a signal for the first, without touching the numeric
+    # baseline targets at all — deliberately: those still verify against
+    # the person's own blended voice, this only steers word choice and
+    # formality at generation time. Same fast-path-by-default pattern as
+    # the deepen-fingerprint panel: visible, not gated, easy to ignore.
+    render_context = st.text_input(
+        "context", value="",
+        placeholder="Optional — who's this for, and what's it for?",
+        label_visibility="collapsed",
+    )
+
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
         placeholder="Paste AI-generated text here — an email draft, a LinkedIn post, a proposal section...",
@@ -1026,9 +1122,10 @@ def screen_render():
             st.error("Paste some text first.")
         else:
             st.session_state.render_input_text = input_text
+            st.session_state.render_context_input = render_context
             st.session_state.render_output = ""
             st.session_state.refinement_used = False
-            _run_render(input_text)
+            _run_render(input_text, render_context=render_context)
             st.rerun()
 
     if st.session_state.get("render_error"):
@@ -1036,7 +1133,10 @@ def screen_render():
         if st.button("Try again", key="retry_render"):
             last_attempt = st.session_state.get("render_last_attempt", input_text)
             was_refinement = st.session_state.get("render_last_is_refinement", False)
-            if _run_render(last_attempt, is_refinement=was_refinement) and was_refinement:
+            if _run_render(
+                last_attempt, is_refinement=was_refinement,
+                render_context=st.session_state.get("render_context_input", ""),
+            ) and was_refinement:
                 st.session_state.refinement_used = True
             st.rerun()
 
@@ -1156,7 +1256,10 @@ def screen_render():
                 # succeeded — previously this flag was set unconditionally
                 # before the call, so a failed render still burned the
                 # user's one refinement with nothing to show for it.
-                if _run_render(refined_input, is_refinement=True):
+                if _run_render(
+                    refined_input, is_refinement=True,
+                    render_context=st.session_state.get("render_context_input", ""),
+                ):
                     st.session_state.refinement_used = True
                 st.rerun()
 

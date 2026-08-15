@@ -18,7 +18,9 @@ Two failure modes are handled deliberately, not left to raise:
     never block the app on a persistence-layer problem.
 
 Only what's expensive to rebuild is persisted: the raw writing sample,
-the starter completions, and the derived baselines. Render output and
+the starter completions, the derived baselines, and the distilled
+voice-profile summary (itself the result of an API call — see
+_generate_voice_profile_summary in app.py). Render output and
 in-progress refinement state are NOT persisted — cheap to regenerate,
 no reason to carry them across a session boundary.
 """
@@ -121,6 +123,11 @@ def restore_profile_if_available() -> bool:
         st.session_state["sample2_completions"] = row.get("sample2_completions") or ["", "", "", ""]
         st.session_state["baseline_fingerprint"] = row.get("baseline_fingerprint")
         st.session_state["starter_baseline"] = row.get("starter_baseline")
+        # Optional — a row saved before this feature existed simply
+        # won't have it, and a render proceeds exactly as it did
+        # before (anchor sentences and numeric targets alone).
+        if row.get("voice_profile_summary"):
+            st.session_state["voice_profile_summary"] = row["voice_profile_summary"]
     except Exception:
         log.error("profile_restore_apply_failed", exc_info=True)
         return False
@@ -158,6 +165,7 @@ def save_profile_if_available() -> None:
         "sample2_completions": st.session_state.get("sample2_completions", ["", "", "", ""]),
         "baseline_fingerprint": baseline,
         "starter_baseline": st.session_state.get("starter_baseline"),
+        "voice_profile_summary": st.session_state.get("voice_profile_summary"),
     }
 
     try:

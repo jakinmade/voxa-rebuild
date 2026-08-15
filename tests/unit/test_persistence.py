@@ -140,6 +140,37 @@ def test_restore_populates_session_state_on_a_real_match():
     assert st.session_state["starter_baseline"] == {"hedge_density": 1.2}
 
 
+def test_restore_populates_voice_profile_summary_when_present():
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+        "voice_profile_summary": "Writes short, direct sentences. Rarely hedges.",
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert st.session_state["voice_profile_summary"] == "Writes short, direct sentences. Rarely hedges."
+
+
+def test_restore_omits_voice_profile_summary_key_when_absent():
+    """A row saved before this feature existed won't have the column —
+    restore must not set the key at all in that case (not set it to
+    None), so downstream code's simple truthiness checks behave the
+    same as if the feature had just never generated a summary yet."""
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert "voice_profile_summary" not in st.session_state
+
+
 def test_restore_does_not_overwrite_an_already_populated_session():
     """Guards against clobbering a baseline built earlier this same
     session (e.g. a mid-flow rerun) with a stale saved profile."""
@@ -185,6 +216,35 @@ def test_save_upserts_with_the_expected_payload():
     assert payload["raw_text"] == "some writing"
     assert payload["baseline_fingerprint"] == {"hedge_density": 1.0}
     assert payload["starter_baseline"] == {"hedge_density": 1.1}
+
+
+def test_save_includes_voice_profile_summary_when_present():
+    st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
+    st.session_state["_device_id"] = "device-1"
+    st.session_state["voice_profile_summary"] = "Writes short, direct sentences."
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        mock_client = _mock_supabase_client()
+        with patch("persistence._get_supabase_client", return_value=mock_client):
+            persistence.save_profile_if_available()
+
+    payload = mock_client.table.return_value.upsert.call_args[0][0]
+    assert payload["voice_profile_summary"] == "Writes short, direct sentences."
+
+
+def test_save_includes_none_for_voice_profile_summary_when_not_yet_generated():
+    """Confirms the key is always present in the payload (as None if
+    not yet generated), not silently omitted — an upsert with a
+    missing key vs. an explicit None can behave differently depending
+    on the client, so this pins the actual behaviour down."""
+    st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
+    st.session_state["_device_id"] = "device-1"
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        mock_client = _mock_supabase_client()
+        with patch("persistence._get_supabase_client", return_value=mock_client):
+            persistence.save_profile_if_available()
+
+    payload = mock_client.table.return_value.upsert.call_args[0][0]
+    assert payload["voice_profile_summary"] is None
 
 
 def test_save_failure_does_not_raise():

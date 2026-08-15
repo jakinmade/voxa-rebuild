@@ -110,7 +110,17 @@ def test_verify_pass_cleans_up_a_hedge_the_llm_correction_left_behind(monkeypatc
 
     def controlled_create(**kwargs):
         call_log.append(kwargs)
-        call_number = len(call_log)
+        # The voice-profile-summary call is uniquely identifiable by its
+        # own max_tokens (200 — see _generate_voice_profile_summary),
+        # rather than relying on call position, which the profile-summary
+        # feature shifted once already (it fires once, lazily, on the
+        # first render before anything else) and could shift again if
+        # another one-time call gets added later.
+        if kwargs.get("max_tokens") == 200:
+            return _fake_response("Writes short, direct sentences. Rarely hedges.")
+
+        content_calls = [c for c in call_log if c.get("max_tokens") != 200]
+        call_number = len(content_calls)
         if call_number == 1:
             # Initial render — deliberately over-hedged.
             return _fake_response(
@@ -136,10 +146,15 @@ def test_verify_pass_cleans_up_a_hedge_the_llm_correction_left_behind(monkeypatc
         f"Expected the free verify pass to remove the residual hedge the "
         f"LLM correction left behind, but it survived: {output!r}"
     )
-    # No extra API call: same 3-call shape (initial render, grammar-fix,
-    # correction) as the pipeline already had before this fix — the
-    # verify pass must add zero additional LLM calls.
-    assert len(call_log) == 3, f"Expected exactly 3 LLM calls (verify pass must be free), got {len(call_log)}"
+    # No extra API call beyond the pipeline's existing shape (initial
+    # render, grammar-fix, correction) PLUS the one-time profile-summary
+    # call this render also triggers (first render for this baseline) —
+    # the verify pass itself must add zero additional LLM calls on top
+    # of that.
+    content_calls = [c for c in call_log if c.get("max_tokens") != 200]
+    assert len(content_calls) == 3, (
+        f"Expected exactly 3 content LLM calls (verify pass must be free), got {len(content_calls)}"
+    )
 
 
 def test_verify_pass_does_nothing_when_correction_fully_succeeded(monkeypatch):

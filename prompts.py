@@ -380,6 +380,8 @@ def _build_system_prompt(
     ai_score: float,
     baseline: dict | None = None,
     input_text: str = "",
+    render_context: str = "",
+    voice_profile_summary: str = "",
 ) -> str:
     """
     Builds the full system prompt.
@@ -392,6 +394,21 @@ def _build_system_prompt(
     see _build_restoration_targets. Optional/backward-compatible: if omitted,
     defaults to permissive (target included) rather than silently changing
     behaviour for any caller not yet passing it.
+
+    render_context: optional, per-render "who's this for, what's it for"
+    text from the field above the paste box. Register/audience is a
+    genuinely distinct axis from personal voice, not a variant of it -
+    injected as generation steering only, deliberately separate from
+    voice_dna's numeric baseline targets, which stay verifying against
+    the person's own blended voice regardless of what this render is for.
+
+    voice_profile_summary: an LLM-distilled natural-language profile of
+    the person's writing habits (see build_voice_profile_summary_prompt),
+    generated once and cached, not built fresh per render. Sits alongside
+    voice_dna's real anchor excerpts and measured numeric dimensions as a
+    third, complementary signal — not a replacement for either. Optional:
+    a render with none (generation failed, or hasn't happened yet for
+    this baseline) proceeds exactly as it did before this existed.
     """
 
     base_rules = (
@@ -413,6 +430,20 @@ def _build_system_prompt(
         "input - more detail on what is already there. Do not pad with filler, and do not introduce "
         "a new claim, opinion, or idea that is not stated or directly implied by the input, even to "
         "hit the word count."
+    )
+
+    render_context_block = (
+        f"CONTEXT FOR THIS PIECE: {render_context.strip()}\n"
+        "Use this only to inform word choice, formality, and directness "
+        "for this specific piece — it does not change the voice profile "
+        "above, which still reflects this person's own writing regardless "
+        "of who this particular piece is for.\n\n"
+        if render_context and render_context.strip() else ""
+    )
+
+    profile_summary_block = (
+        f"WRITER'S DISTINCTIVE HABITS: {voice_profile_summary.strip()}\n\n"
+        if voice_profile_summary and voice_profile_summary.strip() else ""
     )
 
     if ai_score >= 0.25:
@@ -453,7 +484,9 @@ def _build_system_prompt(
             "the voice profile below.\n\n"
             f"VOICE PROFILE:\n{voice_dna}"
             f"{restoration_block}\n\n"
+            f"{profile_summary_block}"
             f"TASK:\n{mode_instruction}\n\n"
+            f"{render_context_block}"
             f"{register_instruction}"
             "STRIPPING INSTRUCTIONS:\n"
             "- Identify every AI tell in the input. Rewrite those sentences from scratch.\n"
@@ -476,7 +509,9 @@ def _build_system_prompt(
             "You are a voice rendering engine. Your job is to rewrite this text so it sounds "
             "exactly like the person who wrote the samples in the voice profile below.\n\n"
             f"VOICE PROFILE:\n{voice_dna}\n\n"
+            f"{profile_summary_block}"
             f"TASK:\n{mode_instruction}\n\n"
+            f"{render_context_block}"
             "RENDERING INSTRUCTIONS:\n"
             "- Match the sentence length from the profile exactly. If they write short, write short.\n"
             "- Match the directness. If they own their statements, do not hedge.\n"
@@ -1121,6 +1156,56 @@ def _grammar_fix_pass(text: str, client) -> str:
         messages=[{"role": "user", "content": text}],
     )
     return response.content[0].text.strip()
+
+
+def build_voice_profile_summary_prompt() -> str:
+    """
+    System prompt for the one-time distillation call: take a person's
+    raw writing corpus and observations, and have Claude condense them
+    into a short natural-language profile of their distinctive habits.
+
+    Grounded in a specific finding, not a guess: research on guided
+    profile generation found that generating FROM a distilled profile
+    outperformed generating from raw personal context directly — a
+    real accuracy improvement in preference prediction, and a real
+    quality lift on the closest comparable task (paraphrasing) to
+    what VOICOVA does. The mechanism: an LLM given a person's raw
+    writing samples and told "sound like this" has to do its own
+    ad-hoc distillation under generation pressure, at the same time as
+    generating; doing that distillation as a SEPARATE, dedicated step
+    beforehand — with no generation task competing for the model's
+    attention — produces a sharper signal to condition on.
+
+    This is genuinely different from the anchor sentences and numeric
+    baseline targets already in the prompt, not a replacement for
+    them: anchors are real excerpts, numeric targets are measured
+    dimensions, this is a synthesised natural-language description
+    sitting between the two. All three get injected together — see
+    _build_voice_dna's caller in app.py.
+
+    Deliberately short output: this is one signal among several in an
+    already-long system prompt, not the whole thing. A few sentences,
+    not a report.
+    """
+    return (
+        "You are analysing a sample of someone's own writing to produce a short, "
+        "concise profile of their distinctive habits as a writer — not a summary "
+        "of what they wrote, a description of HOW they write.\n\n"
+        "Cover only what's genuinely distinctive: sentence rhythm, how they open "
+        "and close thoughts, what they emphasise, recurring phrasing patterns, "
+        "how directly they state things, how much (or little) they hedge or "
+        "qualify, whether they use humour or bluntness, any characteristic verbal "
+        "tics. Skip anything generic that could describe most competent writers.\n\n"
+        "Write 3-5 sentences, plain prose, no headers, no bullet points, no "
+        "preamble. Address the writer's habits directly ('Opens with the concrete "
+        "problem before context.' not 'The writer opens with...'). This will be "
+        "used as a compact reference for another model generating text in this "
+        "person's voice, not shown to the person themselves — write for that "
+        "purpose, not as a compliment or a critique.\n\n"
+        "Return only the profile. Nothing else."
+    )
+
+
 # ============================================================
 # New in v4 — correction prompt extended to target semantic drift
 # ============================================================
