@@ -41,6 +41,13 @@ from prompts import (
     build_correction_prompt, merge_starter_evidence,
 )
 from components.paste_guard import paste_guard
+from deterministic_fixers import (
+    _fix_hedge_density, _fix_sentence_length_sd,
+    _fix_first_person_ratio, _fix_directive_ratio, _fix_modal_hedge,
+)
+from logging_config import get_logger
+
+log = get_logger(__name__)
 
 # ---- Page config — must be first ----
 st.set_page_config(
@@ -668,7 +675,7 @@ def screen_sample2():
 # Screen 4 — Render, Voice Report, one refinement
 # ============================================================
 
-def _run_render(input_text: str) -> bool:
+def _run_render(input_text: str, is_refinement: bool = False) -> bool:
     """The actual generation pipeline. Kept as one function so the
     refinement re-render below can call the same path.
 
@@ -681,7 +688,16 @@ def _run_render(input_text: str) -> bool:
     here, because the caller immediately triggers st.rerun() afterwards,
     which would wipe an error shown before it — session_state survives
     the rerun, a bare st.error() call does not.
+
+    is_refinement / render_last_attempt / render_last_is_refinement are
+    recorded here (not by each caller separately) so the retry button
+    shown alongside render_error always has an exact copy of what was
+    actually sent, whichever path failed — the original paste or a
+    refinement request — without duplicating that bookkeeping at every
+    call site.
     """
+    st.session_state.render_last_attempt = input_text
+    st.session_state.render_last_is_refinement = is_refinement
     st.session_state.render_error = None
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     try:
@@ -691,12 +707,17 @@ def _run_render(input_text: str) -> bool:
 
     if not api_key:
         st.session_state.render_error = "API key missing."
+        log.error("render_failed", reason="api_key_missing", is_refinement=is_refinement)
         return False
 
     import anthropic
 
     detected_mode = _detect_mode(input_text)
     st.session_state.intent_mode = detected_mode
+    log.info(
+        "render_start", input_words=len(input_text.split()),
+        is_refinement=is_refinement, detected_mode=detected_mode,
+    )
 
     ai_score = _score_ai_signal(input_text)
     observations = st.session_state.observations
@@ -753,6 +774,7 @@ def _run_render(input_text: str) -> bool:
         st.session_state.render_error = (
             "That didn't go through — your text is safe, try again."
         )
+        log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
         return False
 
     if baseline:
@@ -768,8 +790,64 @@ def _run_render(input_text: str) -> bool:
         starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
         correction_delta = merge_starter_evidence(delta, starter_delta)
 
+        # Deterministic fixer pass — runs before the LLM correction call,
+        # not instead of it. Each fixer only fires on the one direction
+        # it can safely handle (see deterministic_fixers.py); anything
+        # it declines is left for build_correction_prompt() below, same
+        # as before this pass existed. No API call, no meaning risk
+        # beyond what each fixer's own docstring already accepts.
+        if correction_delta.get("hedge_density", {}).get("verdict") == "MISSED":
+            d = correction_delta["hedge_density"]
+            clean, hedge_fixed = _fix_hedge_density(clean, d["baseline"], d["output"])
+            clean, modal_fixed = _fix_modal_hedge(clean, d["baseline"], d["output"])
+        else:
+            hedge_fixed = modal_fixed = False
+        if correction_delta.get("sentence_length_sd", {}).get("verdict") == "MISSED":
+            d = correction_delta["sentence_length_sd"]
+            clean, rhythm_fixed = _fix_sentence_length_sd(clean, d["baseline"], d["output"])
+        else:
+            rhythm_fixed = False
+        if correction_delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
+            d = correction_delta["first_person_ratio"]
+            clean, ownership_fixed = _fix_first_person_ratio(
+                clean, d["baseline"], d["output"], input_has_opinion_content
+            )
+        else:
+            ownership_fixed = False
+        if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
+            d = correction_delta["directive_ratio"]
+            clean, directive_fixed = _fix_directive_ratio(
+                clean, d["baseline"], d["output"], input_has_directive_content
+            )
+        else:
+            directive_fixed = False
+        log.info(
+            "deterministic_fixers_applied",
+            hedge_density=hedge_fixed, modal_hedge=modal_fixed,
+            sentence_length_sd=rhythm_fixed, first_person_ratio=ownership_fixed,
+            directive_ratio=directive_fixed,
+        )
+
+        # Re-score after the deterministic pass so the LLM correction
+        # call — if still needed — only targets what genuinely survived
+        # (residual modal hedges, noun-phrase subjects, non-imperative
+        # wrappers, etc. — the directions each fixer declines on
+        # purpose), not dimensions the deterministic pass already fixed.
+        clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+        if st.session_state.get("locale", "uk") == "uk":
+            clean = _apply_uk_english(clean)
+        delta = score_render_delta(baseline, clean)
+        semantic = score_semantic_drift(input_text, clean)
+        starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
+        correction_delta = merge_starter_evidence(delta, starter_delta)
+
         correction_prompt = build_correction_prompt(
             correction_delta, semantic, input_has_opinion_content, input_has_directive_content
+        )
+        log.info(
+            "correction_pass_decision",
+            llm_correction_needed=bool(correction_prompt),
+            missed_dimensions=[k for k, d in correction_delta.items() if d["verdict"] == "MISSED"],
         )
         if correction_prompt:
             try:
@@ -785,6 +863,7 @@ def _run_render(input_text: str) -> bool:
                 delta = score_render_delta(baseline, clean)
                 semantic = score_semantic_drift(input_text, clean)
             except Exception:
+                log.error("correction_pass_llm_failed", stage="correction", exc_info=True)
                 pass  # correction pass failed — keep the original render
 
         # Measured verification gate, not a trusted fix-and-hope step.
@@ -802,6 +881,13 @@ def _run_render(input_text: str) -> bool:
             st.session_state.get("dimension_stability"),
         )
         risk = compute_risk(delta, semantic, ai_tells)
+        log.info(
+            "render_complete", is_refinement=is_refinement,
+            confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
+            risk=risk.get("level") if isinstance(risk, dict) else risk,
+            ai_tells_clean=ai_tells["clean"],
+            missed_dimensions=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
+        )
 
         # Second, independently-grounded voice-match signal alongside
         # the four-heuristic delta above — see compute_burrows_delta's
@@ -855,6 +941,12 @@ def screen_render():
 
     if st.session_state.get("render_error"):
         st.error(st.session_state.render_error)
+        if st.button("Try again", key="retry_render"):
+            last_attempt = st.session_state.get("render_last_attempt", input_text)
+            was_refinement = st.session_state.get("render_last_is_refinement", False)
+            if _run_render(last_attempt, is_refinement=was_refinement) and was_refinement:
+                st.session_state.refinement_used = True
+            st.rerun()
 
     output = st.session_state.get("render_output", "")
     if output:
@@ -972,7 +1064,7 @@ def screen_render():
                 # succeeded — previously this flag was set unconditionally
                 # before the call, so a failed render still burned the
                 # user's one refinement with nothing to show for it.
-                if _run_render(refined_input):
+                if _run_render(refined_input, is_refinement=True):
                     st.session_state.refinement_used = True
                 st.rerun()
 

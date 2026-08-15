@@ -11,8 +11,8 @@ dependencies = [
     "voxa-core",
     "voxa-profile",
     "voxa-rendering",
-    "pydantic>=2.0",
-    "structlog>=24.0",
+    "pydantic==2.13.4",
+    "structlog==26.1.0",
 ]
 
 [tool.hatch.build.targets.wheel]

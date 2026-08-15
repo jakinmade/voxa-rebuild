@@ -9,9 +9,9 @@ description = "Voxa Layer 3 — Voice Rendering Engine"
 requires-python = ">=3.12"
 dependencies = [
     "voxa-core",
-    "pydantic>=2.0",
-    "structlog>=24.0",
-    "httpx>=0.27.0",
+    "pydantic==2.13.4",
+    "structlog==26.1.0",
+    "httpx==0.28.1",
 ]
 
 [tool.hatch.build.targets.wheel]

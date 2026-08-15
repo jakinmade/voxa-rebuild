@@ -1,0 +1,34 @@
+# CI for VOICOVA. This does not deploy — Railway's own GitHub integration
+# already auto-deploys on push to main (see railway.json). This workflow's
+# only job is to run the full test suite on every push and PR so a broken
+# change is visible before it reaches Railway, not after.
+#
+# To actually block merges on failure, turn on branch protection for
+# main in GitHub repo settings (Settings -> Branches -> require this
+# workflow to pass) — that's a one-time repo setting, not something a
+# workflow file can do on its own.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
