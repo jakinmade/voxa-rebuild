@@ -335,6 +335,103 @@ def _fix_first_person_ratio(text: str, target: float, current: float,
     return _apply_across_paragraphs(text, _fix_one, max_conversions=_MAX_CONVERSIONS_PER_PASS)
 
 
+# Two groups, deliberately handled differently:
+#   - "I think/I believe/I suspect/I imagine/I would say" all take a
+#     complete independent clause as their object, so stripping the
+#     WHOLE opener leaves a grammatically sound sentence on its own
+#     ("I think the plan works" -> "The plan works").
+#   - "I am curious/certain/confident/not sure/unsure" do NOT reduce
+#     the same way — "I am curious whether X" stripped of the whole
+#     opener leaves "whether X", not a sentence. Stripping only "I am "
+#     and keeping the adjective leaves "Curious whether X" instead — a
+#     legitimate elliptical fragment, not a broken one. This isn't a
+#     stylistic guess: it's literally the construction already present
+#     in the ORIGINAL input this bug was found against ("Curious
+#     whether your clients have solved that..."), which the render had
+#     turned into "I am curious whether..." in the first place.
+_FIRST_PERSON_OPENER_FULL_STRIP = re.compile(
+    r"^(I think|I believe|I suspect|I imagine|I would say)\b[,:]?\s*",
+    re.I
+)
+_FIRST_PERSON_OPENER_PARTIAL_STRIP = re.compile(
+    r"^I am (?=(curious|certain|confident|not sure|unsure)\b)",
+    re.I
+)
+
+
+def _fix_first_person_over_ratio(text: str, target: float, current: float,
+                                  original_input_text: str = "") -> tuple[str, bool]:
+    """
+    Deterministic ownership correction, OVER-owned direction —
+    companion to _fix_first_person_ratio above, which only ever
+    handled the opposite case. Converts up to two sentences that open
+    with a first-person opinion marker ("I think...", "I am
+    curious...") back to a direct statement, stripping only the
+    opener — the claim inside the sentence is untouched, same
+    principle as the UNDER-owned direction.
+
+    Confirmed as a real, previously-unhandled gap, not a hypothetical:
+    a render added "I am curious whether..." where the original input
+    had no first person there at all ("Curious whether..."), and
+    nothing deterministic existed to catch it — only the LLM
+    correction pass could, and only if it happened to target this
+    dimension in that direction.
+
+    original_input_text: the actual text being rewritten this render.
+    Safety check before stripping anything — if the exact opener
+    phrase already appears verbatim in the ORIGINAL input, this
+    fixer leaves the sentence alone. The point is to strip
+    first-person the model ADDED, never to strip first-person the
+    person actually wrote themselves. Same spirit as
+    input_has_opinion_content gating the opposite direction (don't
+    fabricate what wasn't there; symmetrically here, don't erase what
+    was genuinely there).
+
+    Deliberately does NOT reuse the UNDER-owned fixer's
+    _OTHER_ATTRIBUTION check — that check protects against a risk
+    specific to the OPPOSITE direction (fabricating first-person
+    ownership over what might be someone else's impersonal point).
+    Stripping "I think " from a sentence that already has "I" as its
+    subject doesn't misattribute anything; a "your"/"their" appearing
+    elsewhere in the same sentence is just referring to another party
+    as an object, not a sign the opinion belongs to them. Reusing that
+    check here caused a real false decline against the exact case this
+    fixer was built for — caught and corrected before this shipped,
+    not left in.
+
+    Refuses outright if current <= target (nothing to fix in this
+    direction) or the sentence carries a quote — converting quoted
+    material is still a credit error regardless of direction.
+    """
+    if current <= target:
+        return text, False
+
+    original_lower = original_input_text.lower()
+
+    def _fix_one(s: str) -> tuple[str, bool]:
+        if _HAS_QUOTE.search(s):
+            return s, False
+
+        full_match = _FIRST_PERSON_OPENER_FULL_STRIP.match(s)
+        if full_match:
+            opener_text = full_match.group(0).strip().rstrip(",:").lower()
+            if opener_text and opener_text in original_lower:
+                return s, False
+            new_s = _FIRST_PERSON_OPENER_FULL_STRIP.sub("", s)
+            return (new_s[0].upper() + new_s[1:]) if new_s else new_s, True
+
+        partial_match = _FIRST_PERSON_OPENER_PARTIAL_STRIP.match(s)
+        if partial_match:
+            if "i am" in original_lower and partial_match.group(1).lower() in original_lower:
+                return s, False
+            new_s = _FIRST_PERSON_OPENER_PARTIAL_STRIP.sub("", s)
+            return (new_s[0].upper() + new_s[1:]) if new_s else new_s, True
+
+        return s, False
+
+    return _apply_across_paragraphs(text, _fix_one, max_conversions=_MAX_CONVERSIONS_PER_PASS)
+
+
 # ------------------------------------------------------------------
 # Directness (directive_ratio) — under-directive direction only.
 # ------------------------------------------------------------------

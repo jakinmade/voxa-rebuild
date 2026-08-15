@@ -44,7 +44,8 @@ from prompts import (
 from components.paste_guard import paste_guard
 from deterministic_fixers import (
     _fix_hedge_density, _fix_sentence_length_sd,
-    _fix_first_person_ratio, _fix_directive_ratio, _fix_modal_hedge,
+    _fix_first_person_ratio, _fix_first_person_over_ratio,
+    _fix_directive_ratio, _fix_modal_hedge,
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available
@@ -937,6 +938,14 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             clean, ownership_fixed = _fix_first_person_ratio(
                 clean, d["baseline"], d["output"], input_has_opinion_content
             )
+            # Companion fixer, opposite direction — see its own
+            # docstring for why this gap existed. Each fixer declines
+            # independently based on current vs target, so calling
+            # both unconditionally is safe: at most one actually fires.
+            clean, ownership_over_fixed = _fix_first_person_over_ratio(
+                clean, d["baseline"], d["output"], input_text
+            )
+            ownership_fixed = ownership_fixed or ownership_over_fixed
         else:
             ownership_fixed = False
         if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
@@ -1019,6 +1028,9 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
                 d = delta["first_person_ratio"]
                 clean, _ = _fix_first_person_ratio(
                     clean, d["baseline"], d["output"], input_has_opinion_content
+                )
+                clean, _ = _fix_first_person_over_ratio(
+                    clean, d["baseline"], d["output"], input_text
                 )
             if "directive_ratio" in still_missed:
                 d = delta["directive_ratio"]

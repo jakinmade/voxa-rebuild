@@ -2158,7 +2158,18 @@ _AI_TELL_PHRASES = re.compile(
 # text warrants it. See _classify_register below.
 # ---------------------------------------------------------------------------
 _ANALYTICAL_TELL_PHRASES = re.compile(
-    r"\b(drift(s|ed|ing)?|surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
+    r"\b(drift(s|ed|ing)?|"
+    # Excludes "surface area" (already handled) and, new: a possessive
+    # immediately before "surface" ("the agent's surface", "the
+    # model's surface", "its surface") — that's the genuine noun usage
+    # (a technical term, same shape as "attack surface"), not the
+    # AI-essay habit of pressing the noun into service as a verb
+    # ("issues surface", "concerns surfaced") this pattern exists to
+    # catch. Confirmed as a real false positive against a live render
+    # this session: "tied to change in the agent's surface" was
+    # flagged even though "surface" there is unambiguously a noun, the
+    # person's own genuine phrasing, not an AI tell.
+    r"(?<!'s )(?<!its )surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
     r"unpack(s|ed|ing)?|gestur(e|es|ed|ing) (at|toward|towards)|"
     r"sit(s)? with|push back (on|against)|"
     r"worth noting|to be fair|on reflection|"
