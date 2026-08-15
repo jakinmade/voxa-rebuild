@@ -46,6 +46,7 @@ from deterministic_fixers import (
     _fix_first_person_ratio, _fix_directive_ratio, _fix_modal_hedge,
 )
 from logging_config import get_logger
+from persistence import restore_profile_if_available, save_profile_if_available
 
 log = get_logger(__name__)
 
@@ -237,6 +238,14 @@ st.markdown("""
 
 init_state()
 
+# Silent — restores a saved voice profile for this browser/device if one
+# exists, so a returning visit skips straight to Screen 4 instead of
+# redoing onboarding. No UI, no prompt; see persistence.py for the
+# fail-open design (any absence or error just proceeds as fresh
+# onboarding, exactly as it worked before this existed).
+if restore_profile_if_available():
+    st.session_state.screen = 4
+
 
 def progress_dots(current: int, total: int = 4):
     dots = ""
@@ -345,6 +354,14 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
                         report["function_word_biggest_divergences"] = new_burrows_delta.get("biggest_divergences", [])
 
                     st.session_state.voice_report = report
+
+                # Keeps the saved profile in sync with a strengthened
+                # fingerprint. Safe to call even when no baseline exists
+                # yet (e.g. reached from Screen 2, before Screen 3) —
+                # save_profile_if_available() no-ops silently in that
+                # case, same fail-open design as everywhere else in
+                # persistence.py.
+                save_profile_if_available()
 
                 st.success("Added. Your fingerprint just got stronger.")
                 st.rerun()
@@ -667,6 +684,7 @@ def screen_sample2():
                     st.session_state.baseline_fingerprint = _merge_baseline(
                         st.session_state.get("baseline_fingerprint"), m
                     )
+                save_profile_if_available()
                 go_to(4)
                 st.rerun()
 

@@ -18,3 +18,7 @@ pydantic==2.13.4
 structlog==26.1.0
 redis==8.1.0
 pytest-asyncio==1.4.0
+
+# Cross-session persistence — device cookie + Supabase, see persistence.py
+supabase==2.31.0
+streamlit-cookies-controller==0.0.4
