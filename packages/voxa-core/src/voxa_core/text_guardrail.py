@@ -607,4 +607,15 @@ def sweep(text: str, keep_contractions: bool = False) -> str:
     # 10. Strip hedges from sentences carrying an absolute/superlative claim
     text = _strip_hedges_from_absolute_claims(text)
 
+    # 11. Orphan/doubled punctuation cleanup — mirrors the fix in
+    # prompts.py's sweep (root, live Railway product) - see that
+    # function's docstring for the full rationale. Confirmed live:
+    # ",." shipping from an upstream LLM grammar stage inserting a
+    # name before a salutation comma. ",." -> "." only, never the
+    # reverse (".," is a correct abbreviation pattern in "e.g.," /
+    # "i.e.," / "etc.," and collapsing it would corrupt those).
+    text = re.sub(r",\s*\.", ".", text)
+    text = re.sub(r",\s*,+", ",", text)
+    text = re.sub(r" ([,.!?])", r"\1", text)
+
     return text

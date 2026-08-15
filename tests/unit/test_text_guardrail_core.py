@@ -55,6 +55,8 @@ PARITY_CASES = [
     "potential of our ecosystem.",
     "The pressures are not small, and this, in my opinion, will matter "
     "a lot going forward.",
+    "Hi Josh,.",
+    "It was fine, , actually good, e.g., in banking.",
 ]
 
 
@@ -144,3 +146,49 @@ def test_sweep_handles_empty_string():
 def test_sweep_is_deterministic():
     text = "We will leverage this seamless approach, in my view."
     assert sweep(text) == sweep(text)
+
+
+# ---------------------------------------------------------------------
+# Orphan/doubled punctuation cleanup — confirmed live: "Hi Josh,."
+# shipped from the upstream LLM grammar stage (not this module)
+# inserting a name before a salutation comma and mishandling the
+# close. This sweep runs after that stage every time, so it's the
+# general catch, not a patch for one salutation. Mirrored fix in
+# prompts.py's _regex_sweep - parity test above already covers this
+# case; these test the behaviour directly.
+# ---------------------------------------------------------------------
+
+def test_orphan_comma_period_collapsed():
+    assert sweep("Hi Josh,.") == "Hi Josh."
+
+
+def test_orphan_comma_period_mid_sentence():
+    result = sweep("The point stands,. It holds.")
+    assert ",." not in result
+    assert result == "The point stands. It holds."
+
+
+def test_doubled_comma_collapsed():
+    result = sweep("It was fine, , actually good.")
+    assert ",," not in result
+    assert result == "It was fine, actually good."
+
+
+def test_space_before_terminal_punctuation_removed():
+    assert sweep("The word , was misplaced.") == "The word, was misplaced."
+    assert sweep("End of sentence . New one.") == "End of sentence. New one."
+
+
+def test_abbreviation_period_comma_survives():
+    """The reverse direction (".," -> ",") is deliberately NOT applied
+    — 'e.g.,' 'i.e.,' 'etc.,' are correct abbreviation-plus-comma
+    sequences that happen to contain '.,' and collapsing them would
+    corrupt real abbreviations rather than fix an error."""
+    for text in (
+        "This is common, e.g., in banking.",
+        "Check the docs, i.e., the handbook.",
+        "Various tools, etc., were used.",
+    ):
+        result = sweep(text)
+        assert "e.g.," in result or "i.e.," in result or "etc.," in result
+        assert result == text

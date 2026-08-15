@@ -884,6 +884,10 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
        guardrail, not a prompt instruction the model might skip.
     8. [removed] Missing article fix — see note at that step below;
        blacklist heuristic broke correct text, removed rather than patched.
+    9. Orphan/doubled punctuation cleanup — ",." collapsed to ".",
+       doubled commas collapsed to one, space before terminal
+       punctuation removed. Runs last, catches leftovers from any
+       earlier step or the upstream LLM grammar pass.
     """
     import re
 
@@ -1116,6 +1120,33 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     # Business-rule guardrail, not a prompt instruction - see
     # _strip_hedges_from_absolute_claims for why this had to move here.
     text = _strip_hedges_from_absolute_claims(text)
+
+    # 12. Orphan/doubled punctuation cleanup — safety net, runs last so
+    # it catches whatever any earlier step (or the upstream LLM grammar
+    # pass in _grammar_fix_pass, which is not deterministic and can't
+    # be regex-fixed at the source) leaves behind. Confirmed live:
+    # "Hi Josh,." shipped from _grammar_fix_pass inserting a name
+    # before the salutation comma and mishandling the close - this
+    # runs after that stage every time, so it's a general catch, not a
+    # patch for one salutation.
+    #
+    # ",." -> "." only, not the reverse (".," -> ","): a trailing comma
+    # immediately before a sentence-ending period has no legitimate
+    # English use, always a mechanical leftover. The reverse direction
+    # is NOT safe to blanket-fix - "e.g.," "i.e.," "etc.," are all
+    # correct abbreviation-plus-comma sequences that happen to contain
+    # ".," and collapsing them would corrupt real abbreviations, not
+    # fix an error. Left alone rather than guessed at.
+    text = re.sub(r",\s*\.", ".", text)
+    # Doubled commas - no legitimate construction has two commas
+    # back to back, from any source (hedge deletion, dash-splitting
+    # fallback, LLM stage).
+    text = re.sub(r",\s*,+", ",", text)
+    # Space before terminal punctuation - same safe pattern already
+    # proven inside _split_dashes_deterministic's own local cleanup,
+    # applied here as a general final pass rather than only within
+    # that function's scope.
+    text = re.sub(r" ([,.!?])", r"\1", text)
 
     return text
 def _grammar_fix_pass(text: str, client) -> str:
