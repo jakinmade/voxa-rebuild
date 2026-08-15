@@ -184,6 +184,39 @@ def test_hedge_density_still_deletes_plain_quite_and_somewhat():
     assert fixed == "It is unclear. The results are promising."
 
 
+# ---------------------------------------------------------------------------
+# _is_unsafe_collocation / _UNSAFE_COLLOCATIONS — the registry itself,
+# unit-tested directly rather than only through _fix_hedge_density.
+# Was three inline regex lookarounds until this refactor; now a data
+# structure a new idiom can be added to as one line. These tests pin
+# the registry's own contract so the next addition can't silently
+# change existing behaviour.
+# ---------------------------------------------------------------------------
+
+def test_collocation_registry_flags_known_unsafe_pairs():
+    assert df._is_unsafe_collocation("rather", "", "than") is True
+    assert df._is_unsafe_collocation("rather", "would", "") is True
+    assert df._is_unsafe_collocation("rather", "or", "") is True
+    assert df._is_unsafe_collocation("somewhat", "", "of") is True
+    assert df._is_unsafe_collocation("quite", "", "a") is True
+    assert df._is_unsafe_collocation("quite", "", "the") is True
+    assert df._is_unsafe_collocation("quite", "", "something") is True
+
+
+def test_collocation_registry_clears_plain_adverbial_use():
+    assert df._is_unsafe_collocation("rather", "was", "good") is False
+    assert df._is_unsafe_collocation("somewhat", "is", "unclear") is False
+    assert df._is_unsafe_collocation("quite", "are", "promising") is False
+
+
+def test_collocation_registry_ignores_words_with_no_entry():
+    """A word with no registry entry is always safe — the registry
+    only ever narrows the three words it lists, never adds caution
+    elsewhere."""
+    assert df._is_unsafe_collocation("perhaps", "than", "than") is False
+    assert df._is_unsafe_collocation("arguably", "would", "of") is False
+
+
 def test_hedge_density_refuses_when_already_under_target():
     text = "It is somewhat unclear."
     fixed, applied = df._fix_hedge_density(text, target=10.0, current=5.0)

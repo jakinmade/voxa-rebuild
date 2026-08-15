@@ -66,43 +66,66 @@ _HEDGE_WORDS = _HEDGE_PATTERN
 # auto-corrected, same standard as everywhere else in this module: a
 # regex-level fixer should never be less conservative than the
 # structural risk actually requires.
-# Three of these words carry idiom exclusions the rest of the list
-# doesn't need, because each has a second, non-hedge grammatical or
-# semantic role its neighbours don't. Audited the full list against
-# this failure class after the "rather than" bug shipped — the other
-# eight (perhaps, possibly, maybe, potentially, arguably, presumably,
-# apparently, allegedly, seemingly, supposedly) have no idiom
-# collisions and are left unconstrained.
+# Registry of hedge words with a second, non-hedge grammatical or
+# semantic role that makes unconditional deletion unsafe. Was three
+# inline regex lookarounds embedded directly in _SAFE_TO_DELETE_HEDGES
+# (rather(?!\s+than) etc.) until this refactor — worked, but every new
+# idiom found meant hand-editing a single dense regex and getting the
+# lookaround syntax exactly right. This is the same exclusion logic,
+# same three words, same behaviour (see _is_unsafe_collocation's own
+# tests), just as a data structure a new idiom can be added to as one
+# line instead of a regex edit. Audited the full _SAFE_TO_DELETE_HEDGES
+# list against this failure class — the other eight words (perhaps,
+# possibly, maybe, potentially, arguably, presumably, apparently,
+# allegedly, seemingly, supposedly) have no known collisions and carry
+# no entry here.
 #
-# "rather" — "rather than" (comparative connector, fixed already) and
-# "would rather [not]" (preference modal — "would rather wait than
-# rush" -> "would wait than rush" is a grammar break same as rather-
-# than; "would rather not commit" -> "would not commit" survives
-# grammatically but inverts a mild preference into a flat refusal,
-# which is a meaning change, not a hedge softening). Also excludes
-# "or rather," (a self-correction idiom — "an error, or rather, a
-# misreading" — deleting it removes the correction itself, not just
-# the hedge, and leaves an orphan comma).
+# "rather" — "rather than" (comparative connector) and "would rather
+# [not]" (preference modal — "would rather wait than rush" -> "would
+# wait than rush" is a grammar break; "would rather not commit" ->
+# "would not commit" survives grammatically but flips a mild
+# preference into a flat refusal). Also "or rather," (self-correction
+# idiom — deleting it removes the correction itself and orphans a
+# comma).
 #
 # "somewhat" — "somewhat of a" ("somewhat of a mess" -> "of a mess")
-# is the identical grammar-break shape as rather-than: the word isn't
-# modifying a claim there, it's load-bearing in the idiom.
+# is the same grammar-break shape as rather-than: load-bearing in the
+# idiom, not modifying a claim it can be cleanly stripped from.
 #
-# "quite" — the highest-severity case of the three, because the
-# failure isn't a grammar break (visibly wrong) but a magnitude
-# inversion (silently wrong): "quite a few" means MANY, "a few" means
-# NOT many — deleting "quite" doesn't soften the claim, it reverses
-# it. Same shape on "not quite X" (partial negation -> full negation)
-# and "quite the X" / "quite something" (idiomatic emphasis, not a
-# gradable-degree hedge). Plain adverbial use ("quite promising",
-# "quite clear") is unaffected and still deletes normally — this
-# narrows the unsafe idiomatic minority, not the safe majority.
+# "quite" — highest severity: not a grammar break but a magnitude
+# INVERSION. "quite a few" means MANY, "a few" means NOT many —
+# deleting "quite" reverses the claim rather than softening it. Same
+# shape on "quite the X" / "quite something" (idiomatic emphasis, not
+# a gradable-degree hedge). Plain adverbial use ("quite promising",
+# "quite clear") is unaffected — this narrows the unsafe idiomatic
+# minority, not the safe majority.
+_UNSAFE_COLLOCATIONS = {
+    "rather": [{"after": {"than"}}, {"before": {"would", "or"}}],
+    "somewhat": [{"after": {"of"}}],
+    "quite": [{"after": {"a", "the", "something"}}],
+}
+
+
+def _is_unsafe_collocation(word: str, before_word: str, after_word: str) -> bool:
+    """Checks a matched hedge word's immediate neighbours against
+    _UNSAFE_COLLOCATIONS. before_word/after_word are the nearest word
+    tokens on each side, lowercased, empty string if none (start/end
+    of sentence). A word with no registry entry is always safe — this
+    only ever narrows the three words above, never adds new caution
+    elsewhere."""
+    rules = _UNSAFE_COLLOCATIONS.get(word.lower())
+    if not rules:
+        return False
+    for rule in rules:
+        if after_word in rule.get("after", ()):
+            return True
+        if before_word in rule.get("before", ()):
+            return True
+    return False
+
+
 _SAFE_TO_DELETE_HEDGES = re.compile(
-    r"\b(perhaps|possibly|maybe|"
-    r"somewhat(?!\s+of\b)|"
-    r"quite(?!\s+(?:a\b|the\b|something\b))|"
-    r"(?<!would )(?<!or )rather(?!\s+than)|"
-    r"potentially|arguably|"
+    r"\b(perhaps|possibly|maybe|somewhat|quite|rather|potentially|arguably|"
     r"presumably|apparently|allegedly|seemingly|supposedly)\b[ ]?",
     re.I
 )
@@ -209,7 +232,10 @@ def _fix_hedge_density(text: str, target: float, current: float) -> tuple[str, b
     (current > target). Only removes the SAFE_TO_DELETE adverbial
     hedges (perhaps, possibly, maybe, somewhat, quite, rather,
     potentially, arguably) — deleting one of these just tightens a
-    claim: "It is somewhat unclear" -> "It is unclear."
+    claim: "It is somewhat unclear" -> "It is unclear." Three of these
+    words (rather, somewhat, quite) get an additional collocation
+    check against _UNSAFE_COLLOCATIONS before deletion — see that
+    registry's docstring for why each is unsafe in specific contexts.
 
     "might"/"could" are measured as hedges (see _HEDGE_WORDS, used by
     the scorer) but are deliberately NOT auto-deleted here — they're
@@ -227,9 +253,29 @@ def _fix_hedge_density(text: str, target: float, current: float) -> tuple[str, b
         return text, False
 
     def _fix_one(s: str) -> tuple[str, bool]:
-        if _SAFE_TO_DELETE_HEDGES.search(s):
-            return _clean_after_delete(_SAFE_TO_DELETE_HEDGES.sub("", s)), True
-        return s, False
+        matches = list(_SAFE_TO_DELETE_HEDGES.finditer(s))
+        if not matches:
+            return s, False
+
+        to_delete = []
+        for m in matches:
+            word = m.group(1)
+            before_tokens = re.findall(r"[A-Za-z']+", s[:m.start()])
+            after_tokens = re.findall(r"[A-Za-z']+", s[m.end():])
+            before_word = before_tokens[-1].lower() if before_tokens else ""
+            after_word = after_tokens[0].lower() if after_tokens else ""
+            if not _is_unsafe_collocation(word, before_word, after_word):
+                to_delete.append(m)
+
+        if not to_delete:
+            return s, False
+
+        # Delete right-to-left so earlier matches' indices stay valid
+        # as later ones are removed.
+        result = s
+        for m in sorted(to_delete, key=lambda m: m.start(), reverse=True):
+            result = result[:m.start()] + result[m.end():]
+        return _clean_after_delete(result), True
 
     return _apply_across_paragraphs(text, _fix_one)
 
