@@ -1692,7 +1692,10 @@ def confidence_caveat(stability: dict | None) -> str | None:
     return None
 
 
-def compute_risk(delta: dict | None, semantic: dict | None, ai_tells: dict | None = None) -> str:
+def compute_risk(
+    delta: dict | None, semantic: dict | None, ai_tells: dict | None = None,
+    insertion_check: dict | None = None,
+) -> str:
     """
     How much this specific rewrite moved from the person's normal style
     and content — distinct from Confidence. Confidence is about the
@@ -1711,11 +1714,24 @@ def compute_risk(delta: dict | None, semantic: dict | None, ai_tells: dict | Non
     number next to a credit-reassignment error is worse than a low one,
     since it tells the person everything's fine when it isn't. Treated
     as High regardless of every other score, same as an AI tell.
+
+    A grown sentence count out of the LLM correction call is the same
+    category again: score_render_delta and semantic_match are both
+    aggregate checks that can absorb one invented sentence without
+    breaching their own thresholds (see _check_uncorrected_insertions's
+    docstring), so a fabricated sentence can sit underneath a clean
+    headline number the same way an attribution swap does. There's no
+    mechanical fix for which sentence is the invented one, so this
+    can't be silently corrected the way new hedges are — it has to
+    surface as risk instead, same as the other two hard failures here.
     """
     if ai_tells and not ai_tells.get("clean", True):
         return "High"
 
     if (semantic or {}).get("attribution_swaps"):
+        return "High"
+
+    if (insertion_check or {}).get("sentence_growth", 0) > 0:
         return "High"
 
     missed = sum(1 for d in (delta or {}).values() if d.get("verdict") == "MISSED")

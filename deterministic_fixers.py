@@ -23,6 +23,7 @@ rejected as a meaning-risk, same standard as the ones that shipped.
 """
 
 import re
+from collections import Counter
 from voice_engine import _extract_sentences, _imperative_pattern, _HEDGE_PATTERN
 
 # Single source of truth, imported from voice_engine.py rather than
@@ -590,4 +591,83 @@ def _fix_modal_hedge(text: str, target: float, current: float) -> tuple[str, boo
     result = _PRONOUN_SUBJECT_BE.sub(_replace_be, result)
     result = _PRONOUN_SUBJECT_VERB.sub(_replace_verb, result)
     return result, converted > 0
+
+
+# ------------------------------------------------------------------
+# Post-LLM-correction insertion check.
+# ------------------------------------------------------------------
+#
+# Every fixer above only deletes or reduces — none of them can ever be
+# the source of a hedge or sentence that wasn't already in the text.
+# The one step in app.py's correction pass that CAN add content is the
+# LLM correction call itself: it's told to fix one dimension (say,
+# first_person_ratio) and, as a side effect of rewriting, can introduce
+# hedges or an extra sentence that weren't asked for and weren't in the
+# text before that call ran.
+#
+# The existing re-score after that call (score_render_delta) doesn't
+# catch this, structurally. It measures hedge_density as an aggregate
+# ratio against a target BAND. If the band was already satisfied before
+# the call, or the addition doesn't push the ratio far enough to breach
+# it, newly-introduced hedge words pass through as "clean" — the check
+# only ever asks "is the overall count in range", never "was this
+# specific word here before this specific call". Confirmed against a
+# real render: an LLM correction pass fixing ownership introduced
+# "perhaps" and "might be" and a whole new closing sentence, and the
+# dimension-level delta scored hedge_density as held.
+#
+# This function asks the direct question instead: diff the text from
+# immediately before the LLM call against the text immediately after,
+# word-for-word on the hedge list, sentence-count on the rest.
+def _check_uncorrected_insertions(before: str, after: str) -> dict:
+    """
+    Diffs `before` (the deterministically-fixed text, pre-LLM-correction)
+    against `after` (the LLM correction call's output) to catch hedges
+    and sentences the correction call introduced as a side effect of
+    fixing an unrelated dimension — collateral the aggregate
+    score_render_delta band check can miss (see module note above).
+
+    Hedge matching reuses _HEDGE_WORDS (== voice_engine's canonical
+    _HEDGE_PATTERN) rather than the narrower _SAFE_TO_DELETE_HEDGES —
+    this is a detection question ("did a hedge of any kind appear that
+    wasn't there before"), not a correction question, so it should use
+    the same word list the scorer itself uses, same reasoning as
+    _HEDGE_WORDS's own docstring: one canonical list, not a second one
+    that can drift.
+
+    Sentence growth is reported, not auto-corrected — there's no
+    mechanical way to know which added sentence is the fabricated one,
+    only that the count grew. Left for the caller to surface rather
+    than silently passing it through as clean.
+
+    Returns:
+      {
+        "new_hedges": list[str]  — hedge words/phrases present in
+            `after` more times than in `before`, one entry per extra
+            occurrence (e.g. ["perhaps", "might"] if each appeared once
+            more than it did in `before`).
+        "sentence_growth": int   — sentences added beyond `before`'s
+            count, floored at 0 (a drop in sentence count isn't a
+            fabrication signal, so it's not reported here).
+        "flagged": bool          — True if either signal fired.
+      }
+    """
+    before_hedges = Counter(m.lower() for m in _HEDGE_WORDS.findall(before))
+    after_hedges = Counter(m.lower() for m in _HEDGE_WORDS.findall(after))
+
+    new_hedges: list[str] = []
+    for word, count in after_hedges.items():
+        extra = count - before_hedges.get(word, 0)
+        if extra > 0:
+            new_hedges.extend([word] * extra)
+
+    before_sentence_count = len(_extract_sentences(before))
+    after_sentence_count = len(_extract_sentences(after))
+    sentence_growth = max(0, after_sentence_count - before_sentence_count)
+
+    return {
+        "new_hedges": new_hedges,
+        "sentence_growth": sentence_growth,
+        "flagged": bool(new_hedges) or sentence_growth > 0,
+    }
 

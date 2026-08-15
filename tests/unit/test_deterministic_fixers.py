@@ -371,3 +371,93 @@ def test_directive_refuses_when_already_at_or_above_target():
     )
     assert applied is False
     assert fixed == text
+
+
+# ---------------------------------------------------------------------------
+# _check_uncorrected_insertions — catches collateral the LLM correction
+# call introduces, which the aggregate delta re-score can miss (see the
+# module-level comment above the function for the real render that
+# surfaced this: an ownership-fix rewrite added "perhaps" and "might be"
+# and a new closing sentence, and hedge_density still scored as held).
+# ---------------------------------------------------------------------------
+
+def test_flags_new_single_word_hedge():
+    before = "This works. The approach is sound."
+    after = "This perhaps works. The approach is sound."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["flagged"] is True
+    assert result["new_hedges"] == ["perhaps"]
+    assert result["sentence_growth"] == 0
+
+
+def test_flags_new_modal_hedge():
+    before = "This is the easier half."
+    after = "This might be the easier half."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["flagged"] is True
+    assert "might" in result["new_hedges"]
+
+
+def test_flags_multiple_new_hedges_independently():
+    before = "The point stands. It is unclear either way."
+    after = "The point perhaps stands. It might be unclear either way."
+    result = df._check_uncorrected_insertions(before, after)
+    assert sorted(result["new_hedges"]) == ["might", "perhaps"]
+
+
+def test_does_not_flag_hedge_already_present_before():
+    """A hedge that was already in the pre-correction text isn't new —
+    only extra occurrences beyond what was already there count."""
+    before = "This perhaps works."
+    after = "This perhaps works well."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["new_hedges"] == []
+    assert result["flagged"] is False
+
+
+def test_does_not_flag_hedge_that_moved_not_multiplied():
+    """Same single occurrence, different position — count-based diff,
+    not position-based, so this must not double-count."""
+    before = "Perhaps this works well."
+    after = "This works well, perhaps."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["new_hedges"] == []
+
+
+def test_flags_sentence_growth():
+    before = "The point stands. It holds up under scrutiny."
+    after = "The point stands. It holds up under scrutiny. This could prove harder than either of us has acknowledged."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 1
+    assert result["flagged"] is True
+
+
+def test_sentence_drop_not_flagged_as_growth():
+    """A correction pass that legitimately merges/cuts sentences isn't
+    fabrication — only growth beyond the pre-correction count counts."""
+    before = "The point stands. It holds up under scrutiny. Nothing more to add."
+    after = "The point stands and holds up under scrutiny."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 0
+
+
+def test_clean_correction_pass_not_flagged():
+    """The common case: LLM correction genuinely just fixes the target
+    dimension with no collateral. Must not false-positive."""
+    before = "Your point about model risk management is well made."
+    after = "The point about model risk management is well made."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["new_hedges"] == []
+    assert result["sentence_growth"] == 0
+    assert result["flagged"] is False
+
+
+def test_uses_full_hedge_pattern_not_narrow_correction_list():
+    """Must catch clause-level hedges too (curious whether, it seems),
+    not just the narrower _SAFE_TO_DELETE_HEDGES adverb list used for
+    correction — this is a detection question, not a correction one."""
+    before = "This holds up."
+    after = "I am curious whether this holds up."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["flagged"] is True
+    assert any("curious whether" in h for h in result["new_hedges"])

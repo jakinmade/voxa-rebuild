@@ -46,6 +46,7 @@ from deterministic_fixers import (
     _fix_hedge_density, _fix_sentence_length_sd,
     _fix_first_person_ratio, _fix_first_person_over_ratio,
     _fix_directive_ratio, _fix_modal_hedge,
+    _check_uncorrected_insertions,
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available
@@ -983,8 +984,14 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             llm_correction_needed=bool(correction_prompt),
             missed_dimensions=[k for k, d in correction_delta.items() if d["verdict"] == "MISSED"],
         )
+        # Default when no LLM correction call runs at all — nothing to
+        # diff against, so nothing to flag. Only set for real inside
+        # the block below, same as every other correction-pass variable
+        # here that's conditionally populated.
+        insertion_check = None
         if correction_prompt:
             try:
+                pre_llm_correction = clean
                 correction_response = client.messages.create(
                     model="claude-sonnet-4-6", max_tokens=4096,
                     system=correction_prompt, messages=[{"role": "user", "content": clean}],
@@ -994,6 +1001,31 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
                 if st.session_state.get("locale", "uk") == "uk":
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
+
+                # Catches collateral the LLM correction call introduced
+                # as a side effect of fixing its target dimension — see
+                # _check_uncorrected_insertions's docstring for why the
+                # delta re-score two lines below can't catch this on its
+                # own (aggregate band check, not a before/after diff).
+                insertion_check = _check_uncorrected_insertions(pre_llm_correction, clean)
+                if insertion_check["new_hedges"]:
+                    # Same fixers already used earlier in this pass, same
+                    # safe-deletion-only contract — no new correction
+                    # logic, just running them again on what the LLM call
+                    # added. Targets are irrelevant here (recompute from
+                    # the diff itself: any new hedge is by definition over
+                    # whatever the LLM was told to hold), so pass current
+                    # count vs 0 to force the over-hedged branch.
+                    new_hedge_count = len(insertion_check["new_hedges"])
+                    clean, _ = _fix_hedge_density(clean, 0, new_hedge_count)
+                    clean, _ = _fix_modal_hedge(clean, 0, new_hedge_count)
+                log.info(
+                    "correction_pass_side_effect_caught",
+                    new_hedges=insertion_check["new_hedges"],
+                    sentence_growth=insertion_check["sentence_growth"],
+                    flagged=insertion_check["flagged"],
+                )
+
                 delta = score_render_delta(baseline, clean)
                 semantic = score_semantic_drift(input_text, clean)
             except Exception:
@@ -1062,7 +1094,7 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             st.session_state.get("sample_fitness"), baseline, len(observations),
             st.session_state.get("dimension_stability"),
         )
-        risk = compute_risk(delta, semantic, ai_tells)
+        risk = compute_risk(delta, semantic, ai_tells, insertion_check)
         log.info(
             "render_complete", is_refinement=is_refinement,
             confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
