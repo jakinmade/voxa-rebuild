@@ -23,15 +23,16 @@ rule applied — same evidence-trail principle as score_render_delta.
 """
 
 import re
-from voice_engine import _extract_sentences, _protect_abbreviations, _imperative_pattern
+from voice_engine import _extract_sentences, _protect_abbreviations, _imperative_pattern, _HEDGE_PATTERN
 
-# Full hedge list matches score_hedging_signature() / compute_baseline_metrics()
-# in voice_engine.py — used for MEASUREMENT (the score has to count every
-# hedge to be accurate against the baseline).
-_HEDGE_WORDS = re.compile(
-    r"\b(might|could|perhaps|possibly|maybe|somewhat|"
-    r"quite|rather|potentially|arguably)\b", re.I
-)
+# Single source of truth, imported from voice_engine.py rather than
+# duplicated here — this file previously kept its own hand-copied word
+# list, which had already drifted out of sync with the actual scorer
+# (compute_baseline_metrics) by the time that was caught. See
+# _HEDGE_PATTERN's own docstring in voice_engine.py for what it covers
+# and why (Hyland's hedging taxonomy) — used here for MEASUREMENT (the
+# score has to count every hedge to be accurate against the baseline).
+_HEDGE_WORDS = _HEDGE_PATTERN
 
 # Narrower list for CORRECTION. Pure adverbial hedges only — words that
 # modify a claim without carrying the sentence's grammar. Deleting one
@@ -47,8 +48,26 @@ _HEDGE_WORDS = re.compile(
 # rewrite, not a deletion. That's out of scope for a regex-level fixer.
 # These stay flagged rather than auto-corrected until there's a
 # POS-tagged version (see spaCy note in the module docstring below).
+# Widened to match voice_engine.py's expanded single-word adverb list
+# (presumably, apparently, allegedly, seemingly, supposedly added
+# alongside the original set) — same syntactic category as the
+# originals, deleting one is equally safe: "It is apparently unclear"
+# -> "It is unclear."
+#
+# The newer CLAUSE-LEVEL hedges _HEDGE_PATTERN now also detects ("it
+# seems", "curious whether", "wonder if", etc.) are deliberately NOT
+# included here. Same reasoning as the modal-verb exclusion below:
+# deleting "it seems " from "It seems the numbers are off" leaves "The
+# numbers are off" — fine there, but "I wonder if we should reconsider"
+# with "I wonder if " deleted leaves "we should reconsider", which needs
+# recapitalising and is a real grammatical rewrite, not a clean
+# deletion. These stay flagged for the LLM correction pass rather than
+# auto-corrected, same standard as everywhere else in this module: a
+# regex-level fixer should never be less conservative than the
+# structural risk actually requires.
 _SAFE_TO_DELETE_HEDGES = re.compile(
-    r"\b(perhaps|possibly|maybe|somewhat|quite|rather|potentially|arguably)\b[ ]?",
+    r"\b(perhaps|possibly|maybe|somewhat|quite|rather|potentially|arguably|"
+    r"presumably|apparently|allegedly|seemingly|supposedly)\b[ ]?",
     re.I
 )
 _MODAL_HEDGES = re.compile(r"\b(might|could)\b", re.I)

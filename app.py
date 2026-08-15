@@ -884,6 +884,51 @@ def _run_render(input_text: str, is_refinement: bool = False) -> bool:
                 log.error("correction_pass_llm_failed", stage="correction", exc_info=True)
                 pass  # correction pass failed — keep the original render
 
+        # Verify-and-retry gate, not instruct-and-trust: the LLM
+        # correction call above is a request, not a guarantee — an
+        # instruction can be partially followed or missed entirely,
+        # which is exactly what re-scoring delta afterward is for. This
+        # was previously the one place in the correction pass that
+        # re-scored but never acted on the result — the ai_tells check
+        # a few lines below already does this correctly (measure, and
+        # if still not clean, run one more free deterministic pass
+        # rather than reporting a result that didn't actually land).
+        # Mirrors that same pattern here: bounded to one extra pass, no
+        # additional API call, so this can't run away on cost. Each
+        # fixer already independently checks its own dimension's
+        # verdict and declines outright if it isn't MISSED or the
+        # direction isn't its safe one, so this is safe to call
+        # unconditionally rather than gating per-dimension twice.
+        still_missed = [k for k, d in delta.items() if d["verdict"] == "MISSED"]
+        if still_missed:
+            if "hedge_density" in still_missed:
+                d = delta["hedge_density"]
+                clean, _ = _fix_hedge_density(clean, d["baseline"], d["output"])
+                clean, _ = _fix_modal_hedge(clean, d["baseline"], d["output"])
+            if "sentence_length_sd" in still_missed:
+                d = delta["sentence_length_sd"]
+                clean, _ = _fix_sentence_length_sd(clean, d["baseline"], d["output"])
+            if "first_person_ratio" in still_missed:
+                d = delta["first_person_ratio"]
+                clean, _ = _fix_first_person_ratio(
+                    clean, d["baseline"], d["output"], input_has_opinion_content
+                )
+            if "directive_ratio" in still_missed:
+                d = delta["directive_ratio"]
+                clean, _ = _fix_directive_ratio(
+                    clean, d["baseline"], d["output"], input_has_directive_content
+                )
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+            if st.session_state.get("locale", "uk") == "uk":
+                clean = _apply_uk_english(clean)
+            delta = score_render_delta(baseline, clean)
+            semantic = score_semantic_drift(input_text, clean)
+            log.info(
+                "post_correction_verify_pass",
+                still_missed_before=still_missed,
+                still_missed_after=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
+            )
+
         # Measured verification gate, not a trusted fix-and-hope step.
         # If anything survived the sweeps, run one more deterministic
         # pass (free, no API call) and re-measure. If it's still not

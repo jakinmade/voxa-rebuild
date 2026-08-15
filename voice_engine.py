@@ -24,6 +24,55 @@ import hashlib
 from dataclasses import dataclass
 from collections import Counter
 
+
+# ============================================================
+# Hedge detection — single source of truth
+# ============================================================
+#
+# Was previously three separate, hand-copied word lists (here in
+# score_hedging_signature, here again in compute_baseline_metrics, and
+# a third copy in deterministic_fixers.py) that had already drifted out
+# of sync — score_hedging_signature had "arguably", compute_baseline_
+# metrics didn't. One canonical pattern now, imported everywhere it's
+# needed, so a future change to what counts as a hedge can't silently
+# apply to the narrative but not the actual scored metric, or vice versa.
+#
+# Expanded per Hyland's (1998, 2005) hedging taxonomy — the field's
+# standard reference — which distinguishes single-lexical-item hedges
+# (the original list here) from writer-oriented hedges realised through
+# epistemic verb/clause constructions ("it seems that", "I wonder
+# whether"). The original list only ever covered the first category.
+# Real gap this closes: "Curious whether it holds up... because" reads
+# as an unmistakable hedge in plain English but was invisible to this
+# scorer before — it's a clause-level epistemic construction, not a
+# single flagged word.
+#
+# Deliberately NOT included: "I think" / "I believe" on their own.
+# These are genuinely ambiguous in casual professional writing (as
+# opposed to the academic-research-article register Hyland's taxonomy
+# was built on) — "I think you're wrong" is direct opinion-stating for
+# many writers, not hedged uncertainty, and flagging it unconditionally
+# would misread a direct writer's own voice as hedged. Only the less
+# ambiguous clause-level constructions below were added; the risk of
+# a false positive on those is lower.
+_HEDGE_PATTERN = re.compile(
+    r"\b("
+    # Single-word epistemic adverbs / modals (original list, plus the
+    # missing adverbs from the same Hyland category: presumably,
+    # apparently, allegedly, seemingly, supposedly all modify a claim's
+    # certainty the same way "possibly" or "perhaps" does).
+    r"might|could|perhaps|possibly|maybe|somewhat|quite|rather|potentially|arguably|"
+    r"presumably|apparently|allegedly|seemingly|supposedly|"
+    # Clause-level epistemic hedges (Hyland's writer-oriented category)
+    r"it seems|it appears|seems like|appears to|seems to|"
+    r"curious whether|wonder if|wondering if|"
+    r"not sure if|not sure whether|not certain if|not certain whether|"
+    r"unsure if|unsure whether|hard to say|difficult to say|"
+    # Softening quantifier hedges
+    r"kind of|sort of|to some extent|in some ways"
+    r")\b", re.I
+)
+
 _DOTTED_ABBREV = re.compile(r'\b(?:[A-Za-z]\.){2,}')
 _WORD_ABBREV = re.compile(
     r'\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Rev|Hon|vs|etc|approx|dept|no|vol|pp|'
@@ -150,11 +199,7 @@ def score_hedging_signature(sentences: list[str], text: str) -> Observation:
     """Does the writer own statements or cushion them?"""
     words = text.split()
     total = max(len(words), 1)
-    hedge_pattern = re.compile(
-        r"\b(might|could|perhaps|possibly|maybe|somewhat|"
-        r"quite|rather|potentially|arguably)\b", re.I
-    )
-    hedge_count = len(hedge_pattern.findall(text))
+    hedge_count = len(_HEDGE_PATTERN.findall(text))
     density = hedge_count / total
 
     hedge_sentences = _hedge_sentences(sentences)
@@ -492,10 +537,7 @@ def compute_baseline_metrics(text: str) -> dict:
     total_sents = max(len(sentences), 1)
 
     # 1. Hedge density — per 100 words
-    hedge = re.compile(
-        r"\b(might|could|perhaps|possibly|maybe|somewhat|quite|rather|potentially)\b", re.I
-    )
-    hedge_count = len(hedge.findall(text))
+    hedge_count = len(_HEDGE_PATTERN.findall(text))
     hedge_density = round((hedge_count / total_words) * 100, 2)
 
     # 2. Sentence length SD
