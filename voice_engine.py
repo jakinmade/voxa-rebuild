@@ -481,7 +481,7 @@ def _deterministic_fallback(observations: list[Observation]) -> list[dict]:
             else:
                 body = (
                     f'Your writing uses cushioning language before conclusions. "{quote}" '
-                    f"— the softening comes before the point." if quote else
+                    f"The softening comes before the point." if quote else
                     "You soften before landing the point."
                 )
 
@@ -783,11 +783,11 @@ def _score_sample_fitness(text: str) -> dict:
         if specificity < 10 and ownership < 10:
             nudge = "Paste an email you sent to someone you know. Something with names, real context, not a formal document."
         elif specificity < 10:
-            nudge = "Paste something with real names and specific context — an email to a colleague about an actual project."
+            nudge = "Paste something with real names and specific context. An email to a colleague about an actual project."
         elif ownership < 10:
-            nudge = "Paste something written in your own voice — where you say what you think, not what sounds professional."
+            nudge = "Paste something written in your own voice, where you say what you think, not what sounds professional."
         elif spontaneity < 10:
-            nudge = "Paste something you wrote quickly without re-reading — a message or email dashed off on your phone."
+            nudge = "Paste something you wrote quickly without re-reading. A message or email dashed off on your phone."
         else:
             nudge = "Paste one more piece of your own writing to sharpen the fingerprint."
 
@@ -1466,9 +1466,9 @@ def detect_attribution_swaps(input_text: str, output_text: str) -> list[str]:
         if not output_pronouns:
             continue
         if "your" in input_pronouns and "my" in output_pronouns and "your" not in output_pronouns:
-            flags.append(f"'your {noun}' became 'my {noun}' — credit moved from them to you")
+            flags.append(f"'your {noun}' became 'my {noun}', credit moved from them to you")
         elif "my" in input_pronouns and "your" in output_pronouns and "my" not in output_pronouns:
-            flags.append(f"'my {noun}' became 'your {noun}' — credit moved from you to them")
+            flags.append(f"'my {noun}' became 'your {noun}', credit moved from you to them")
     return flags
 
 
@@ -1686,7 +1686,7 @@ def confidence_caveat(stability: dict | None) -> str | None:
     if stable_ratio < 0.5:
         return (
             "Your two samples read pretty differently from each other. "
-            "Paste one more — if your writing holds steady there, this "
+            "Paste one more. If your writing holds steady there, this "
             "will strengthen things. If it lands differently again, that's "
             "telling you something real too: your voice may just shift more "
             "than most between these kinds of writing."
@@ -1790,7 +1790,7 @@ def voice_match_label(delta: dict) -> dict:
     if hits and not missed:
         evidence = "Held on " + ", ".join(hits) + "."
     elif hits and missed:
-        evidence = "Held on " + ", ".join(hits) + " — drifted on " + ", ".join(missed) + "."
+        evidence = "Held on " + ", ".join(hits) + ". Drifted on " + ", ".join(missed) + "."
     elif missed:
         evidence = "Drifted on " + ", ".join(missed) + "."
     else:

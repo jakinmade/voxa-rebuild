@@ -276,12 +276,12 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
     body = (
         "Paste one more piece of your own writing. If it reads closer to "
         "your other samples, this will lift the Confidence badge above. "
-        "If it doesn't, that's a real result too — some people's writing "
+        "If it doesn't, that's a real result too. Some people's writing "
         "genuinely shifts more than others across situations, and no "
         "amount of extra samples changes that."
         if show_caveat_framing else
-        "Paste more of your own writing. Each sample strengthens the baseline "
-        "— useful if you want a higher bar than the fast path gives you."
+        "Paste more of your own writing. Each sample strengthens the baseline, "
+        "useful if you want a higher bar than the fast path gives you."
     )
     with st.expander(label, expanded=show_caveat_framing):
         st.markdown(
@@ -377,7 +377,7 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
                 st.session_state.deepen_success_message = "Added. Your fingerprint just got stronger."
                 st.rerun()
             else:
-                st.error("A bit more — at least a sentence or two.")
+                st.error("A bit more, at least a sentence or two.")
 
 
 # ============================================================
@@ -564,9 +564,9 @@ STARTERS = [
 # sample is.
 _ANCHOR_TEMPLATES = [
     'Picture someone pushing back hard on this line you wrote: "{s}" Type your reply exactly as it comes to you, first draft, no editing...',
-    'A friend just read this line of yours — "{s}" — and asked what you actually meant. Answer them right now, in your own words...',
+    'A friend just read this line of yours, "{s}", and asked what you actually meant. Answer them right now, in your own words...',
     'Someone just asked you to justify this: "{s}" What do you say...',
-    'Keep going from where you left off — "{s}" — write the next few sentences, unfiltered, first version only...',
+    'Keep going from where you left off. "{s}" Write the next few sentences, unfiltered, first version only...',
 ]
 
 
@@ -664,7 +664,7 @@ def screen_sample2():
             under_floor = [i for i in REQUIRED_STARTER_INDICES if required_word_counts[i] < SAMPLE2_REQUIRED_MIN_WORDS]
             if under_floor:
                 st.error(
-                    f"A little more on both — at least {SAMPLE2_REQUIRED_MIN_WORDS} words each "
+                    f"A little more on both, at least {SAMPLE2_REQUIRED_MIN_WORDS} words each "
                     f"to continue."
                 )
             else:
@@ -898,7 +898,7 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             clean = _regex_sweep(clean, keep_contractions=keep_contractions)
     except Exception:
         st.session_state.render_error = (
-            "That didn't go through — your text is safe, try again."
+            "That didn't go through. Your text is safe, try again."
         )
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
         return False
@@ -1119,13 +1119,13 @@ def screen_render():
     # the deepen-fingerprint panel: visible, not gated, easy to ignore.
     render_context = st.text_input(
         "context", value="",
-        placeholder="Optional — who's this for, and what's it for?",
+        placeholder="Optional. Who's this for, and what's it for?",
         label_visibility="collapsed",
     )
 
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
-        placeholder="Paste AI-generated text here — an email draft, a LinkedIn post, a proposal section...",
+        placeholder="Paste AI-generated text here. An email draft, a LinkedIn post, a proposal section...",
         height=220, label_visibility="collapsed",
     )
 
@@ -1179,7 +1179,7 @@ def screen_render():
             ai_tell_html = (
                 '<span class="badge badge-green">Clean</span>'
                 if report.get("ai_tell_clean", True)
-                else f'<span class="badge badge-red">Flagged</span> — {"; ".join(report.get("ai_tell_flags", []))}'
+                else f'<span class="badge badge-red">Flagged</span>: {"; ".join(report.get("ai_tell_flags", []))}'
             )
             vm_badge = report.get('voice_match_badge', 'badge-amber')
             vm_tier = report.get('voice_match_tier', 'Unrated')
@@ -1217,7 +1217,7 @@ def screen_render():
             if swaps:
                 st.markdown(
                     '<div class="microcopy" style="margin-top:0.5rem;color:#C0392B;">'
-                    '\u26a0 Check who gets credit before sending — the rewrite may have swapped '
+                    '\u26a0 Check who gets credit before sending. The rewrite may have swapped '
                     'whose point this was.</div>',
                     unsafe_allow_html=True
                 )
