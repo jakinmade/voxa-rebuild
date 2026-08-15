@@ -66,19 +66,43 @@ _HEDGE_WORDS = _HEDGE_PATTERN
 # auto-corrected, same standard as everywhere else in this module: a
 # regex-level fixer should never be less conservative than the
 # structural risk actually requires.
-# "rather" carries a negative lookahead the other words here don't
-# need, because it has a second, non-hedge grammatical role none of
-# its neighbours do: half of the comparative construction "rather
-# than" ("found the gap rather than a subdivision"). Deleting it there
-# doesn't tighten a claim, it strips the comparative's second term
-# away from its connector and leaves a fragment ("found the gap than a
-# subdivision"). Confirmed against a real render where this fired
-# twice and shipped two broken sentences before this exclusion existed
-# — "rather" alone, deleted correctly as a hedge, and "rather than",
-# where the same deletion is a grammar break, are not the same case
-# and this function must not treat them as one.
+# Three of these words carry idiom exclusions the rest of the list
+# doesn't need, because each has a second, non-hedge grammatical or
+# semantic role its neighbours don't. Audited the full list against
+# this failure class after the "rather than" bug shipped — the other
+# eight (perhaps, possibly, maybe, potentially, arguably, presumably,
+# apparently, allegedly, seemingly, supposedly) have no idiom
+# collisions and are left unconstrained.
+#
+# "rather" — "rather than" (comparative connector, fixed already) and
+# "would rather [not]" (preference modal — "would rather wait than
+# rush" -> "would wait than rush" is a grammar break same as rather-
+# than; "would rather not commit" -> "would not commit" survives
+# grammatically but inverts a mild preference into a flat refusal,
+# which is a meaning change, not a hedge softening). Also excludes
+# "or rather," (a self-correction idiom — "an error, or rather, a
+# misreading" — deleting it removes the correction itself, not just
+# the hedge, and leaves an orphan comma).
+#
+# "somewhat" — "somewhat of a" ("somewhat of a mess" -> "of a mess")
+# is the identical grammar-break shape as rather-than: the word isn't
+# modifying a claim there, it's load-bearing in the idiom.
+#
+# "quite" — the highest-severity case of the three, because the
+# failure isn't a grammar break (visibly wrong) but a magnitude
+# inversion (silently wrong): "quite a few" means MANY, "a few" means
+# NOT many — deleting "quite" doesn't soften the claim, it reverses
+# it. Same shape on "not quite X" (partial negation -> full negation)
+# and "quite the X" / "quite something" (idiomatic emphasis, not a
+# gradable-degree hedge). Plain adverbial use ("quite promising",
+# "quite clear") is unaffected and still deletes normally — this
+# narrows the unsafe idiomatic minority, not the safe majority.
 _SAFE_TO_DELETE_HEDGES = re.compile(
-    r"\b(perhaps|possibly|maybe|somewhat|quite|rather(?!\s+than)|potentially|arguably|"
+    r"\b(perhaps|possibly|maybe|"
+    r"somewhat(?!\s+of\b)|"
+    r"quite(?!\s+(?:a\b|the\b|something\b))|"
+    r"(?<!would )(?<!or )rather(?!\s+than)|"
+    r"potentially|arguably|"
     r"presumably|apparently|allegedly|seemingly|supposedly)\b[ ]?",
     re.I
 )

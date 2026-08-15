@@ -103,6 +103,87 @@ def test_hedge_density_still_deletes_plain_rather():
     assert fixed == "The result was good, all things considered."
 
 
+def test_hedge_density_leaves_would_rather_not_intact():
+    """'would rather not' is a preference modal, not a hedge — deleting
+    'rather' survives grammatically but flips a mild preference into a
+    flat refusal. Must decline, same standard as any other meaning
+    change this module refuses to guess at."""
+    text = "I would rather not commit to that yet."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_hedge_density_leaves_would_rather_than_intact():
+    """Same modal, comparative form — 'would rather wait than rush' is
+    the same grammar-break shape as bare 'rather than'."""
+    text = "The team would rather wait than rush it."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_hedge_density_leaves_or_rather_correction_intact():
+    """'or rather,' is a self-correction idiom — deleting it removes
+    the correction itself, not just a hedge, and orphans a comma."""
+    text = "It was an error, or rather, a misreading of the brief."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_hedge_density_leaves_somewhat_of_a_intact():
+    """'somewhat of a' is the same grammar-break shape as 'rather
+    than' — 'somewhat' is load-bearing in the idiom, not modifying a
+    claim it can be cleanly stripped from."""
+    text = "It was somewhat of a mess by the end."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_hedge_density_leaves_quite_a_few_intact():
+    """Highest-severity case in this family: 'quite a few' means MANY,
+    'a few' means NOT many — deleting 'quite' doesn't soften the claim,
+    it reverses it. Must decline rather than silently invert meaning."""
+    text = "There were quite a few issues raised."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_hedge_density_leaves_not_quite_intact():
+    """'not quite X' (partial negation) becoming 'not X' (full negation)
+    is the same magnitude-inversion risk as 'quite a few'."""
+    text = "Not quite the reaction I expected."
+    fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_hedge_density_leaves_quite_the_and_quite_something_intact():
+    """'quite the X' / 'quite something' are idiomatic emphasis, not a
+    gradable-degree hedge — same exclusion family as 'quite a few'."""
+    for text in (
+        "It is quite the opposite of what we planned.",
+        "That is quite something.",
+    ):
+        fixed, applied = df._fix_hedge_density(text, target=0.0, current=1.0)
+        assert applied is False
+        assert fixed == text
+
+
+def test_hedge_density_still_deletes_plain_quite_and_somewhat():
+    """The exclusions must be narrow — plain adverbial use of both
+    words, the majority case, still deletes normally. Exact string
+    from the module's own original regression test, unchanged by the
+    new exclusions."""
+    text = "It is somewhat unclear. The results are quite promising, arguably."
+    fixed, applied = df._fix_hedge_density(text, target=1.0, current=2.0)
+    assert applied is True
+    assert fixed == "It is unclear. The results are promising."
+
+
 def test_hedge_density_refuses_when_already_under_target():
     text = "It is somewhat unclear."
     fixed, applied = df._fix_hedge_density(text, target=10.0, current=5.0)
