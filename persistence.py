@@ -32,6 +32,7 @@ import streamlit as st
 from streamlit_cookies_controller import CookieController
 
 from logging_config import get_logger
+from supabase_client import get_supabase_client
 
 log = get_logger(__name__)
 
@@ -47,22 +48,6 @@ def _get_cookie_controller() -> CookieController:
     if "_cookie_controller" not in st.session_state:
         st.session_state["_cookie_controller"] = CookieController()
     return st.session_state["_cookie_controller"]
-
-
-def _get_supabase_client():
-    """Returns a Supabase client, or None if not configured. Never
-    raises — callers treat None as 'persistence unavailable, proceed
-    without it', matching the fail-open design."""
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
-    if not url or not key:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(url, key)
-    except Exception:
-        log.error("supabase_client_init_failed", exc_info=True)
-        return None
 
 
 def get_or_create_device_id() -> str:
@@ -100,7 +85,7 @@ def restore_profile_if_available() -> bool:
         # don't overwrite with a stale saved one.
         return False
 
-    client = _get_supabase_client()
+    client = get_supabase_client()
     if client is None:
         return False
 
@@ -148,7 +133,7 @@ def save_profile_if_available() -> None:
     fails. A failed save just means this device won't be recognised
     next visit; it must never interrupt the render flow the user is
     actually waiting on."""
-    client = _get_supabase_client()
+    client = get_supabase_client()
     if client is None:
         return
 

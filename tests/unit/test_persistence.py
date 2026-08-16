@@ -104,14 +104,14 @@ def test_restore_returns_false_when_credentials_not_configured():
 def test_restore_returns_false_and_does_not_raise_when_supabase_unreachable():
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(raise_on_select=True)):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(raise_on_select=True)):
                 assert persistence.restore_profile_if_available() is False
 
 
 def test_restore_returns_false_when_no_matching_row():
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[])):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[])):
                 assert persistence.restore_profile_if_available() is False
 
 
@@ -119,7 +119,7 @@ def test_restore_returns_false_when_row_exists_but_has_no_baseline():
     row = {"device_id": "device-1", "raw_text": "hello", "baseline_fingerprint": None}
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is False
 
 
@@ -133,7 +133,7 @@ def test_restore_populates_session_state_on_a_real_match():
     }
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is True
     assert st.session_state["raw_text"] == "I think we should move fast on this."
     assert st.session_state["baseline_fingerprint"] == {"hedge_density": 1.0}
@@ -149,7 +149,7 @@ def test_restore_populates_voice_profile_summary_when_present():
     }
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is True
     assert st.session_state["voice_profile_summary"] == "Writes short, direct sentences. Rarely hedges."
 
@@ -166,7 +166,7 @@ def test_restore_omits_voice_profile_summary_key_when_absent():
     }
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is True
     assert "voice_profile_summary" not in st.session_state
 
@@ -193,7 +193,7 @@ def test_save_no_ops_when_credentials_not_configured():
 def test_save_no_ops_when_no_baseline_yet():
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         mock_client = _mock_supabase_client()
-        with patch("persistence._get_supabase_client", return_value=mock_client):
+        with patch("persistence.get_supabase_client", return_value=mock_client):
             persistence.save_profile_if_available()
     mock_client.table.return_value.upsert.assert_not_called()
 
@@ -205,7 +205,7 @@ def test_save_upserts_with_the_expected_payload():
     st.session_state["_device_id"] = "device-1"
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         mock_client = _mock_supabase_client()
-        with patch("persistence._get_supabase_client", return_value=mock_client):
+        with patch("persistence.get_supabase_client", return_value=mock_client):
             persistence.save_profile_if_available()
 
     mock_client.table.assert_called_with(persistence._TABLE)
@@ -224,7 +224,7 @@ def test_save_includes_voice_profile_summary_when_present():
     st.session_state["voice_profile_summary"] = "Writes short, direct sentences."
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         mock_client = _mock_supabase_client()
-        with patch("persistence._get_supabase_client", return_value=mock_client):
+        with patch("persistence.get_supabase_client", return_value=mock_client):
             persistence.save_profile_if_available()
 
     payload = mock_client.table.return_value.upsert.call_args[0][0]
@@ -240,7 +240,7 @@ def test_save_includes_none_for_voice_profile_summary_when_not_yet_generated():
     st.session_state["_device_id"] = "device-1"
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         mock_client = _mock_supabase_client()
-        with patch("persistence._get_supabase_client", return_value=mock_client):
+        with patch("persistence.get_supabase_client", return_value=mock_client):
             persistence.save_profile_if_available()
 
     payload = mock_client.table.return_value.upsert.call_args[0][0]
@@ -251,5 +251,5 @@ def test_save_failure_does_not_raise():
     st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
-            with patch("persistence._get_supabase_client", return_value=_mock_supabase_client(raise_on_upsert=True)):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(raise_on_upsert=True)):
                 persistence.save_profile_if_available()  # must not raise

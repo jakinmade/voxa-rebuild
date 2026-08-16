@@ -23,6 +23,7 @@ import re
 import streamlit as st
 
 from scoring_rules import scoring_rules_version
+from render_events import log_render_event
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from voice_engine import (
     analyse_writing, _analyse_intro,
@@ -1127,14 +1128,24 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             st.session_state.get("dimension_stability"),
         )
         risk = compute_risk(delta, semantic, ai_tells, insertion_check)
+        risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)
         log.info(
             "render_complete", is_refinement=is_refinement,
             confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
             risk=risk.get("level") if isinstance(risk, dict) else risk,
-            risk_reason=compute_risk_reason(delta, semantic, ai_tells, insertion_check),
+            risk_reason=risk_reason,
             scoring_rules_version=scoring_rules_version(),
             ai_tells_clean=ai_tells["clean"],
             missed_dimensions=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
+        )
+        log_render_event(
+            risk=risk.get("level") if isinstance(risk, dict) else risk,
+            risk_reason=risk_reason,
+            semantic_match=semantic.get("semantic_match") if semantic else None,
+            missed_dimensions=sum(1 for d in delta.values() if d["verdict"] == "MISSED"),
+            ai_tells_clean=ai_tells["clean"],
+            is_refinement=is_refinement,
+            scoring_rules_version=scoring_rules_version(),
         )
 
         # Second, independently-grounded voice-match signal alongside

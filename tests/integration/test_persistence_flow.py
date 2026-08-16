@@ -120,7 +120,7 @@ def test_completing_onboarding_saves_a_profile_silently(fake_db):
     client = _fake_supabase_client(fake_db)
     no_cookie = _cookie_controller_returning(None)
 
-    with patch("persistence._get_supabase_client", return_value=client):
+    with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=no_cookie):
             at = AppTest.from_file(_APP_PATH)
             at = _complete_onboarding_through_screen3(at)
@@ -140,7 +140,7 @@ def test_returning_visit_with_matching_cookie_restores_straight_to_screen4(fake_
     no_cookie = _cookie_controller_returning(None)
 
     # First visit: onboard and save.
-    with patch("persistence._get_supabase_client", return_value=client):
+    with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=no_cookie):
             at = AppTest.from_file(_APP_PATH)
             at = _complete_onboarding_through_screen3(at)
@@ -149,7 +149,7 @@ def test_returning_visit_with_matching_cookie_restores_straight_to_screen4(fake_
     # Second visit: a fresh AppTest instance (new browser session, same
     # device cookie) should skip onboarding entirely.
     returning_cookie = _cookie_controller_returning(saved_id)
-    with patch("persistence._get_supabase_client", return_value=client):
+    with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=returning_cookie):
             at2 = AppTest.from_file(_APP_PATH)
             at2.run(timeout=15)
@@ -166,7 +166,7 @@ def test_unrecognised_cookie_falls_back_to_fresh_onboarding(fake_db):
     client = _fake_supabase_client(fake_db)
     unknown_cookie = _cookie_controller_returning("some-device-id-never-saved")
 
-    with patch("persistence._get_supabase_client", return_value=client):
+    with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=unknown_cookie):
             at = AppTest.from_file(_APP_PATH)
             at.run(timeout=15)
@@ -186,7 +186,7 @@ def test_supabase_unreachable_on_load_fails_open_to_fresh_onboarding(fake_db):
     broken_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.side_effect = Exception("network down")
     some_cookie = _cookie_controller_returning("device-id-doesnt-matter")
 
-    with patch("persistence._get_supabase_client", return_value=broken_client):
+    with patch("persistence.get_supabase_client", return_value=broken_client):
         with patch("persistence.CookieController", return_value=some_cookie):
             at = AppTest.from_file(_APP_PATH)
             at.run(timeout=15)
