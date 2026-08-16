@@ -149,3 +149,64 @@ def test_confirming_the_gate_reveals_the_output():
         f"render_output {actual_output!r} somewhere in the visible "
         f"text_area values, found: {text_area_values}"
     )
+
+
+def test_confirming_the_gate_reveals_the_output_WITH_low_confidence_caveat_active():
+    """Faithful reproduction of the reported scenario specifically:
+    High risk AND Low confidence (the caveat / 'Try one more sample'
+    panel) both active at once - the one combination the test above
+    doesn't cover, and the one JA's actual report showed on screen
+    alongside the gate. If this passes and the simpler test above
+    also passes, the gate mechanism itself is confirmed sound under
+    every combination reproducible outside the live Railway
+    deployment, and the remaining explanations are environmental
+    (stale deploy, a live-only API response shape) rather than a
+    logic bug in this code path."""
+    at = _run_screen4_forced_high_risk()
+
+    # Force the exact second condition from JA's report: unstable
+    # dimension_stability -> confidence_caveat() returns a string ->
+    # _deepen_fingerprint_panel renders expanded, alongside the gate.
+    at.session_state["dimension_stability"] = {
+        "sample_count": 2, "stable_count": 1, "volatile_count": 3,
+    }
+    at.run()
+    assert not at.exception, f"App raised with low-confidence caveat active: {at.exception}"
+
+    # Confirm the caveat panel is genuinely present, not just assumed.
+    expander_labels = [e.label for e in at.expander] if hasattr(at, "expander") else []
+    assert any("Try one more sample" in lbl for lbl in expander_labels), (
+        f"Expected the caveat-framed deepen panel to be showing, "
+        f"got expanders: {expander_labels}"
+    )
+
+    gate_checkbox = next(
+        c for c in at.checkbox if "reviewed the report above" in c.label
+    )
+    gate_checkbox.set_value(True)
+    at.run()
+    assert not at.exception, (
+        f"App raised after checking the gate checkbox with caveat panel "
+        f"also on screen: {at.exception}"
+    )
+
+    confirm_button = next(
+        b for b in at.button if "Show my rewritten text" in b.label
+    )
+    assert not confirm_button.disabled
+    confirm_button.click()
+    at.run()
+    assert not at.exception, (
+        f"App raised after confirming the gate with caveat panel also "
+        f"on screen: {at.exception}"
+    )
+
+    actual_output = at.session_state["render_output"]
+    text_area_values = [t.value for t in at.text_area]
+    joined = "".join(v or "" for v in text_area_values)
+    assert actual_output in joined, (
+        "Output text still not visible after confirming the gate WITH "
+        "the low-confidence caveat panel also active - this reproduces "
+        f"the reported bug under the exact combination seen live. "
+        f"text_area values found: {text_area_values}"
+    )
