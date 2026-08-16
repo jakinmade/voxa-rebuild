@@ -210,3 +210,47 @@ def test_confirming_the_gate_reveals_the_output_WITH_low_confidence_caveat_activ
         f"the reported bug under the exact combination seen live. "
         f"text_area values found: {text_area_values}"
     )
+
+
+def test_confirming_the_gate_with_a_real_succeeding_supabase_client():
+    """Closes a real gap in every test above: all of them ran with no
+    SUPABASE_URL/SUPABASE_SERVICE_KEY set, so log_review_confirmation()
+    always took the fail-open 'client is None' path. Never actually
+    tested the path where get_supabase_client() returns a real,
+    successfully-connecting client and the insert genuinely succeeds -
+    if something about handling a real client's return value (rather
+    than short-circuiting on None) broke the reveal, nothing above
+    would have caught it."""
+    at = _run_screen4_forced_high_risk()
+
+    mock_supabase_client = MagicMock()
+    mock_supabase_client.table.return_value.insert.return_value.execute.return_value = (
+        MagicMock(data=[{"id": "fake-uuid"}])
+    )
+
+    with patch("review_gate.get_supabase_client", return_value=mock_supabase_client):
+        gate_checkbox = next(
+            c for c in at.checkbox if "reviewed the report above" in c.label
+        )
+        gate_checkbox.set_value(True)
+        at.run()
+        assert not at.exception
+
+        confirm_button = next(
+            b for b in at.button if "Show my rewritten text" in b.label
+        )
+        confirm_button.click()
+        at.run()
+        assert not at.exception, f"App raised with a real succeeding Supabase client: {at.exception}"
+
+    mock_supabase_client.table.assert_called_with("review_confirmations")
+
+    actual_output = at.session_state["render_output"]
+    text_area_values = [t.value for t in at.text_area]
+    joined = "".join(v or "" for v in text_area_values)
+    assert actual_output in joined, (
+        "Output text still not visible after confirming the gate with a "
+        "REAL, successfully-connecting Supabase client (not the fail-"
+        "open None path) - this is the specific combination none of "
+        f"the earlier tests covered. text_area values found: {text_area_values}"
+    )
