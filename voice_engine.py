@@ -1914,12 +1914,22 @@ def voice_match_label(delta: dict) -> dict:
     hits = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "HIT"]
     missed = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "MISSED"]
 
+    # "Drifted" was the original wording here — dropped because it's one
+    # of the exact words voice_engine's own _ANALYTICAL_TELL_PHRASES
+    # flags as an AI tell (score_ai_tells("...Drifted on hedging...")
+    # returns clean=False, flagged=['AI-typical phrasing found: Drifted']
+    # - confirmed live, not hypothetical). This is app-copy shown to the
+    # user, not LLM output, so it was never actually run through the
+    # scorer - but having the product's own explanation of "why this
+    # doesn't sound like you" itself use a word the product flags as
+    # not sounding human undermines the message. "Off on" reads
+    # naturally in the same slot and is clean against score_ai_tells.
     if hits and not missed:
         evidence = "Held on " + ", ".join(hits) + "."
     elif hits and missed:
-        evidence = "Held on " + ", ".join(hits) + ". Drifted on " + ", ".join(missed) + "."
+        evidence = "Held on " + ", ".join(hits) + ". Off on " + ", ".join(missed) + "."
     elif missed:
-        evidence = "Drifted on " + ", ".join(missed) + "."
+        evidence = "Off on " + ", ".join(missed) + "."
     else:
         evidence = "No baseline comparison available."
 

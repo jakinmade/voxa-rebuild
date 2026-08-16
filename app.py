@@ -48,7 +48,7 @@ from deterministic_fixers import (
     _fix_hedge_density, _fix_sentence_length_sd,
     _fix_first_person_ratio, _fix_first_person_over_ratio,
     _fix_directive_ratio, _fix_modal_hedge,
-    _check_uncorrected_insertions,
+    _check_uncorrected_insertions, _fix_entity_casing,
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available
@@ -905,6 +905,24 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         )
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
         return False
+
+    # Case-only entity drift — deterministic, runs before ANY scoring so
+    # a defect that's mechanically fixable never reaches score_semantic_
+    # drift's dropped_entities check (and therefore never trips compute_
+    # risk's dropped_entities hard-fail, never gets sent to the LLM
+    # correction pass, never appears to the user at all). Confirmed live:
+    # a render kept a brand name's letters but not its casing ("CLEARANCE"
+    # -> "Clearance") and that alone was enough to force a High risk
+    # verdict on an otherwise clean render. See _fix_entity_casing's
+    # docstring for why this is safe to apply unconditionally (whole-word,
+    # case-only substitution, never touches word choice or count).
+    clean, casing_restored, casing_still_dropped = _fix_entity_casing(clean, input_text)
+    if casing_restored:
+        log.info(
+            "entity_casing_restored",
+            restored=casing_restored,
+            still_dropped=casing_still_dropped,
+        )
 
     # Diff-preserving guard on the initial render pass — same check the
     # correction pass already runs (see _check_uncorrected_insertions's

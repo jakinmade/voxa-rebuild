@@ -570,6 +570,92 @@ def _fix_directive_ratio(text: str, target: float, current: float,
 
 
 # ------------------------------------------------------------------
+# Entity-casing restoration — fixes a specific false-positive in
+# score_semantic_drift's dropped_entities check.
+# ------------------------------------------------------------------
+#
+# _entities_and_numbers() (voice_engine.py) does a case-SENSITIVE set
+# comparison between input and output. Confirmed live against a real
+# render: "CLEARANCE" (input, brand-name all-caps) survived into the
+# output as "Clearance" (title case) - same word, same position in
+# meaning, only the casing changed. Because the comparison is a plain
+# set difference, this counted as a full drop, identical in kind to a
+# genuinely vanished entity, which:
+#   (a) understated semantic_match/entity_preservation for a defect
+#       that isn't actually a lost fact, and
+#   (b) fed into compute_risk's dropped_entities hard-fail, forcing
+#       High risk for something mechanically fixable without any LLM
+#       call at all.
+#
+# This fixer runs a case-insensitive scan: for every input entity NOT
+# found in output_entities (case-sensitive), check whether a case-
+# insensitive whole-word match exists anywhere in the output text. If
+# so, restore the original casing via a whole-word substitution -
+# deterministic, same input always produces the same output, and safe
+# by construction because it only ever changes letter case, never the
+# letters themselves or the word count.
+#
+# Entities with NO case-insensitive match anywhere in the output
+# (e.g. "Curious" in that same live render, where the opening clause
+# was reworded away entirely) are left untouched - that's a genuine
+# drop, not a casing defect, and belongs to build_correction_prompt's
+# existing "add it back in naturally" LLM correction path, not this
+# fixer. Conflating the two would either falsely "fix" a real content
+# loss by re-inserting a bare word with no sentence to hold it, or
+# silently suppress a defect that should surface to the user.
+def _fix_entity_casing(output_text: str, input_text: str) -> tuple[str, list[str], list[str]]:
+    """
+    Restores original casing for entities that survived the rewrite
+    with a case-only change. Returns (fixed_text, restored, still_dropped)
+    where restored is the list of entities whose casing was fixed, and
+    still_dropped is the input_entities set minus output entities minus
+    whatever restored - i.e. what's left for the LLM correction path to
+    handle, so callers don't have to recompute the diff themselves.
+
+    Import is local, not top-of-file, to avoid a circular import -
+    voice_engine.py doesn't import deterministic_fixers.py, but keeping
+    this import scoped here (rather than adding it to the existing
+    voice_engine import line at the top of this file) makes the
+    dependency direction obvious at the call site instead of implicit
+    at module load.
+    """
+    from voice_engine import _entities_and_numbers
+
+    input_entities = _entities_and_numbers(input_text)
+    output_entities = _entities_and_numbers(output_text)
+    dropped = sorted(input_entities - output_entities)
+    if not dropped:
+        return output_text, [], []
+
+    output_lower = {e.lower(): e for e in output_entities}
+    fixed = output_text
+    restored = []
+    still_dropped = []
+    for entity in dropped:
+        if entity.lower() in output_lower:
+            # Case-insensitive match exists — restore the input's
+            # casing everywhere that word appears in the output,
+            # whole-word only so this never touches a substring inside
+            # a longer word.
+            pattern = re.compile(r"\b" + re.escape(entity) + r"\b", re.I)
+            new_fixed, n = pattern.subn(entity, fixed)
+            if n:
+                fixed = new_fixed
+                restored.append(entity)
+            else:
+                # Matched in the entity set but not via this word-
+                # boundary regex (rare — e.g. entity extraction found
+                # it inside a numeral/percent token). Leave for the
+                # LLM correction path rather than force a substitution
+                # that might not be safe.
+                still_dropped.append(entity)
+        else:
+            still_dropped.append(entity)
+
+    return fixed, restored, still_dropped
+
+
+# ------------------------------------------------------------------
 # Modal-hedge removal (might/could) — the residual left after
 # _fix_hedge_density's adverbial-only pass.
 # ------------------------------------------------------------------

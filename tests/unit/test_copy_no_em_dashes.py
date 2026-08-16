@@ -33,7 +33,11 @@ def test_voice_match_label_evidence_has_no_em_dash_when_mixed():
     result = ve.voice_match_label(delta)
     assert _no_em_dash(result["evidence"]), result["evidence"]
     assert "Held on" in result["evidence"]
-    assert "Drifted on" in result["evidence"]
+    # "Drifted" was the original wording — replaced because it's one of
+    # voice_engine's own _ANALYTICAL_TELL_PHRASES (score_ai_tells flags
+    # it as an AI tell). See the wording change note in voice_match_label
+    # itself for the full reasoning; "Off on" is the replacement.
+    assert "Off on" in result["evidence"]
 
 
 def test_voice_match_label_evidence_has_no_em_dash_all_hit():
