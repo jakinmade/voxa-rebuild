@@ -29,7 +29,7 @@ from voice_engine import (
     compute_baseline_metrics, _merge_baseline,
     _score_sample_fitness, _fitness_gate,
     _score_ai_signal,
-    score_semantic_drift, compute_confidence, compute_risk,
+    score_semantic_drift, compute_confidence, compute_risk, compute_risk_reason,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells,
     compute_dimension_stability, confidence_caveat,
@@ -1131,6 +1131,8 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             "render_complete", is_refinement=is_refinement,
             confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
             risk=risk.get("level") if isinstance(risk, dict) else risk,
+            risk_reason=compute_risk_reason(delta, semantic, ai_tells, insertion_check),
+            scoring_rules_version=scoring_rules_version(),
             ai_tells_clean=ai_tells["clean"],
             missed_dimensions=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
         )

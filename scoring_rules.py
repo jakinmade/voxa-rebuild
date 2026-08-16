@@ -42,6 +42,18 @@ HOW TO CHANGE A THRESHOLD
    further wiring needed for a threshold-only change.
 
 CHANGELOG
+1.1.0 (16 Aug 2026) - Added compute_risk_reason() (voice_engine.py),
+    logged alongside this version stamp in app.py's render_complete
+    log line. Not a threshold change - v1.0.0's own honest gap was
+    that its bands (RISK_HIGH/MEDIUM_SEMANTIC_MATCH_BELOW especially)
+    were extracted unchanged with no live evidence isolating whether
+    they're well-calibrated, because every real render checked that
+    day hit a hard-fail (AI tell, dropped entity, sentence growth)
+    before the aggregate bands ever got to be the deciding factor.
+    This closes that gap the right way: instrumentation before
+    recalibration, not a number changed on a hunch. Once render logs
+    accumulate enough aggregate_band-driven verdicts, the bands can
+    be recalibrated against real data instead of guessed at.
 1.0.0 (16 Aug 2026) - Initial extraction. Values unchanged from their
     prior inline locations - this version establishes the baseline,
     it does not recalibrate anything. Prompted by a working session
@@ -49,9 +61,25 @@ CHANGELOG
     fidelity, an over-broad AI-tell pattern, a fabricated sentence,
     a hallucinated salutation name) and needed a place to point at
     for "what does the scoring actually check, as of today."
+
+SCOPE BOUNDARY — what's deliberately NOT in this file
+_score_ai_signal's internal weights (voice_engine.py) score how
+AI-contaminated the INPUT looks, before a render even happens - a
+different concern from this file's scope (thresholds governing the
+OUTPUT's Confidence/Risk verdict, post-render). AI_CONTAMINATION_
+PATH_THRESHOLD lives here because it's the boundary where that input
+score gets CONSUMED by a downstream decision (which prompt path to
+use); the weights that produce the score in the first place stay
+where they are. If input-classification calibration ever needs the
+same audit-trail treatment this file gives output-verdict calibration,
+that's a parallel file, not an expansion of this one - the two are
+different governance questions (is the input AI-written vs was this
+particular render trustworthy) and conflating them would make this
+file's "every threshold governing a render's Confidence/Risk verdict"
+claim inaccurate rather than more complete.
 """
 
-SCORING_RULES_VERSION = "1.0.0"
+SCORING_RULES_VERSION = "1.1.0"
 
 
 # ---------------------------------------------------------------------------

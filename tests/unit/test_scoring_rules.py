@@ -22,6 +22,12 @@ def test_version_is_a_semver_string():
     assert all(p.isdigit() for p in parts)
 
 
+def test_version_bumped_for_reason_instrumentation():
+    """1.1.0 added compute_risk_reason - a minor bump (new capability,
+    no threshold changed), not a patch or a major."""
+    assert sr.SCORING_RULES_VERSION == "1.1.0"
+
+
 def test_scoring_rules_version_function_matches_constant():
     assert sr.scoring_rules_version() == sr.SCORING_RULES_VERSION
 
@@ -51,6 +57,82 @@ def test_ai_contamination_threshold_matches_module_constant():
         word_count_input=20, ai_score=sr.AI_CONTAMINATION_PATH_THRESHOLD,
     )
     assert "STRIPPING INSTRUCTIONS" in prompt
+
+
+# ---------------------------------------------------------------------------
+# compute_risk_reason — instrumentation added in v1.1.0 so the aggregate
+# bands (RISK_HIGH/MEDIUM_SEMANTIC_MATCH_BELOW) can eventually be
+# recalibrated against real evidence of which check actually drives a
+# verdict, rather than guessed at. Mirrors compute_risk's own check
+# order exactly - if these two functions ever disagree on which check
+# fired first, that's a real bug, so the tests below cross-check them
+# on the same fixtures rather than only testing compute_risk_reason
+# in isolation.
+# ---------------------------------------------------------------------------
+
+def test_reason_is_ai_tell_when_that_hard_fail_fires():
+    delta = {}
+    semantic = {"semantic_match": 100, "attribution_swaps": [], "dropped_entities": []}
+    ai_tells = {"clean": False}
+    assert ve.compute_risk(delta, semantic, ai_tells) == "High"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells) == "ai_tell"
+
+
+def test_reason_is_attribution_swap_when_that_hard_fail_fires():
+    delta = {}
+    semantic = {"semantic_match": 100, "attribution_swaps": ["'your point' became 'my point'"], "dropped_entities": []}
+    ai_tells = {"clean": True}
+    assert ve.compute_risk(delta, semantic, ai_tells) == "High"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells) == "attribution_swap"
+
+
+def test_reason_is_dropped_entity_when_that_hard_fail_fires():
+    delta = {}
+    semantic = {"semantic_match": 96, "attribution_swaps": [], "dropped_entities": ["Scott"]}
+    ai_tells = {"clean": True}
+    assert ve.compute_risk(delta, semantic, ai_tells) == "High"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells) == "dropped_entity"
+
+
+def test_reason_is_sentence_growth_when_that_hard_fail_fires():
+    delta = {}
+    semantic = {"semantic_match": 100, "attribution_swaps": [], "dropped_entities": []}
+    ai_tells = {"clean": True}
+    insertion_check = {"sentence_growth": 2}
+    assert ve.compute_risk(delta, semantic, ai_tells, insertion_check) == "High"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells, insertion_check) == "sentence_growth"
+
+
+def test_reason_is_aggregate_band_when_only_the_score_is_low():
+    """The actual gap this instrumentation closes: confirms a verdict
+    CAN be driven by the aggregate bands alone, with no hard-fail
+    present - this is the case v1.0.0 had zero real examples of."""
+    delta = {}
+    semantic = {"semantic_match": 60, "attribution_swaps": [], "dropped_entities": []}
+    ai_tells = {"clean": True}
+    assert ve.compute_risk(delta, semantic, ai_tells) == "High"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells) == "aggregate_band"
+
+
+def test_reason_is_clean_when_nothing_fires():
+    delta = {}
+    semantic = {"semantic_match": 100, "attribution_swaps": [], "dropped_entities": []}
+    ai_tells = {"clean": True}
+    assert ve.compute_risk(delta, semantic, ai_tells) == "Low"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells) == "clean"
+
+
+def test_reason_checks_same_priority_order_as_compute_risk():
+    """If both an AI tell AND a dropped entity are present, compute_risk
+    returns High either way - but the REASON must match whichever
+    check compute_risk's own if-chain hits first (ai_tell, since it's
+    checked before dropped_entities), or the two functions would be
+    silently describing different renders."""
+    delta = {}
+    semantic = {"semantic_match": 100, "attribution_swaps": [], "dropped_entities": ["Scott"]}
+    ai_tells = {"clean": False}
+    assert ve.compute_risk(delta, semantic, ai_tells) == "High"
+    assert ve.compute_risk_reason(delta, semantic, ai_tells) == "ai_tell"
 
 
 def test_semantic_match_weights_sum_to_one():

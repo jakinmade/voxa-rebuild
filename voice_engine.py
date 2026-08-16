@@ -1782,6 +1782,60 @@ def compute_risk(
     return "Low"
 
 
+def compute_risk_reason(
+    delta: dict | None, semantic: dict | None, ai_tells: dict | None = None,
+    insertion_check: dict | None = None,
+) -> str:
+    """
+    Companion to compute_risk: identifies WHICH check actually drove
+    the verdict, without changing compute_risk's own return type or
+    call sites (still a plain "High"/"Medium"/"Low" string everywhere
+    it's already used).
+
+    Exists to close a specific gap in scoring_rules.py v1.0.0: that
+    module's own changelog is explicit that its thresholds (the
+    semantic_match < 70/85 bands in particular) were extracted
+    unchanged, not recalibrated, because no live data yet isolates
+    whether those specific numbers are well-tuned - every real render
+    checked in the 16 Aug 2026 session hit a hard-fail (an AI tell,
+    a dropped entity, sentence growth) before the aggregate bands
+    ever got a chance to be the deciding factor. Recalibrating a
+    number nobody has seen fire on its own would be tuning blind.
+
+    This is the fix for that: log the reason alongside every render
+    (see render_complete in app.py), and after enough real renders
+    accumulate, it becomes possible to ask a grounded question -
+    "of the renders that hit High risk, how many were hard-fails vs
+    aggregate_band, and at what semantic_match did aggregate_band
+    actually fire" - instead of adjusting 70/85 on a hunch. Same
+    principle the scoring_rules.py docstring already commits to:
+    monitor first, recalibrate only once there's a reason to.
+
+    Returns one of: "ai_tell", "attribution_swap", "dropped_entity",
+    "sentence_growth", "aggregate_band", "clean" (Low with nothing
+    remotely close to a fail).
+    """
+    if ai_tells and not ai_tells.get("clean", True):
+        return "ai_tell"
+
+    if (semantic or {}).get("attribution_swaps"):
+        return "attribution_swap"
+
+    if (semantic or {}).get("dropped_entities"):
+        return "dropped_entity"
+
+    if (insertion_check or {}).get("sentence_growth", 0) > 0:
+        return "sentence_growth"
+
+    missed = sum(1 for d in (delta or {}).values() if d.get("verdict") == "MISSED")
+    semantic_match = (semantic or {}).get("semantic_match", 100)
+
+    if semantic_match < RISK_MEDIUM_SEMANTIC_MATCH_BELOW or missed >= RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST:
+        return "aggregate_band"
+
+    return "clean"
+
+
 def score_render_delta(baseline: dict, output_text: str) -> dict:
     """
     Per-dimension comparison of the render output against the numeric
