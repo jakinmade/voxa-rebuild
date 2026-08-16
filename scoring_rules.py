@@ -1,0 +1,124 @@
+"""
+VOICOVA scoring policy — the "policy version" half of a model-version /
+policy-version split (same idea used in versioned credit-decisioning
+systems: a decision is reproducible from *model version + policy
+version + inputs*, and a threshold can be recalibrated same-day
+without a retrain or a code change to the scoring logic itself).
+
+WHY THIS FILE EXISTS
+Before this, every threshold governing a render's Confidence/Risk
+verdict was an inline magic number scattered across voice_engine.py -
+0.20 and 0.40 in one function, 70 and 85 in another, 0.25 in
+prompts.py. Nothing was wrong with any individual number, but there
+was no single place to look to know what "good" currently means, and
+no version stamp on any of it - if a threshold changed, there was no
+record of which renders were scored under the old value vs the new
+one. That's the actual governance gap this closes: not that the
+numbers were miscalibrated (no evidence of that yet - see CHANGELOG),
+but that the numbers weren't auditable as a set.
+
+WHAT THIS IS NOT
+Not a dynamic rule engine, not business-user-editable, not hot-
+swappable at runtime. VOICOVA is built and calibrated by one person;
+a rule-authoring UI or a rules DSL would be solving a team-scale
+problem this product doesn't have. This is deliberately just a
+versioned Python module - the smallest thing that gives real
+governance value (one place to look, one version stamp per render,
+one changelog) without the complexity of a system built for a
+scenario that isn't this one.
+
+HOW TO CHANGE A THRESHOLD
+1. Change the constant below.
+2. Bump SCORING_RULES_VERSION (semver: patch for a number tweak,
+   minor for a new rule/dimension, major for a change that could flip
+   verdicts on renders that were already scored under the old policy).
+3. Add a CHANGELOG entry: version, date, what changed, why, what
+   render/incident (if any) prompted it. Every entry so far in this
+   file was prompted by a specific, confirmed-live render - keep that
+   discipline. A threshold changed on a hunch, with no entry
+   explaining why, is exactly the opacity this file exists to prevent.
+4. Every render log line already carries this version (see
+   scoring_rules_version() call site in app.py's _run_render) - no
+   further wiring needed for a threshold-only change.
+
+CHANGELOG
+1.0.0 (16 Aug 2026) - Initial extraction. Values unchanged from their
+    prior inline locations - this version establishes the baseline,
+    it does not recalibrate anything. Prompted by a working session
+    that fixed four separate render-quality bugs in one day (lexical
+    fidelity, an over-broad AI-tell pattern, a fabricated sentence,
+    a hallucinated salutation name) and needed a place to point at
+    for "what does the scoring actually check, as of today."
+"""
+
+SCORING_RULES_VERSION = "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# score_render_delta — per-dimension HIT/CLOSE/MISSED bands
+#
+# pct_diff is the output metric's percentage distance from the
+# person's own baseline for that dimension (hedge_density,
+# sentence_length_sd, first_person_ratio, directive_ratio). Applied
+# identically to all four dimensions - no dimension currently has a
+# tighter or looser band than the others. That uniformity is itself a
+# calibration choice, not an oversight: no evidence yet that any one
+# dimension needs a different tolerance than the others. If that
+# changes, this is where a per-dimension override would go.
+# ---------------------------------------------------------------------------
+DELTA_BAND_HIT_MAX_PCT = 0.20    # within 20% of baseline -> HIT
+DELTA_BAND_CLOSE_MAX_PCT = 0.40  # within 40% of baseline -> CLOSE, else MISSED
+
+
+# ---------------------------------------------------------------------------
+# compute_risk — overall Low/Medium/High verdict from aggregate scores
+#
+# These only apply once none of the hard-fail checks (AI tell present,
+# attribution swap, dropped entity, sentence growth) have already
+# forced High - see compute_risk's own docstring for why those are
+# binary, not banded: a single high-consequence error isn't something
+# a percentage threshold should be able to average away.
+# ---------------------------------------------------------------------------
+RISK_HIGH_SEMANTIC_MATCH_BELOW = 70
+RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST = 3
+RISK_MEDIUM_SEMANTIC_MATCH_BELOW = 85
+RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1
+
+
+# ---------------------------------------------------------------------------
+# score_semantic_drift — how entity preservation and content overlap
+# combine into the headline semantic_match number
+#
+# Entity preservation weighted higher than content-word overlap:
+# losing a name or a number is treated as a bigger deal than losing
+# some general vocabulary overlap, even before the dropped_entities
+# hard-fail (which fires independently of this weighting - see
+# compute_risk). This weighting affects the headline number Confidence
+# is partly built from; the hard-fail is the actual backstop.
+# ---------------------------------------------------------------------------
+SEMANTIC_MATCH_ENTITY_WEIGHT = 0.6
+SEMANTIC_MATCH_CONTENT_WEIGHT = 0.4
+
+
+# ---------------------------------------------------------------------------
+# _build_system_prompt — AI-contamination path selector
+#
+# ai_score >= this value routes a render through the "AI-contaminated"
+# prompt path (aggressive stripping + restoration targets) instead of
+# the "clean human input" path (preservation-first, lexical fidelity
+# enforced - see rule 9/10 in base_rules). Getting this wrong in
+# either direction has a real cost: too low, and a person's own
+# genuine writing gets the aggressive AI-stripping treatment meant for
+# actually-AI-generated input; too high, and real AI slop sails
+# through the gentler, preservation-first path uncorrected.
+# ---------------------------------------------------------------------------
+AI_CONTAMINATION_PATH_THRESHOLD = 0.25
+
+
+def scoring_rules_version() -> str:
+    """The version stamp every render log line should carry alongside
+    its actual scores, so a render is reproducible later from
+    (scoring_rules_version, input_text, baseline) the same way a
+    credit decision is reproducible from (model_version, policy_
+    version, application_data)."""
+    return SCORING_RULES_VERSION

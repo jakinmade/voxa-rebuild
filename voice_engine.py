@@ -24,6 +24,17 @@ import hashlib
 from dataclasses import dataclass
 from collections import Counter
 
+from scoring_rules import (
+    DELTA_BAND_HIT_MAX_PCT,
+    DELTA_BAND_CLOSE_MAX_PCT,
+    RISK_HIGH_SEMANTIC_MATCH_BELOW,
+    RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST,
+    RISK_MEDIUM_SEMANTIC_MATCH_BELOW,
+    RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST,
+    SEMANTIC_MATCH_ENTITY_WEIGHT,
+    SEMANTIC_MATCH_CONTENT_WEIGHT,
+)
+
 
 # ============================================================
 # Hedge detection — single source of truth
@@ -1508,7 +1519,9 @@ def score_semantic_drift(input_text: str, output_text: str) -> dict:
     else:
         content_score = 1.0
 
-    semantic_match = round(100 * (0.6 * entity_score + 0.4 * content_score))
+    semantic_match = round(100 * (
+        SEMANTIC_MATCH_ENTITY_WEIGHT * entity_score + SEMANTIC_MATCH_CONTENT_WEIGHT * content_score
+    ))
 
     attribution_swaps = detect_attribution_swaps(input_text, output_text)
 
@@ -1762,9 +1775,9 @@ def compute_risk(
     missed = sum(1 for d in (delta or {}).values() if d.get("verdict") == "MISSED")
     semantic_match = (semantic or {}).get("semantic_match", 100)
 
-    if semantic_match < 70 or missed >= 3:
+    if semantic_match < RISK_HIGH_SEMANTIC_MATCH_BELOW or missed >= RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST:
         return "High"
-    if semantic_match < 85 or missed >= 1:
+    if semantic_match < RISK_MEDIUM_SEMANTIC_MATCH_BELOW or missed >= RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST:
         return "Medium"
     return "Low"
 
@@ -1784,7 +1797,11 @@ def score_render_delta(baseline: dict, output_text: str) -> dict:
         o_val = output_metrics[key]
         diff = o_val - b_val
         pct_diff = abs(diff) / max(b_val, 0.01)
-        verdict = "HIT" if pct_diff <= 0.20 else "CLOSE" if pct_diff <= 0.40 else "MISSED"
+        verdict = (
+            "HIT" if pct_diff <= DELTA_BAND_HIT_MAX_PCT
+            else "CLOSE" if pct_diff <= DELTA_BAND_CLOSE_MAX_PCT
+            else "MISSED"
+        )
         delta[key] = {
             "baseline": b_val, "output": o_val,
             "delta": round(diff, 3), "pct_diff": round(pct_diff, 3),

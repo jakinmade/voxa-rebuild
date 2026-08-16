@@ -14,6 +14,8 @@ here it's a function, so it's testable independent of Streamlit.
 
 import re
 
+from scoring_rules import AI_CONTAMINATION_PATH_THRESHOLD
+
 from voice_engine import (
     _score_thought_density,
     _pick_anchor_sentences,
@@ -459,7 +461,7 @@ def _build_system_prompt(
         if voice_profile_summary and voice_profile_summary.strip() else ""
     )
 
-    if ai_score >= 0.25:
+    if ai_score >= AI_CONTAMINATION_PATH_THRESHOLD:
         # AI-contaminated path — stripping + restoration
         input_has_opinion_content = True
         input_has_directive_content = True

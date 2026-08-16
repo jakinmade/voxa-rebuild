@@ -22,6 +22,7 @@ import os
 import re
 import streamlit as st
 
+from scoring_rules import scoring_rules_version
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from voice_engine import (
     analyse_writing, _analyse_intro,
@@ -921,6 +922,7 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         new_hedges=initial_insertion_check["new_hedges"],
         sentence_growth=initial_insertion_check["sentence_growth"],
         flagged=initial_insertion_check["flagged"],
+        scoring_rules_version=scoring_rules_version(),
     )
     st.session_state.render_insertion_check = initial_insertion_check
 
