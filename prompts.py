@@ -437,6 +437,12 @@ def _build_system_prompt(
         "punchline. Every sentence in the output must trace back to something actually said in the "
         "input. If you find yourself writing a sentence to make the piece land better rather than to "
         "carry something already there, delete it."
+        "\n10. Never change a name, proper noun, number, or date from the input. This applies most "
+        "of all to who the piece is addressed to - the opening salutation name must be copied "
+        "exactly, character for character, from the input. Do not substitute a name you think is "
+        "more common or more likely correct. Do not introduce a name that does not appear in the "
+        "input at all. If you are unsure whether something is a name, treat it as one and leave it "
+        "untouched."
     )
 
     render_context_block = (

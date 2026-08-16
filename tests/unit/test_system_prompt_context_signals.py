@@ -180,3 +180,34 @@ def test_sentence_splitting_for_rhythm_still_permitted():
     output ones) - only banning invented content, not restructuring."""
     prompt = _build_system_prompt(**_base_kwargs(ai_score=0.1))
     assert "split one long sentence into two or three shorter ones" in prompt
+
+
+# ------------------------------------------------------------------
+# Name preservation (both paths — base_rules is shared)
+#
+# Root-caused against a second real render, after the fabrication fix
+# above: "Scott" became "Josh" in the opening salutation, AND a wholly
+# new sentence was fabricated referencing "Scott's angle" as a third
+# party — while the render's own greeting used "Josh" for the actual
+# addressee. The earlier fix to _grammar_fix_pass's system prompt
+# (DO NOT TOUCH names) didn't cover this, because the substitution
+# was happening in the INITIAL render call (this function), not the
+# grammar-only second pass. score_semantic_drift's dropped_entities
+# check (see test_entity_drop_risk.py) correctly caught this render
+# as High risk/78% match after the fact — this closes the gap at the
+# source instead of only detecting it downstream.
+# ------------------------------------------------------------------
+
+def test_name_preservation_rule_present_on_clean_input_path():
+    prompt = _build_system_prompt(**_base_kwargs(ai_score=0.1))
+    assert "Never change a name" in prompt
+    assert "opening salutation name must be copied exactly" in prompt
+
+
+def test_name_preservation_rule_present_on_ai_contaminated_path():
+    """base_rules is appended on both paths - confirm it isn't
+    accidentally scoped to only one, since the AI-contaminated path's
+    'destroy the words' framing is exactly the kind of instruction
+    that could plausibly be read as license to also rewrite a name."""
+    prompt = _build_system_prompt(**_base_kwargs(ai_score=0.5))
+    assert "Never change a name" in prompt
