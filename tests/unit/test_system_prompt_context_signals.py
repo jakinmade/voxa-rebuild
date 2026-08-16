@@ -122,3 +122,33 @@ def test_voice_profile_summary_and_render_context_coexist():
     assert "WRITER'S DISTINCTIVE HABITS" in prompt
     assert "LinkedIn post" in prompt
     assert "Opens with the concrete problem" in prompt
+
+
+# ------------------------------------------------------------------
+# Lexical fidelity (clean human input path)
+#
+# Root-caused against a real render: clean-human input ("Curious if
+# you got a chance to run it") came back with gratuitous synonym
+# substitution ("Curious whether...") that _check_uncorrected_insertions
+# correctly flagged as a new hedge — the detection layer was already
+# working (see test_deterministic_fixers.py), but nothing upstream in
+# the render prompt itself discouraged the substitution in the first
+# place, so every render risked tripping its own insertion check.
+# This is the missing instruction, clean-path only: the AI-contaminated
+# path is intentionally a full rewrite ("keep the ideas, destroy the
+# words") and must NOT get this constraint.
+# ------------------------------------------------------------------
+
+def test_lexical_fidelity_instruction_present_on_clean_input_path():
+    prompt = _build_system_prompt(**_base_kwargs(ai_score=0.1))
+    assert "LEXICAL FIDELITY" in prompt
+    assert "not a paraphrase task" in prompt
+
+
+def test_lexical_fidelity_instruction_absent_on_ai_contaminated_path():
+    """The AI-contaminated path's whole job is full rewrite - stripping
+    AI tells and replacing the words wholesale. A lexical-preservation
+    instruction there would directly contradict "Keep the ideas.
+    Destroy the words." and must not be injected on this path."""
+    prompt = _build_system_prompt(**_base_kwargs(ai_score=0.5))
+    assert "LEXICAL FIDELITY" not in prompt
