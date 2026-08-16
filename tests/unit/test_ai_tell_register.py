@@ -177,3 +177,37 @@ class TestRegexSweepFixesAnalyticalTells:
         result = pr._regex_sweep(text)
         assert "leverage" not in result.lower()
         assert "seamless" not in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Regression: 15 Aug 2026 live render. A fabricated closing sentence,
+# "Curious whether that framing lands for you", shipped and scored
+# score_ai_tells as "Clean" — the soft check-in hedge wasn't in any
+# tell vocabulary, corporate or analytical, so nothing could catch it
+# even though the AI-tell was obvious to a human reader. Added to
+# _AI_TELL_PHRASES (voice_engine.py) 16 Aug 2026.
+# ---------------------------------------------------------------------------
+
+class TestCheckInHedgeTell:
+    def test_curious_whether_flagged(self):
+        text = "Curious whether that framing lands for you."
+        result = ve.score_ai_tells(text)
+        assert result["clean"] is False
+
+    def test_does_that_land_flagged(self):
+        text = "Does that land for you, or should I reframe it?"
+        result = ve.score_ai_tells(text)
+        assert result["clean"] is False
+
+    def test_does_that_resonate_flagged(self):
+        text = "Does that resonate with you at all?"
+        result = ve.score_ai_tells(text)
+        assert result["clean"] is False
+
+    def test_genuine_curiosity_about_a_fact_not_flagged(self):
+        """Must not over-fire on ordinary uses of 'curious' that aren't
+        the soft check-in construction — e.g. genuine curiosity about a
+        fact, which is normal human writing, not an AI tell."""
+        text = "I'm curious what the Q3 numbers actually showed."
+        result = ve.score_ai_tells(text)
+        assert result["clean"] is True

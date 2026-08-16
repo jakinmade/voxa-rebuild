@@ -904,6 +904,26 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
         return False
 
+    # Diff-preserving guard on the initial render pass — same check the
+    # correction pass already runs (see _check_uncorrected_insertions's
+    # docstring), applied here for the first time. Two LLM calls sit
+    # upstream of this point (the voice-transformation render and the
+    # grammar-fix pass) and neither had a diff against the true source
+    # text before now — score_render_delta below is an aggregate band
+    # check against the baseline fingerprint, not a diff against THIS
+    # input, so a fabricated sentence or an invented hedge can land
+    # inside a passing band and go unflagged. Diffing against input_text
+    # (not an intermediate) catches both calls in one pass, and catches
+    # it at the earliest point content exists to diff.
+    initial_insertion_check = _check_uncorrected_insertions(input_text, clean)
+    log.info(
+        "initial_render_insertion_check",
+        new_hedges=initial_insertion_check["new_hedges"],
+        sentence_growth=initial_insertion_check["sentence_growth"],
+        flagged=initial_insertion_check["flagged"],
+    )
+    st.session_state.render_insertion_check = initial_insertion_check
+
     if baseline:
         delta = score_render_delta(baseline, clean)
         semantic = score_semantic_drift(input_text, clean)
@@ -984,11 +1004,13 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
             llm_correction_needed=bool(correction_prompt),
             missed_dimensions=[k for k, d in correction_delta.items() if d["verdict"] == "MISSED"],
         )
-        # Default when no LLM correction call runs at all — nothing to
-        # diff against, so nothing to flag. Only set for real inside
-        # the block below, same as every other correction-pass variable
-        # here that's conditionally populated.
-        insertion_check = None
+        # Seeded from the initial-render check above, not None — that
+        # check already covers the voice-transformation and grammar-fix
+        # calls; this block, if it runs, adds what the correction call
+        # introduces on top. Merged rather than overwritten below so a
+        # sentence fabricated at either stage still surfaces as risk —
+        # whichever call invented it, compute_risk needs to see it.
+        insertion_check = initial_insertion_check
         if correction_prompt:
             try:
                 pre_llm_correction = clean
@@ -1007,8 +1029,16 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
                 # _check_uncorrected_insertions's docstring for why the
                 # delta re-score two lines below can't catch this on its
                 # own (aggregate band check, not a before/after diff).
-                insertion_check = _check_uncorrected_insertions(pre_llm_correction, clean)
-                if insertion_check["new_hedges"]:
+                # Merged with the initial-render check rather than
+                # replacing it, so growth/hedges from either stage carry
+                # through to compute_risk below.
+                correction_insertion_check = _check_uncorrected_insertions(pre_llm_correction, clean)
+                insertion_check = {
+                    "new_hedges": insertion_check["new_hedges"] + correction_insertion_check["new_hedges"],
+                    "sentence_growth": insertion_check["sentence_growth"] + correction_insertion_check["sentence_growth"],
+                    "flagged": insertion_check["flagged"] or correction_insertion_check["flagged"],
+                }
+                if correction_insertion_check["new_hedges"]:
                     # Same fixers already used earlier in this pass, same
                     # safe-deletion-only contract — no new correction
                     # logic, just running them again on what the LLM call
@@ -1016,14 +1046,14 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
                     # the diff itself: any new hedge is by definition over
                     # whatever the LLM was told to hold), so pass current
                     # count vs 0 to force the over-hedged branch.
-                    new_hedge_count = len(insertion_check["new_hedges"])
+                    new_hedge_count = len(correction_insertion_check["new_hedges"])
                     clean, _ = _fix_hedge_density(clean, 0, new_hedge_count)
                     clean, _ = _fix_modal_hedge(clean, 0, new_hedge_count)
                 log.info(
                     "correction_pass_side_effect_caught",
-                    new_hedges=insertion_check["new_hedges"],
-                    sentence_growth=insertion_check["sentence_growth"],
-                    flagged=insertion_check["flagged"],
+                    new_hedges=correction_insertion_check["new_hedges"],
+                    sentence_growth=correction_insertion_check["sentence_growth"],
+                    flagged=correction_insertion_check["flagged"],
                 )
 
                 delta = score_render_delta(baseline, clean)
@@ -1152,13 +1182,13 @@ def screen_render():
     render_context = st.text_input(
         "context", value="",
         placeholder="Optional. Who's this for, and what's it for?",
-        label_visibility="collapsed",
+        label_visibility="collapsed", key="render_context_field",
     )
 
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
         placeholder="Paste AI-generated text here. An email draft, a LinkedIn post, a proposal section...",
-        height=220, label_visibility="collapsed",
+        height=220, label_visibility="collapsed", key="render_input_field",
     )
 
     if st.button("Write as me \u2192", type="primary", use_container_width=True):

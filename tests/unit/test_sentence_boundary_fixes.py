@@ -17,6 +17,7 @@ reading (830%) given how close to zero this dimension's baseline
 typically sits for non-imperative writers.
 """
 import voice_engine as ve
+from prompts import _regex_sweep
 
 
 # ------------------------------------------------------------------
@@ -74,6 +75,36 @@ def test_real_session_render_produces_no_punctuation_artifacts():
         assert not any(bad in s for bad in ["?.", "!.", ".."]), (
             f"Found a punctuation artifact in sentence: {s!r}"
         )
+
+
+# ------------------------------------------------------------------
+# Bug 3 — quote+period double punctuation from _regex_sweep, found live
+# 16 Aug 2026 (Scott/CLEARANCE render, same family as Bug 1 but a
+# different site: a closing quote followed by a redundant terminal
+# mark, e.g. 'here is what happens when it did not.".' — the quoted
+# content already ends in '.', so the mark after the closing quote is
+# always a duplicate, never a legitimate second sentence-ender.
+# ------------------------------------------------------------------
+
+def test_period_after_closing_quote_collapsed():
+    text = 'Not "the agent ran" but "here is what happens when it did not.".'
+    result = _regex_sweep(text)
+    assert '.".' not in result
+    assert result.endswith('did not."')
+
+
+def test_question_mark_after_closing_quote_collapsed():
+    text = 'She asked "is this working?".'
+    result = _regex_sweep(text)
+    assert '?".' not in result
+
+
+def test_quote_without_trailing_period_untouched():
+    """A quote NOT already ending in terminal punctuation must keep its
+    outer period — this fix only targets the doubled case."""
+    text = 'He calls it "the moat argument".'
+    result = _regex_sweep(text)
+    assert result.rstrip() == 'He calls it "the moat argument".'
 
 
 # ------------------------------------------------------------------

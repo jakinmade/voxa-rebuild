@@ -1142,6 +1142,15 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
     # back to back, from any source (hedge deletion, dash-splitting
     # fallback, LLM stage).
     text = re.sub(r",\s*,+", ",", text)
+    # Redundant terminal punctuation trailing a closing quote - e.g.
+    # 'here is what happens when it did not.".' Confirmed live: the
+    # quoted content already ends in [.!?], the closing quote follows
+    # immediately, and a second terminal mark is appended outside the
+    # quote as if the quote itself weren't already a complete sentence.
+    # Always safe to drop the outer mark in this exact shape - a quote
+    # whose own content ends with [.!?] never legitimately needs a
+    # second terminal character right after the closing quote mark.
+    text = re.sub(r'([.!?])"[.!?]', r'\1"', text)
     # Space before terminal punctuation - same safe pattern already
     # proven inside _split_dashes_deterministic's own local cleanup,
     # applied here as a general final pass rather than only within

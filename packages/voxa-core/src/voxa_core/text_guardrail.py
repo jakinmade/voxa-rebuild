@@ -64,7 +64,11 @@ _AI_TELL_PHRASES = re.compile(
     r"in conclusion|to summarise|to summarize|in summary|"
     r"moving forward|circle back|touch base|pain points|"
     r"seamless(ly)?|delve into|tapestry|testament to|boasts|elevate|"
-    r"unlock the potential|game.changer|unparalleled|paramount)\b",
+    r"unlock the potential|game.changer|unparalleled|paramount|"
+    # Mirrors voice_engine.py's addition, 16 Aug 2026 — see that
+    # module's inline comment for the live-render case this closes.
+    r"curious (whether|if|how)|does (this|that) (land|resonate)|"
+    r"(lands|resonates?) (for|with) you)\b",
     re.I
 )
 
@@ -616,6 +620,11 @@ def sweep(text: str, keep_contractions: bool = False) -> str:
     # "i.e.," / "etc.," and collapsing it would corrupt those).
     text = re.sub(r",\s*\.", ".", text)
     text = re.sub(r",\s*,+", ",", text)
+    # Redundant terminal punctuation trailing a closing quote — mirrors
+    # the fix in prompts.py's sweep (root, live Railway product), added
+    # 16 Aug 2026 after a live render shipped 'did not.".' See that
+    # function's inline comment for the full rationale.
+    text = re.sub(r'([.!?])"[.!?]', r'\1"', text)
     text = re.sub(r" ([,.!?])", r"\1", text)
 
     return text

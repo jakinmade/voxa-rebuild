@@ -2156,7 +2156,16 @@ _AI_TELL_PHRASES = re.compile(
     r"in conclusion|to summarise|to summarize|in summary|"
     r"moving forward|circle back|touch base|pain points|"
     r"seamless(ly)?|delve into|tapestry|testament to|boasts|elevate|"
-    r"unlock the potential|game.changer|unparalleled|paramount)\b",
+    r"unlock the potential|game.changer|unparalleled|paramount|"
+    # Soft check-in hedge closer — confirmed live (this session): a
+    # correction/render call fabricated "Curious whether that framing
+    # lands for you" wholesale, invisible to every existing pattern
+    # here because it isn't corporate-marketing vocabulary, it's a
+    # rapport-softening tic from chat-assistant register. Same family
+    # as "does that (make sense|land|resonate)" — an unearned check
+    # for buy-in the person themselves didn't write.
+    r"curious (whether|if|how)|does (this|that) (land|resonate)|"
+    r"(lands|resonates?) (for|with) you)\b",
     re.I
 )
 

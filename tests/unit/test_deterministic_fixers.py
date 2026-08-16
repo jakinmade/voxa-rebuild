@@ -610,3 +610,30 @@ def test_uses_full_hedge_pattern_not_narrow_correction_list():
     result = df._check_uncorrected_insertions(before, after)
     assert result["flagged"] is True
     assert any("curious whether" in h for h in result["new_hedges"])
+
+
+# ---------------------------------------------------------------------------
+# Regression: 15 Aug 2026 live render — Scott/CLEARANCE follow-up email.
+# The initial render call fabricated a whole new closing sentence
+# ("Curious whether that framing lands for you") with no anchor in the
+# original input at all. This wasn't a correction-pass side effect (no
+# correction call fired) — it came from the FIRST LLM call, which had no
+# diff-preserving guard at the time. See app.py's initial_insertion_check.
+# ---------------------------------------------------------------------------
+
+def test_flags_fabricated_closing_sentence_from_initial_render():
+    original = (
+        "If it holds up, it's the concrete proof point Matt was pushing for "
+        "on that thread, something you could put in front of a portfolio "
+        "company this week, not a framework to workshop."
+    )
+    rendered = (
+        "If it holds up, it is the concrete proof point Matt was pushing for "
+        "on that thread. Something you put in front of a portfolio company "
+        "this week, not a framework to workshop. Curious whether that "
+        "framing lands for you."
+    )
+    result = df._check_uncorrected_insertions(original, rendered)
+    assert result["flagged"] is True
+    assert result["sentence_growth"] >= 1
+    assert any("curious whether" in h for h in result["new_hedges"])
