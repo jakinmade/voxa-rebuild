@@ -152,3 +152,31 @@ def test_lexical_fidelity_instruction_absent_on_ai_contaminated_path():
     Destroy the words." and must not be injected on this path."""
     prompt = _build_system_prompt(**_base_kwargs(ai_score=0.5))
     assert "LEXICAL FIDELITY" not in prompt
+
+
+# ------------------------------------------------------------------
+# Content fabrication (both paths — base_rules is shared)
+#
+# Root-caused against a real render: a one-sentence closing paragraph
+# ("If it holds up, it's the concrete proof point... not a framework
+# to workshop.") came back split into three sentences, the third of
+# which - "Matters right now." - had no anchor anywhere in the input.
+# _check_uncorrected_insertions correctly flagged the sentence_growth,
+# but nothing in the render prompt actually told the model not to add
+# content in the first place; rule 8's "do not introduce a new claim"
+# language was scoped to the word-count-padding scenario specifically,
+# not stated as a general rule. Elevated to its own numbered rule.
+# ------------------------------------------------------------------
+
+def test_no_content_fabrication_rule_present():
+    prompt = _build_system_prompt(**_base_kwargs(ai_score=0.1))
+    assert "Do not invent content" in prompt
+    assert "trace back to something actually said in the input" in prompt
+
+
+def test_sentence_splitting_for_rhythm_still_permitted():
+    """The new rule must not accidentally ban the core rhythm-matching
+    feature (splitting one long input sentence into several short
+    output ones) - only banning invented content, not restructuring."""
+    prompt = _build_system_prompt(**_base_kwargs(ai_score=0.1))
+    assert "split one long sentence into two or three shorter ones" in prompt

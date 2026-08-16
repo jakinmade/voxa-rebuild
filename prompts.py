@@ -430,6 +430,13 @@ def _build_system_prompt(
         "input - more detail on what is already there. Do not pad with filler, and do not introduce "
         "a new claim, opinion, or idea that is not stated or directly implied by the input, even to "
         "hit the word count."
+        "\n9. Do not invent content. You may split one long sentence into two or three shorter ones "
+        "to match sentence-rhythm targets - that is allowed and often required. What is not allowed: "
+        "adding a new sentence, clause, or standalone line whose content, claim, or emphasis is not "
+        "already present in the input, even a short one, even if it sounds like a natural closer or "
+        "punchline. Every sentence in the output must trace back to something actually said in the "
+        "input. If you find yourself writing a sentence to make the piece land better rather than to "
+        "carry something already there, delete it."
     )
 
     render_context_block = (
