@@ -33,7 +33,22 @@ _MAX_TOKENS = 2000
 
 
 def compute_baseline_metrics(text: str) -> dict:
-    """Ported verbatim from app.py compute_baseline_metrics."""
+    """Ported verbatim from app.py compute_baseline_metrics.
+
+    NOTE — root voice_engine.py has its own compute_baseline_metrics
+    with the same name and return shape, used by the five-dimension
+    checker. Deliberately not the same function (see this module's
+    top-level docstring for why the two paths are kept separate).
+    They will NOT return identical numbers on the same input: this
+    version's hedge regex is single-word-only, missing the clause-level
+    hedges (Hyland taxonomy — "curious whether", "it seems", "kind of")
+    that voice_engine.py's _HEDGE_PATTERN catches; this version's
+    sentence split is a raw re.split with no abbreviation guard, so
+    "Dr. Smith called." splits after "Dr." here but not in
+    voice_engine.py. See tests/unit/test_baseline_metrics_divergence.py
+    for a pinned example. If you're touching either implementation,
+    check whether this note (and that test) still describes reality.
+    """
     words = text.split()
     total_words = max(len(words), 1)
     sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip() and len(s.split()) >= 2]

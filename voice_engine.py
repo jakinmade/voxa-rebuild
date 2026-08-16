@@ -573,6 +573,23 @@ def compute_baseline_metrics(text: str) -> dict:
     Extracts four numerical constraint metrics from a text sample.
     Used to build the baseline fingerprint for v10.1 restoration targeting.
 
+    NOTE — a second, independent implementation of this same function
+    name and shape exists in packages/voxa-api/src/voxa_api/recalibrate.py.
+    That copy is not a duplicate to be merged; its own docstring explains
+    it's a near-verbatim port of the older Streamlit app.py pipeline,
+    kept deliberately separate because it powers full-draft recalibration
+    rather than the five-dimension checker this file supports. The two
+    are NOT expected to return identical numbers on the same input —
+    confirmed divergences: this version's hedge detection uses the full
+    _HEDGE_PATTERN (Hyland clause-level hedges like "curious whether",
+    "it seems", "kind of" — see that pattern's own comment for why),
+    recalibrate.py's is a single-word-only regex; this version's sentence
+    splitting goes through _extract_sentences (abbreviation-guarded via
+    _protect_abbreviations), recalibrate.py's is a raw re.split with no
+    such guard. See tests/unit/test_baseline_metrics_divergence.py for a
+    pinned example of the gap. If either implementation changes, check
+    whether the divergence this documents is still accurate.
+
     Returns:
         hedge_density     — hedge words per 100 words
         sentence_length_sd — standard deviation of sentence word counts
