@@ -211,3 +211,21 @@ class TestCheckInHedgeTell:
         text = "I'm curious what the Q3 numbers actually showed."
         result = ve.score_ai_tells(text)
         assert result["clean"] is True
+
+    def test_curious_if_ordinary_follow_up_not_flagged(self):
+        """Regression, 16 Aug 2026 live render: the original fix's
+        pattern was `curious (whether|if|how)`, over-broad enough to
+        catch "Curious if you got a chance to run it" — the person's
+        own preserved original wording, not a fabrication — as an AI
+        tell purely because it paired "curious" with "if". Only
+        "curious whether" (the actual fabricated construction from the
+        original incident) belongs in this list; "curious if" is an
+        ordinary, extremely common human email opener."""
+        text = "Curious if you got a chance to run it."
+        result = ve.score_ai_tells(text)
+        assert result["clean"] is True
+
+    def test_curious_how_ordinary_question_not_flagged(self):
+        text = "Curious how the migration went in the end."
+        result = ve.score_ai_tells(text)
+        assert result["clean"] is True

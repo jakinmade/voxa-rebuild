@@ -2164,7 +2164,16 @@ _AI_TELL_PHRASES = re.compile(
     # rapport-softening tic from chat-assistant register. Same family
     # as "does that (make sense|land|resonate)" — an unearned check
     # for buy-in the person themselves didn't write.
-    r"curious (whether|if|how)|does (this|that) (land|resonate)|"
+    #
+    # "whether" only, not "if|how": the original incident and every
+    # existing test used "curious whether" specifically. "Curious if
+    # you got a chance to run it" is an ordinary, extremely common
+    # human email opener - confirmed live against a real render where
+    # a person's own preserved original wording ("curious if") got
+    # flagged as an AI tell despite matching their unedited input.
+    # The tell is the fabricated check-in construction, not the word
+    # "curious" paired with any conjunction.
+    r"curious whether|does (this|that) (land|resonate)|"
     r"(lands|resonates?) (for|with) you)\b",
     re.I
 )
