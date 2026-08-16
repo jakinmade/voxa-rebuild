@@ -1415,7 +1415,15 @@ def _entities_and_numbers(text: str) -> set:
         'Would', 'Could', 'Should', 'Just', 'Still', 'Even', 'Here',
         'Very', 'More', 'Most', 'Into', 'Over', 'After', 'About',
     }
-    proper = {w for w in re.findall(r'(?<=[.!? ])[A-Z][a-zA-Z]{2,}', text) if w not in non_proper}
+    # Lookbehind covers [.!? ] OR start-of-string. Confirmed live: a
+    # salutation name is structurally the very first word of the text,
+    # which has no preceding [.!? ] character for the old lookbehind
+    # to match against - so the single highest-consequence proper
+    # noun in an email (who it's addressed to) was silently exempt
+    # from entity-preservation checking. "Scott" -> "Josh" in a real
+    # render's opening word scored 100% entity_preservation, because
+    # neither name was ever extracted as an entity on either side.
+    proper = {w for w in re.findall(r'(?:(?<=[.!? ])|^)[A-Z][a-zA-Z]{2,}', text) if w not in non_proper}
     numbers = set(re.findall(r'\b\d+[\d,.]*%?\b', text))
     return proper | numbers
 
@@ -1715,6 +1723,20 @@ def compute_risk(
     since it tells the person everything's fine when it isn't. Treated
     as High regardless of every other score, same as an AI tell.
 
+    A dropped entity is the same category again, for a sharper reason:
+    _entities_and_numbers' own docstring calls these "the facts a
+    rewrite must not lose", but until now nothing actually enforced
+    that - a dropped proper noun only diluted the aggregate
+    semantic_match number, the same way one invented sentence used to
+    hide inside an otherwise-passing score_render_delta band. Confirmed
+    live: a real render's recipient name flipped ('Scott' -> 'Josh')
+    and still scored 96% semantic match, because one wrong name among
+    a paragraph of otherwise-preserved content barely moves an
+    aggregate number, even though sending an email to the wrong name
+    is a far higher-consequence error than any voice-drift score in
+    this function. Treated as High regardless of every other score,
+    same as an AI tell or an attribution swap.
+
     A grown sentence count out of the LLM correction call is the same
     category again: score_render_delta and semantic_match are both
     aggregate checks that can absorb one invented sentence without
@@ -1729,6 +1751,9 @@ def compute_risk(
         return "High"
 
     if (semantic or {}).get("attribution_swaps"):
+        return "High"
+
+    if (semantic or {}).get("dropped_entities"):
         return "High"
 
     if (insertion_check or {}).get("sentence_growth", 0) > 0:

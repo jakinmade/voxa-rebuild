@@ -1199,6 +1199,12 @@ def _grammar_fix_pass(text: str, client) -> str:
         "3. Any word choice, sentence structure, or punctuation that is grammatically valid.\n"
         "4. Register, tone, or voice — change nothing that is not a clear error.\n"
         "5. UK spellings — do not Americanise anything.\n"
+        "6. Names, proper nouns, numbers, dates, and any other factual detail. Never substitute, "
+        "correct, or 'fix' a name — including the opening salutation name — even if it looks unusual "
+        "or you think a different name is more likely. If a name looks like it might contain a typo, "
+        "leave it exactly as given. Confirmed live: this pass has previously replaced the addressee's "
+        "actual name with a different one while leaving the surrounding grammar clean — that is a "
+        "content error, not a grammar fix, and it is never in scope here.\n"
         "\n"
         "Return only the corrected text. No explanation. No preamble."
     )
