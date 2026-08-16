@@ -24,8 +24,20 @@ def test_version_is_a_semver_string():
 
 def test_version_bumped_for_reason_instrumentation():
     """1.1.0 added compute_risk_reason - a minor bump (new capability,
-    no threshold changed), not a patch or a major."""
-    assert sr.SCORING_RULES_VERSION == "1.1.0"
+    no threshold changed), not a patch or a major. The live constant
+    moves forward with each new entry (see the 1.2.0 test below for
+    the current value) - this checks the CHANGELOG still documents
+    1.1.0 rather than pinning it as the current version forever."""
+    assert "1.1.0" in sr.__doc__
+
+
+def test_version_bumped_for_review_gate_rule():
+    """1.2.0 added REVIEW_REQUIRED_RISK_LEVELS - a minor bump (new
+    business rule, no existing threshold changed), consumed by
+    review_gate.py."""
+    assert sr.SCORING_RULES_VERSION == "1.2.0"
+    assert hasattr(sr, "REVIEW_REQUIRED_RISK_LEVELS")
+    assert sr.REVIEW_REQUIRED_RISK_LEVELS == {"Medium", "High"}
 
 
 def test_scoring_rules_version_function_matches_constant():

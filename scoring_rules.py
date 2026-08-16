@@ -42,6 +42,26 @@ HOW TO CHANGE A THRESHOLD
    further wiring needed for a threshold-only change.
 
 CHANGELOG
+1.2.0 (16 Aug 2026) - Added REVIEW_REQUIRED_RISK_LEVELS. Not a scoring
+    threshold - a business rule consumed by review_gate.py to decide
+    which risk verdicts require an explicit human confirmation before
+    the rewritten text is shown, rather than a Streamlit text_area
+    that's simply always visible the moment a render completes. Exists
+    because FINRA's existing guidance on AI-assisted communications
+    (Rule 3110/2210/4511) identifies undocumented human-in-the-loop
+    review as the most common small-firm compliance gap - this makes
+    the review step a real, structural gate instead of something a
+    person could skip by scrolling past it. Deliberately still fully
+    anonymous: review_gate.py logs that a gated render was reviewed
+    and confirmed, with the same risk/semantic_match/scoring_rules_
+    version shape as render_events.py, no device_id, no identity. A
+    persisted, per-person compliance record (the kind an actual
+    supervisor could review by name) is a separate, larger decision -
+    it needs an account/identity model this product has explicitly
+    not built (see persistence.py's own docstring) - and isn't made
+    here. This just builds the gate and the anonymous evidence that
+    the gate exists and gets used; whether to attach identity to it is
+    for JA to decide deliberately, not something to default into.
 1.1.0 (16 Aug 2026) - Added compute_risk_reason() (voice_engine.py),
     logged alongside this version stamp in app.py's render_complete
     log line. Not a threshold change - v1.0.0's own honest gap was
@@ -79,7 +99,7 @@ file's "every threshold governing a render's Confidence/Risk verdict"
 claim inaccurate rather than more complete.
 """
 
-SCORING_RULES_VERSION = "1.1.0"
+SCORING_RULES_VERSION = "1.2.0"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +131,25 @@ RISK_HIGH_SEMANTIC_MATCH_BELOW = 70
 RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST = 3
 RISK_MEDIUM_SEMANTIC_MATCH_BELOW = 85
 RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1
+
+
+# ---------------------------------------------------------------------------
+# review_gate — which risk verdicts require an explicit human
+# confirmation before the rewritten text is revealed
+#
+# Consumed by review_gate.py, not by anything in this file - kept here
+# rather than in that module because it's a policy decision with the
+# same shape as every other constant above (versioned, changelogged,
+# one place to look), not implementation detail. Low is excluded
+# deliberately: gating every render regardless of risk would train
+# people to click through the confirmation without reading it, the
+# same failure mode as an over-triggered warning dialog anywhere else.
+# Medium and High are exactly the two verdicts compute_risk can
+# produce when something concrete already didn't match the baseline or
+# the source text - see compute_risk's own docstring for what drives
+# each level.
+# ---------------------------------------------------------------------------
+REVIEW_REQUIRED_RISK_LEVELS = {"Medium", "High"}
 
 
 # ---------------------------------------------------------------------------

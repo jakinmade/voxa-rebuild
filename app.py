@@ -24,6 +24,7 @@ import streamlit as st
 
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
+from review_gate import requires_review, log_review_confirmation
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from voice_engine import (
     analyse_writing, _analyse_intro,
@@ -1181,6 +1182,7 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         st.session_state.semantic_drift = semantic
         st.session_state.confidence = confidence
         st.session_state.risk = risk
+        st.session_state.risk_reason = risk_reason
         st.session_state.ai_tells = ai_tells
         st.session_state.function_word_delta = burrows_delta
         st.session_state.voice_report = build_voice_report(
@@ -1254,16 +1256,20 @@ def screen_render():
 
         import hashlib
         output_key = "out_" + hashlib.md5(output[:50].encode()).hexdigest()[:8]
-        st.text_area(
-            label="output", value=output, height=350,
-            label_visibility="collapsed", key=output_key,
-        )
-        st.markdown(
-            '<div class="microcopy">The engine wrote as you. Not for you.</div>',
-            unsafe_allow_html=True
-        )
 
+        # Review gate — see review_gate.py. Moved the report block ahead
+        # of the text_area (previously rendered after) so the risk/
+        # confidence/AI-tell badges are visible BEFORE any decision about
+        # showing the text, for both the gated and ungated paths - the
+        # ordering itself is part of what makes the gate meaningful,
+        # not just the confirmation click.
         report = st.session_state.get("voice_report")
+        risk_level = report.get("risk") if report else None
+        gated = requires_review(risk_level)
+        confirm_flag_key = f"reviewed_{output_key}"
+        already_confirmed = st.session_state.get(confirm_flag_key, False)
+        show_output = (not gated) or already_confirmed
+
         if report:
             badge_class = {"Low": "badge-green", "Medium": "badge-amber", "High": "badge-red"}
             conf_badge_class = {"High": "badge-green", "Medium": "badge-amber", "Low": "badge-red"}
@@ -1325,7 +1331,40 @@ def screen_render():
                 )
                 _deepen_fingerprint_panel(show_caveat_framing=True)
 
-        if st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
+        if show_output:
+            st.text_area(
+                label="output", value=output, height=350,
+                label_visibility="collapsed", key=output_key,
+            )
+            st.markdown(
+                '<div class="microcopy">The engine wrote as you. Not for you.</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f'<div class="microcopy" style="margin-top:0.5rem;color:#C0392B;">'
+                f'\u26a0 This render is flagged {risk_level} risk. Review the report above '
+                f'before seeing the rewritten text.</div>',
+                unsafe_allow_html=True
+            )
+            confirmed_checkbox = st.checkbox(
+                "I've reviewed the report above and understand the flagged risk.",
+                key=f"confirm_checkbox_{output_key}",
+            )
+            if st.button(
+                "Show my rewritten text \u2192", use_container_width=True,
+                disabled=not confirmed_checkbox, key=f"confirm_button_{output_key}",
+            ):
+                st.session_state[confirm_flag_key] = True
+                log_review_confirmation(
+                    risk=risk_level,
+                    risk_reason=st.session_state.get("risk_reason", ""),
+                    semantic_match=report.get("semantic_match") if report else None,
+                    scoring_rules_version=scoring_rules_version(),
+                )
+                st.rerun()
+
+        if show_output and st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
             receipt = generate_receipt(st.session_state.session_start, st.session_state.word_count)
             st.markdown(f"""
@@ -1340,7 +1379,10 @@ def screen_render():
             """, unsafe_allow_html=True)
 
         # Sample 3 — one refinement, per the v4 spec. Combo: tags + free text.
-        if not st.session_state.refinement_used:
+        # Gated on show_output too — refining text the person hasn't been
+        # shown yet doesn't make sense, and would let someone route around
+        # the confirmation by refining instead of confirming.
+        if show_output and not st.session_state.refinement_used:
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
             st.markdown('<div class="tag-hint">Not quite right? You get one refinement.</div>', unsafe_allow_html=True)
             tag_options = ["Too formal", "Too blunt", "Doesn't sound like me", "Too long", "Missing my directness"]
