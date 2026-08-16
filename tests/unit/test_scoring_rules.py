@@ -34,10 +34,22 @@ def test_version_bumped_for_reason_instrumentation():
 def test_version_bumped_for_review_gate_rule():
     """1.2.0 added REVIEW_REQUIRED_RISK_LEVELS - a minor bump (new
     business rule, no existing threshold changed), consumed by
-    review_gate.py."""
-    assert sr.SCORING_RULES_VERSION == "1.2.0"
+    review_gate.py. The live constant moves forward with each new
+    entry (see the 1.3.0 test below for the current value) - this
+    checks the CHANGELOG still documents 1.2.0 rather than pinning it
+    as the current version forever."""
+    assert "1.2.0" in sr.__doc__
     assert hasattr(sr, "REVIEW_REQUIRED_RISK_LEVELS")
     assert sr.REVIEW_REQUIRED_RISK_LEVELS == {"Medium", "High"}
+
+
+def test_version_bumped_for_firm_signal_rule():
+    """1.3.0 added PERSONAL_EMAIL_DOMAINS - a minor bump (new business
+    rule, no existing threshold changed), consumed by firm_signal.py."""
+    assert sr.SCORING_RULES_VERSION == "1.3.0"
+    assert hasattr(sr, "PERSONAL_EMAIL_DOMAINS")
+    assert "gmail.com" in sr.PERSONAL_EMAIL_DOMAINS
+    assert "yahoo.com" in sr.PERSONAL_EMAIL_DOMAINS
 
 
 def test_scoring_rules_version_function_matches_constant():

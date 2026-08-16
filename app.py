@@ -25,6 +25,7 @@ import streamlit as st
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from review_gate import requires_review, log_review_confirmation
+from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from voice_engine import (
     analyse_writing, _analyse_intro,
@@ -1340,6 +1341,49 @@ def screen_render():
                 '<div class="microcopy">The engine wrote as you. Not for you.</div>',
                 unsafe_allow_html=True
             )
+
+            # Opt-in firm signal — offered once per session, only after
+            # an actually-gated (Medium/High) render was confirmed.
+            # Low-risk renders never see this at all: the offer only
+            # makes sense right after someone has just demonstrated,
+            # by confirming a review gate, that this is relevant to
+            # them. See firm_signal.py for exactly what is and isn't
+            # stored — domain only, never the email itself.
+            if gated and not st.session_state.get("firm_signal_resolved", False):
+                st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="microcopy">Optional: if others at your firm use '
+                    'VOICOVA too, sharing your work email helps us show your firm '
+                    'this is already in use. We store only the domain — never your '
+                    'email address, never anything you write.</div>',
+                    unsafe_allow_html=True,
+                )
+                col_a, col_b, col_c = st.columns([2, 1, 1])
+                with col_a:
+                    work_email = st.text_input(
+                        "work email", placeholder="you@yourfirm.com",
+                        label_visibility="collapsed", key="firm_signal_email_input",
+                    )
+                with col_b:
+                    if st.button("Share", key="firm_signal_share_button", use_container_width=True):
+                        domain = extract_domain(work_email)
+                        if domain:
+                            log_firm_signal(
+                                domain=domain, risk=risk_level,
+                                risk_reason=st.session_state.get("risk_reason", ""),
+                                scoring_rules_version=scoring_rules_version(),
+                            )
+                            st.session_state.firm_signal_resolved = True
+                            st.rerun()
+                        else:
+                            st.warning(
+                                "That doesn't look like a work email, or it's a "
+                                "personal provider we don't count as a firm signal."
+                            )
+                with col_c:
+                    if st.button("No thanks", key="firm_signal_dismiss_button", use_container_width=True):
+                        st.session_state.firm_signal_resolved = True
+                        st.rerun()
         else:
             st.markdown(
                 f'<div class="microcopy" style="margin-top:0.5rem;color:#C0392B;">'

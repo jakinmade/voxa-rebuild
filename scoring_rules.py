@@ -42,6 +42,17 @@ HOW TO CHANGE A THRESHOLD
    further wiring needed for a threshold-only change.
 
 CHANGELOG
+1.3.0 (16 Aug 2026) - Added PERSONAL_EMAIL_DOMAINS, consumed by the
+    new firm_signal.py. Governs which domains extract_domain() refuses
+    to treat as a firm signal - not a scoring threshold, but the same
+    "one place to look, versioned, changelogged" discipline applies:
+    this list directly determines what counts as noise vs signal in
+    the domain-clustering data, so a change to it is a real behaviour
+    change worth a version bump and a reason, same as any threshold
+    above. Starting list is the handful of large, unambiguous consumer
+    webmail providers - deliberately not exhaustive. Extending it
+    (a smaller regional provider, a new consumer webmail entrant)
+    is a one-line addition here, not a code change in firm_signal.py.
 1.2.0 (16 Aug 2026) - Added REVIEW_REQUIRED_RISK_LEVELS. Not a scoring
     threshold - a business rule consumed by review_gate.py to decide
     which risk verdicts require an explicit human confirmation before
@@ -99,7 +110,7 @@ file's "every threshold governing a render's Confidence/Risk verdict"
 claim inaccurate rather than more complete.
 """
 
-SCORING_RULES_VERSION = "1.2.0"
+SCORING_RULES_VERSION = "1.3.0"
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +161,26 @@ RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1
 # each level.
 # ---------------------------------------------------------------------------
 REVIEW_REQUIRED_RISK_LEVELS = {"Medium", "High"}
+
+
+# ---------------------------------------------------------------------------
+# firm_signal — which domains never count as a firm signal
+#
+# Consumed by firm_signal.extract_domain(). Multiple people signing up
+# from the same large consumer webmail provider isn't evidence of a
+# firm relationship - it's the single most common domain in any
+# dataset, by construction. Excluding these keeps the domain-
+# clustering data meaningful (a repeated domain actually means "the
+# same company") rather than dominated by gmail.com showing up
+# constantly. Lowercase, exact match only - no wildcard/subdomain
+# logic, since none of these providers issue user accounts on
+# subdomains in a way that would need it.
+# ---------------------------------------------------------------------------
+PERSONAL_EMAIL_DOMAINS = {
+    "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+    "aol.com", "protonmail.com", "live.com", "msn.com", "me.com",
+    "mail.com", "gmx.com", "yandex.com",
+}
 
 
 # ---------------------------------------------------------------------------
