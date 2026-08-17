@@ -1396,7 +1396,7 @@ def screen_render():
                 key=f"confirm_checkbox_{output_key}",
             )
             if st.button(
-                "Show my rewritten text \u2192", use_container_width=True,
+                "Show my rewritten text \u2192", type="primary", use_container_width=True,
                 disabled=not confirmed_checkbox, key=f"confirm_button_{output_key}",
             ):
                 st.session_state[confirm_flag_key] = True
