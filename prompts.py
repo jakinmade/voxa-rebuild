@@ -375,7 +375,7 @@ def _build_restoration_targets(
     )
 
     return "\n".join(lines)
-def _build_system_prompt_parts(
+def _build_system_prompt(
     voice_dna: str,
     mode_instruction: str,
     word_count_input: int,
@@ -384,7 +384,7 @@ def _build_system_prompt_parts(
     input_text: str = "",
     render_context: str = "",
     voice_profile_summary: str = "",
-) -> tuple[str, str, str]:
+) -> str:
     """
     Builds the full system prompt.
     Two paths: AI-contaminated input vs clean human input.
@@ -413,14 +413,6 @@ def _build_system_prompt_parts(
     this baseline) proceeds exactly as it did before this existed.
     """
 
-    # Rule 8 used to embed word_count_input directly, which made base_rules
-    # differ on every single render (breaking prompt-cache reuse of this
-    # block across the whole product, not just per-user). The instruction
-    # itself is now generic — same text on every call — and the actual
-    # number for this render is supplied separately via word_count_directive,
-    # appended in the uncached, per-render tail below. Meaning is unchanged:
-    # the model still receives the exact figure, just not baked into the
-    # otherwise-static rules block.
     base_rules = (
         "ABSOLUTE RULES — never break these:\n"
         "1. No em dashes. Rewrite the sentence without one — split it into two sentences or "
@@ -435,11 +427,11 @@ def _build_system_prompt_parts(
         "5. No preamble. No explanation. Return only the rewritten text.\n"
         "6. UK English throughout.\n"
         "7. Every paragraph in the input gets a paragraph in the output. Do not compress into a summary.\n"
-        "8. Output must be at least as long as the input (see INPUT WORD COUNT below for this "
-        "render's exact figure). Match or exceed it. If you run short, add specificity and texture "
-        "to points already in the input - more detail on what is already there. Do not pad with "
-        "filler, and do not introduce a new claim, opinion, or idea that is not stated or directly "
-        "implied by the input, even to hit the word count."
+        f"8. Output must be at least {word_count_input} words. The input is {word_count_input} words. "
+        "Match or exceed it. If you run short, add specificity and texture to points already in the "
+        "input - more detail on what is already there. Do not pad with filler, and do not introduce "
+        "a new claim, opinion, or idea that is not stated or directly implied by the input, even to "
+        "hit the word count."
         "\n9. Do not invent content. You may split one long sentence into two or three shorter ones "
         "to match sentence-rhythm targets - that is allowed and often required. What is not allowed: "
         "adding a new sentence, clause, or standalone line whose content, claim, or emphasis is not "
@@ -467,10 +459,6 @@ def _build_system_prompt_parts(
     profile_summary_block = (
         f"WRITER'S DISTINCTIVE HABITS: {voice_profile_summary.strip()}\n\n"
         if voice_profile_summary and voice_profile_summary.strip() else ""
-    )
-
-    word_count_directive = (
-        f"INPUT WORD COUNT: {word_count_input} words. Output must match or exceed this (rule 8).\n\n"
     )
 
     if ai_score >= AI_CONTAMINATION_PATH_THRESHOLD:
@@ -502,16 +490,18 @@ def _build_system_prompt_parts(
             "Curtness is a style choice. Truncation is an error. Know the difference.\n\n"
         )
 
-        # Static across every render on this path (cache breakpoint 1 in
-        # _build_system_prompt_blocks): identical wording regardless of
-        # user or input.
-        static_part = (
+        prompt = (
             "You are a voice rendering engine with one job: strip AI-generated language and rewrite "
             "in this person's authentic voice.\n\n"
             "The input text has been identified as AI-generated or heavily AI-influenced. "
             "It carries AI tells: verbose openers, em dashes, stacked hedges, filler transitions, "
             "passive constructions. Your job is to eliminate all of that and replace it with "
             "the voice profile below.\n\n"
+            f"VOICE PROFILE:\n{voice_dna}"
+            f"{restoration_block}\n\n"
+            f"{profile_summary_block}"
+            f"TASK:\n{mode_instruction}\n\n"
+            f"{render_context_block}"
             f"{register_instruction}"
             "STRIPPING INSTRUCTIONS:\n"
             "- Identify every AI tell in the input. Rewrite those sentences from scratch.\n"
@@ -526,24 +516,17 @@ def _build_system_prompt_parts(
             "- Before you finish: re-read THE STANDARD sentences in the voice profile. "
             "Ask yourself: does this output feel like it came from the same person? "
             "If not, rewrite until it does.\n\n"
-            f"{base_rules}\n\n"
-        )
-        # Static per-user across renders in a session (cache breakpoint 2):
-        # only changes when the baseline/voice profile is recalculated.
-        user_part = f"VOICE PROFILE:\n{voice_dna}\n\n{profile_summary_block}"
-        # Genuinely different every render — never cached.
-        dynamic_part = (
-            f"TASK:\n{mode_instruction}\n\n"
-            f"{render_context_block}"
-            f"{restoration_block}\n\n"
-            f"{word_count_directive}"
+            f"{base_rules}"
         )
     else:
-        # Clean human input path — preservation is the primary job.
-        # Static across every render on this path (cache breakpoint 1).
-        static_part = (
+        # Clean human input path — preservation is the primary job
+        prompt = (
             "You are a voice rendering engine. Your job is to rewrite this text so it sounds "
             "exactly like the person who wrote the samples in the voice profile below.\n\n"
+            f"VOICE PROFILE:\n{voice_dna}\n\n"
+            f"{profile_summary_block}"
+            f"TASK:\n{mode_instruction}\n\n"
+            f"{render_context_block}"
             "RENDERING INSTRUCTIONS:\n"
             "- Match the sentence length from the profile exactly. If they write short, write short.\n"
             "- Match the directness. If they own their statements, do not hedge.\n"
@@ -559,97 +542,11 @@ def _build_system_prompt_parts(
             "- CRITICAL: STOP WHEN THE CONTENT IS DONE. The final paragraph of the input is the final paragraph of the output. "
             "Do not add sentences after it. Do not summarise. Do not close. Do not reflect. "
             "When the last substantive point from the input is restated, your job is finished. Stop there.\n\n"
-            f"{base_rules}\n\n"
-        )
-        # Static per-user across renders in a session (cache breakpoint 2).
-        user_part = f"VOICE PROFILE:\n{voice_dna}\n\n{profile_summary_block}"
-        # Genuinely different every render — never cached.
-        dynamic_part = (
-            f"TASK:\n{mode_instruction}\n\n"
-            f"{render_context_block}"
-            f"{word_count_directive}"
+            f"{base_rules}"
         )
 
-    return static_part, user_part, dynamic_part
+    return prompt
 
-
-def _build_system_prompt(
-    voice_dna: str,
-    mode_instruction: str,
-    word_count_input: int,
-    ai_score: float,
-    baseline: dict | None = None,
-    input_text: str = "",
-    render_context: str = "",
-    voice_profile_summary: str = "",
-) -> str:
-    """
-    Backward-compatible plain-string form of the system prompt, for
-    callers/tests that don't need prompt-caching (e.g. the correction
-    pass, or any test asserting on prompt content). Identical content
-    and order to _build_system_prompt_blocks — just joined into one
-    string instead of returned as separately-cacheable parts.
-    """
-    static_part, user_part, dynamic_part = _build_system_prompt_parts(
-        voice_dna=voice_dna, mode_instruction=mode_instruction,
-        word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
-        input_text=input_text, render_context=render_context,
-        voice_profile_summary=voice_profile_summary,
-    )
-    return static_part + user_part + dynamic_part
-
-
-def _build_system_prompt_blocks(
-    voice_dna: str,
-    mode_instruction: str,
-    word_count_input: int,
-    ai_score: float,
-    baseline: dict | None = None,
-    input_text: str = "",
-    render_context: str = "",
-    voice_profile_summary: str = "",
-) -> list[dict]:
-    """
-    Cache-aware form of the system prompt for the Anthropic API's
-    `system` parameter (a list of content blocks rather than a plain
-    string). Same three parts as _build_system_prompt, but with
-    cache_control markers on the two static/semi-static blocks:
-
-    - static_part: identical wording on every render on this path,
-      for every user. Marked cacheable — near-100% hit rate in
-      practice, since nothing about it ever changes.
-    - user_part: voice DNA + distilled profile. Only changes when a
-      user's baseline is recalculated, so it's stable across a
-      session's worth of renders for the same person. Marked
-      cacheable.
-    - dynamic_part: word count, render context, restoration targets,
-      task instruction. Genuinely different every render — no
-      cache_control, always sent (and billed) at full price.
-
-    No wording, ordering of information within a block, or content
-    differs from _build_system_prompt — this only affects how it's
-    packaged for the API call, not what the model reads.
-    """
-    static_part, user_part, dynamic_part = _build_system_prompt_parts(
-        voice_dna=voice_dna, mode_instruction=mode_instruction,
-        word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
-        input_text=input_text, render_context=render_context,
-        voice_profile_summary=voice_profile_summary,
-    )
-    blocks = []
-    if static_part:
-        blocks.append({
-            "type": "text", "text": static_part,
-            "cache_control": {"type": "ephemeral"},
-        })
-    if user_part:
-        blocks.append({
-            "type": "text", "text": user_part,
-            "cache_control": {"type": "ephemeral"},
-        })
-    if dynamic_part:
-        blocks.append({"type": "text", "text": dynamic_part})
-    return blocks
 def _detect_locale(text: str) -> str:
     """
     Detects whether the user writes in UK or US English.

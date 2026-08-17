@@ -26,11 +26,12 @@ from streamlit.testing.v1 import AppTest
 
 
 def _system_text(system) -> str:
-    """The real call site now sends `system` as a list of cache-aware
-    content blocks (see _build_system_prompt_blocks) rather than a
-    plain string, so prompt content there and only the correction
-    pass's plain-string form differ. Flatten either shape to a single
-    string for content assertions."""
+    """The call site currently sends `system` as a plain string
+    (the caching restructure that briefly sent it as a list of
+    content blocks was reverted - see the commit reverting
+    _build_system_prompt_blocks). Kept defensive/shape-agnostic in
+    case that's revisited later, rather than assuming a plain string
+    and breaking again if it changes."""
     if isinstance(system, str):
         return system
     return "".join(block.get("text", "") for block in system)

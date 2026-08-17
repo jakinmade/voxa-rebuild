@@ -40,7 +40,7 @@ from voice_engine import (
     compute_burrows_delta,
 )
 from prompts import (
-    _build_voice_dna, _build_system_prompt, _build_system_prompt_blocks,
+    _build_voice_dna, _build_system_prompt,
     _detect_mode, apply_intent_mode, _detect_locale,
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
     build_correction_prompt, merge_starter_evidence,
@@ -1065,7 +1065,7 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
     input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
     input_has_directive_content = input_metrics_signal["directive_ratio"] > 0
 
-    system = _build_system_prompt_blocks(
+    system = _build_system_prompt(
         voice_dna=voice_dna, mode_instruction=mode_instruction,
         word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
         input_text=input_text, render_context=render_context,
@@ -1505,6 +1505,17 @@ def screen_render():
                     '<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
                     '\u26a0 Check who gets credit before sending. The rewrite may have swapped '
                     'whose point this was.</div>',
+                    unsafe_allow_html=True
+                )
+
+            dropped = report.get("dropped_entities", [])
+            if dropped:
+                listed = ", ".join(dropped)
+                st.markdown(
+                    f'<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
+                    f'\u26a0 Missing from the rewrite: {listed}. This can mean the rewrite '
+                    f'drifted into different content, not just a different style - read it '
+                    f'in full before sending, don\'t just skim the changes above.</div>',
                     unsafe_allow_html=True
                 )
 

@@ -89,6 +89,64 @@ def _run_screen4_forced_high_risk():
             return at
 
 
+def _run_screen4_forced_high_risk_with_dropped_entity(dropped_entities):
+    """Same as _run_screen4_forced_high_risk, but also sets
+    report['dropped_entities'] explicitly - the field that's been
+    computed and logged all along but was never actually rendered to
+    the person. Reproduces the real incident: risk=High,
+    risk_reason=dropped_entity, and a specific missing name."""
+    at = _run_screen4_forced_high_risk()
+    report = dict(at.session_state["voice_report"])
+    report["dropped_entities"] = dropped_entities
+    at.session_state["voice_report"] = report
+    at.run()
+    assert not at.exception, f"App raised after forcing dropped_entities: {at.exception}"
+    return at
+
+
+def test_dropped_entity_warning_shown_when_entities_missing():
+    """The core gap this closes: report['dropped_entities'] was
+    computed, logged to Supabase, and used to drive risk=High - but
+    never actually shown to the person. Only attribution_swaps had a
+    dedicated warning before this fix."""
+    at = _run_screen4_forced_high_risk_with_dropped_entity(["Scott"])
+    markdown_html = " ".join(m.value for m in at.markdown if m.value)
+    assert "Missing from the rewrite" in markdown_html
+    assert "Scott" in markdown_html
+
+
+def test_dropped_entity_warning_names_multiple_entities():
+    at = _run_screen4_forced_high_risk_with_dropped_entity(["Scott", "Matt", "43"])
+    markdown_html = " ".join(m.value for m in at.markdown if m.value)
+    assert "Scott, Matt, 43" in markdown_html or all(
+        e in markdown_html for e in ["Scott", "Matt", "43"]
+    )
+
+
+def test_no_dropped_entity_warning_when_nothing_dropped():
+    """Sanity check the warning isn't shown unconditionally - only
+    when dropped_entities is actually non-empty."""
+    at = _run_screen4_forced_high_risk_with_dropped_entity([])
+    markdown_html = " ".join(m.value for m in at.markdown if m.value)
+    assert "Missing from the rewrite" not in markdown_html
+
+
+def test_dropped_entity_warning_appears_before_the_gate_is_confirmed():
+    """Critical ordering check: this warning must be visible on the
+    GATED (blocked) screen, before the person decides whether to
+    click through - not only after, when it's too late to inform
+    that decision."""
+    at = _run_screen4_forced_high_risk_with_dropped_entity(["Scott"])
+    # Confirm we're still in the gated state (output hidden).
+    text_area_values = [t.value for t in at.text_area]
+    assert FAKE_LLM_OUTPUT not in "".join(v or "" for v in text_area_values), (
+        "Test setup issue: gate isn't actually engaged, this check "
+        "wouldn't be testing what it claims to."
+    )
+    markdown_html = " ".join(m.value for m in at.markdown if m.value)
+    assert "Missing from the rewrite" in markdown_html
+
+
 def test_gate_shows_when_risk_is_high_and_output_is_hidden():
     """Sanity check the gate actually engages before testing the
     confirm path - if this fails, the bug is upstream of the
