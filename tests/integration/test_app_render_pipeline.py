@@ -105,6 +105,97 @@ def test_screen4_loads_with_seeded_baseline_no_exceptions():
     assert at.session_state["screen"] == 4
 
 
+# ------------------------------------------------------------------
+# 17 Aug 2026 layout/feedback fix: "Write as me" button now disables
+# itself immediately on click, before the (multi-second, multi-API-
+# call) render pipeline runs - fixes reports of it "taking more than
+# one click to fire", since previously the button stayed fully
+# clickable with no visible change for the whole duration.
+# ------------------------------------------------------------------
+
+def _land_on_screen4_no_render(input_text: str = "Please write a short note about the launch plan."):
+    """Same seeded-baseline setup as _run_screen4_with_mocked_render,
+    but stops short of clicking the render button - for tests that
+    need to inspect button/session-state right before or during the
+    two-phase click, not after a render has already completed."""
+    at = AppTest.from_file(_APP_PATH)
+    at.run()
+
+    combined = BASELINE_SAMPLE_1 + " " + BASELINE_SAMPLE_2
+    metrics_1 = compute_baseline_metrics(BASELINE_SAMPLE_1)
+    metrics_2 = compute_baseline_metrics(BASELINE_SAMPLE_2)
+
+    at.session_state["screen"] = 4
+    at.session_state["raw_text"] = BASELINE_SAMPLE_1
+    at.session_state["baseline_fingerprint"] = compute_baseline_metrics(combined)
+    at.session_state["observations"] = analyse_writing(combined)
+    at.session_state["sample_fitness"] = _score_sample_fitness(combined)
+    at.session_state["fingerprint_samples"] = [metrics_1, metrics_2]
+    at.session_state["fingerprint_sample_texts"] = [BASELINE_SAMPLE_1, BASELINE_SAMPLE_2]
+    at.session_state["sample2_completions"] = ["", "", "", ""]
+
+    at.run()
+    assert not at.exception, f"App raised on Screen 4 load: {at.exception}"
+    at.text_area[0].input(input_text)
+    return at
+
+
+def test_write_as_me_button_enabled_before_any_click():
+    at = _land_on_screen4_no_render()
+    write_button = next(b for b in at.button if "Write as me" in b.label)
+    assert not write_button.disabled
+
+
+def test_write_as_me_button_wired_to_disable_on_render_in_progress():
+    """The core of the fix: the button's disabled= parameter must be
+    tied to render_in_progress, so the button is disabled the instant
+    that line executes - before the slow, multi-API-call render
+    pipeline runs later in the same script pass.
+
+    This can't be observed end-to-end through AppTest: it resolves
+    the full st.rerun() chain (click -> set flag -> rerun -> render ->
+    clear flag -> rerun) synchronously within a single .run() call, so
+    by the time control returns to the test, the pipeline has already
+    completed and the flag is already cleared - there's no hook to
+    freeze on the intermediate disabled state the way a real browser
+    would see it. In a real browser, Streamlit streams each element to
+    the frontend as it's created during script execution, so the
+    disabled button appears on screen immediately, well before the
+    slow API call further down in that same script pass finishes -
+    that's the actual mechanism the fix relies on, and it's a
+    real, standard Streamlit pattern for exactly this problem.
+
+    What IS reliably testable is that the wiring is actually there -
+    checking the real source, not a hand-copied string, so this fails
+    if the wiring is ever accidentally removed or reworded."""
+    import inspect
+    import app as app_module
+    source = inspect.getsource(app_module.screen_render)
+    assert 'disabled=render_in_progress' in source.replace(' ', '').replace('\n', ''), (
+        "Expected the 'Write as me' button's disabled= parameter to "
+        "be wired to render_in_progress in screen_render's source."
+    )
+
+
+def test_render_in_progress_flag_clears_after_render_completes():
+    """Confirms the flag is a transient in-flight marker, not a stuck
+    state - once the render pipeline finishes, the button must become
+    clickable again for the next paste."""
+    at = _run_screen4_with_mocked_render()
+    assert at.session_state["render_in_progress"] is False
+    write_button = next(b for b in at.button if "Write as me" in b.label)
+    assert not write_button.disabled
+
+
+def test_click_sets_render_in_progress_and_completes_the_render():
+    """End-to-end: a real click still results in a completed render
+    (the two-phase mechanism doesn't break the actual render), and by
+    the time control returns the flag is correctly cleared."""
+    at = _run_screen4_with_mocked_render()
+    assert at.session_state["render_output"], "Render did not complete"
+    assert at.session_state["render_in_progress"] is False
+
+
 def test_render_output_passed_through_real_guardrail_sweep():
     # Proves the plausibility-shield fix (and the rest of the sweep)
     # actually runs in the live app pipeline, not just in isolated

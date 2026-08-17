@@ -1521,9 +1521,28 @@ def score_semantic_drift(input_text: str, output_text: str) -> dict:
     input_entities = _entities_and_numbers(input_text)
     output_entities = _entities_and_numbers(output_text)
     if input_entities:
-        preserved = input_entities & output_entities
+        # Check literal presence in the raw output text, not just
+        # membership in output_entities. _entities_and_numbers only
+        # ever extracts CAPITALISED words (see its regex), so a word
+        # legitimately recapitalised to lowercase in the output -
+        # moved from sentence-initial ("Curious if...") to mid-
+        # sentence ("...I am curious...") - is never added to
+        # output_entities in any case; comparing the two extracted
+        # sets, even case-insensitively, can't see a word that was
+        # never extracted from the output side to begin with. This
+        # checks whether the actual word survives anywhere in the
+        # output text at all, case-insensitive, whole-word match -
+        # the real question this check exists to answer. Genuinely
+        # different words (the Scott -> Josh regression this exists
+        # to catch) are unaffected: "scott" plainly doesn't appear
+        # anywhere in an output that says "Josh, ...".
+        output_lower = output_text.lower()
+        preserved = {
+            e for e in input_entities
+            if re.search(r'\b' + re.escape(e.lower()) + r'\b', output_lower)
+        }
         entity_score = len(preserved) / len(input_entities)
-        dropped = sorted(input_entities - output_entities)
+        dropped = sorted(input_entities - preserved)
     else:
         entity_score = 1.0
         dropped = []

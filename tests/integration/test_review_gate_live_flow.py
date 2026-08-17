@@ -147,6 +147,66 @@ def test_dropped_entity_warning_appears_before_the_gate_is_confirmed():
     assert "Missing from the rewrite" in markdown_html
 
 
+def test_output_has_a_clear_heading_not_an_unlabeled_blob():
+    """17 Aug 2026 layout fix: the rewritten text previously had no
+    heading of its own - 'Your writing.' actually headed the report
+    card above it, and the output text_area sat unlabeled below a
+    'Try one more sample' panel. Confirms the new heading is present."""
+    at = _run_screen4_forced_high_risk_with_dropped_entity([])
+    gate_checkbox = next(c for c in at.checkbox if "reviewed the report above" in c.label)
+    gate_checkbox.set_value(True)
+    at.run()
+    confirm_button = next(b for b in at.button if "Show my rewritten text" in b.label)
+    confirm_button.click()
+    at.run()
+    assert not at.exception, f"App raised after confirming the gate: {at.exception}"
+
+    markdown_values = [m.value for m in at.markdown if m.value]
+    assert any("Your rewritten text" in v for v in markdown_values), (
+        f"Expected a heading directly above the output, got markdown blocks: "
+        f"{markdown_values}"
+    )
+
+
+def test_try_one_more_sample_panel_now_appears_after_the_output():
+    """17 Aug 2026 layout fix (JA feedback): the caveat/deepen panel
+    used to sit BETWEEN the report warnings and the output text_area,
+    ahead of the actual rewritten text - confirmed nonsensical
+    ordering. Now must appear after the output in element order."""
+    at = _run_screen4_forced_high_risk()
+    at.session_state["dimension_stability"] = {
+        "sample_count": 2, "stable_count": 1, "volatile_count": 3,
+    }
+    at.run()
+    gate_checkbox = next(c for c in at.checkbox if "reviewed the report above" in c.label)
+    gate_checkbox.set_value(True)
+    at.run()
+    confirm_button = next(b for b in at.button if "Show my rewritten text" in b.label)
+    confirm_button.click()
+    at.run()
+    assert not at.exception, f"App raised after confirming the gate: {at.exception}"
+
+    # at.main.children reflects true document/render order across every
+    # widget type (markdown, expander, etc), unlike the type-specific
+    # lists (at.markdown, at.expander) which each only preserve order
+    # within their own type. This is what actually proves the fix.
+    ordered = list(at.main.children.values())
+    heading_index = next(
+        i for i, el in enumerate(ordered)
+        if getattr(el, "value", None) and "Your rewritten text" in el.value
+    )
+    panel_index = next(
+        i for i, el in enumerate(ordered)
+        if getattr(el, "label", None) and "Try one more sample" in el.label
+    )
+    assert heading_index < panel_index, (
+        f"Expected the output heading (index {heading_index}) to appear "
+        f"before the 'Try one more sample' panel (index {panel_index}) - "
+        f"the whole point of the layout fix was moving the panel after "
+        f"the output, not before it."
+    )
+
+
 def test_gate_shows_when_risk_is_high_and_output_is_hidden():
     """Sanity check the gate actually engages before testing the
     confirm path - if this fails, the bug is upstream of the

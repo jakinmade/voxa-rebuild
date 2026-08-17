@@ -1221,10 +1221,11 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         if correction_prompt:
             try:
                 pre_llm_correction = clean
-                correction_response = client.messages.create(
-                    model="claude-sonnet-4-6", max_tokens=4096,
-                    system=correction_prompt, messages=[{"role": "user", "content": clean}],
-                )
+                with st.spinner("Refining..."):
+                    correction_response = client.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=4096,
+                        system=correction_prompt, messages=[{"role": "user", "content": clean}],
+                    )
                 corrected = correction_response.content[0].text
                 corrected = _regex_sweep(corrected, keep_contractions=keep_contractions)
                 if st.session_state.get("locale", "uk") == "uk":
@@ -1411,7 +1412,11 @@ def screen_render():
         height=220, label_visibility="collapsed", key="render_input_field",
     )
 
-    if st.button("Write as me \u2192", type="primary", use_container_width=True):
+    render_in_progress = st.session_state.get("render_in_progress", False)
+    if st.button(
+        "Write as me \u2192", type="primary", use_container_width=True,
+        disabled=render_in_progress,
+    ):
         if not input_text or not input_text.strip():
             st.error("Paste some text first.")
         else:
@@ -1419,8 +1424,16 @@ def screen_render():
             st.session_state.render_context_input = render_context
             st.session_state.render_output = ""
             st.session_state.refinement_used = False
-            _run_render(input_text, render_context=render_context)
+            st.session_state.render_in_progress = True
             st.rerun()
+
+    if st.session_state.get("render_in_progress"):
+        _run_render(
+            st.session_state.get("render_input_text", ""),
+            render_context=st.session_state.get("render_context_input", ""),
+        )
+        st.session_state.render_in_progress = False
+        st.rerun()
 
     if st.session_state.get("render_error"):
         st.error(st.session_state.render_error)
@@ -1519,15 +1532,8 @@ def screen_render():
                     unsafe_allow_html=True
                 )
 
-            caveat = confidence_caveat(st.session_state.get("dimension_stability"))
-            if caveat:
-                st.markdown(
-                    f'<div class="microcopy" style="margin-top:0.5rem;">{caveat}</div>',
-                    unsafe_allow_html=True
-                )
-                _deepen_fingerprint_panel(show_caveat_framing=True)
-
         if show_output:
+            st.markdown('<div class="tagline">Your rewritten text</div>', unsafe_allow_html=True)
             st.text_area(
                 label="output", value=output, height=350,
                 label_visibility="collapsed", key=output_key,
@@ -1602,6 +1608,23 @@ def screen_render():
                     scoring_rules_version=scoring_rules_version(),
                 )
                 st.rerun()
+
+        # Moved here (17 Aug 2026, JA feedback) from its previous spot
+        # between the report warnings and the output text_area - that
+        # ordering put an optional "improve your fingerprint" upsell
+        # ahead of the actual rewritten text the person came here for,
+        # which read as backwards. Runs regardless of gated/show_output
+        # state (still relevant even if output is hidden pending
+        # confirmation), just positioned after the report+output/gate
+        # resolve rather than wedged in the middle of them.
+        if report:
+            caveat = confidence_caveat(st.session_state.get("dimension_stability"))
+            if caveat:
+                st.markdown(
+                    f'<div class="microcopy" style="margin-top:0.5rem;">{caveat}</div>',
+                    unsafe_allow_html=True
+                )
+                _deepen_fingerprint_panel(show_caveat_framing=True)
 
         if show_output and st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
