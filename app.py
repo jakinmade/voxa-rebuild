@@ -68,177 +68,344 @@ st.set_page_config(
 # ---- Styles ----
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
+    /* ---------------------------------------------------------------
+       Design tokens. One place to look, same discipline as
+       scoring_rules.py — change a value here, not at each call site.
+       Kept in sync with .streamlit/config.toml's [theme] block, which
+       covers native widgets (buttons, checkboxes, focus rings) CSS
+       alone can't reliably reach across Streamlit versions.
+       --------------------------------------------------------------- */
+    :root {
+        --ink: #12172B;
+        --body-text: #3C4257;
+        --muted: #6B7280;
+        --faint: #9AA1B1;
+        --canvas: #FFFFFF;
+        --surface: #F7F8FB;
+        --border: #E4E7EE;
+        --accent: #2B4C7E;
+        --accent-hover: #1F3A5F;
+        --accent-soft: #EAF0F9;
+        --success: #1E7D46;
+        --success-soft: #E3F5EA;
+        --warning: #A5690B;
+        --warning-soft: #FDF2DF;
+        --danger: #B3382C;
+        --danger-soft: #FBE4E2;
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+        --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+    }
+
     html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: var(--font-sans);
+        color: var(--body-text);
+    }
+
+    .stApp {
+        background: var(--canvas);
     }
 
     .block-container {
-        max-width: 680px;
-        padding-top: 3rem;
-        padding-bottom: 3rem;
+        max-width: 700px;
+        padding-top: 3.5rem;
+        padding-bottom: 4rem;
+    }
+
+    @media (max-width: 640px) {
+        .block-container {
+            padding-top: 2rem;
+            padding-left: 1.25rem;
+            padding-right: 1.25rem;
+        }
+    }
+
+    /* Respect reduced-motion preferences — every transition below is
+       decorative, not load-bearing, so it's safe to disable wholesale. */
+    @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+    }
+
+    /* Visible keyboard focus everywhere, not just the elements below
+       that already get a custom ring — accessibility floor, not a
+       per-component decision. */
+    :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
     }
 
     .tagline {
-        font-size: 0.9rem;
-        color: #888;
-        letter-spacing: 0.05em;
-        margin-bottom: 0.5rem;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--accent);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-bottom: 0.9rem;
     }
 
     .headline {
-        font-size: 2rem;
+        font-size: 2.1rem;
         font-weight: 700;
-        color: #1a1a2e;
-        line-height: 1.2;
-        margin-bottom: 0.3rem;
+        color: var(--ink);
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+        margin-bottom: 0.5rem;
     }
 
     .sub {
-        font-size: 1rem;
-        color: #555;
-        margin-bottom: 2rem;
+        font-size: 1.05rem;
+        color: var(--muted);
+        line-height: 1.55;
+        margin-bottom: 2.25rem;
+        max-width: 54ch;
     }
 
     /* Your Voice checklist — new in v3, replaces prose observation cards */
     .voice-check {
         display: flex;
         align-items: flex-start;
-        gap: 0.6rem;
-        padding: 0.55rem 0;
-        border-bottom: 1px solid #f0f0f5;
+        gap: 0.75rem;
+        padding: 0.7rem 0;
+        border-bottom: 1px solid var(--border);
     }
     .voice-check-mark {
-        color: #2e8b57;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.4rem;
+        height: 1.4rem;
+        flex-shrink: 0;
+        margin-top: 0.1rem;
+        border-radius: 50%;
+        background: var(--success-soft);
+        color: var(--success);
         font-weight: 700;
-        font-size: 1rem;
-        line-height: 1.5;
+        font-size: 0.8rem;
+        line-height: 1;
     }
     .voice-check-text {
-        font-size: 0.95rem;
-        color: #222;
+        font-size: 0.97rem;
+        color: var(--ink);
+        font-weight: 500;
         line-height: 1.5;
     }
     .voice-check-evidence {
-        font-size: 0.82rem;
-        color: #888;
-        margin-top: 0.15rem;
+        font-size: 0.83rem;
+        color: var(--muted);
+        font-style: italic;
+        margin-top: 0.2rem;
+        line-height: 1.5;
     }
 
     .mode-label {
-        font-size: 0.8rem;
-        color: #888;
-        margin-bottom: 0.5rem;
-        font-weight: 500;
-        letter-spacing: 0.05em;
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        color: var(--accent);
+        margin-bottom: 0.6rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
     }
 
     .render-box {
-        background: #fff;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        padding: 1.5rem;
-        font-size: 0.95rem;
-        line-height: 1.7;
-        color: #222;
+        background: var(--canvas);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 1.75rem;
+        font-size: 0.97rem;
+        line-height: 1.75;
+        color: var(--ink);
         white-space: pre-wrap;
+        box-shadow: 0 1px 2px rgba(18, 23, 43, 0.04), 0 4px 16px rgba(18, 23, 43, 0.04);
     }
 
     .receipt {
-        background: #f0f4ff;
-        border: 1px solid #c0d0ff;
-        border-radius: 8px;
-        padding: 1.2rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 1.3rem 1.4rem;
         font-size: 0.85rem;
-        color: #334;
-        line-height: 1.6;
+        color: var(--body-text);
+        line-height: 1.7;
     }
     .receipt-title {
         font-weight: 700;
         font-size: 0.9rem;
-        color: #1a1a2e;
-        margin-bottom: 0.5rem;
+        color: var(--ink);
+        margin-bottom: 0.6rem;
+    }
+    .receipt strong {
+        color: var(--ink);
+        font-weight: 600;
     }
 
     .microcopy {
         font-size: 0.8rem;
-        color: #aaa;
+        color: var(--faint);
         text-align: center;
         margin-top: 0.5rem;
     }
 
     .progress {
-        text-align: center;
-        margin-bottom: 2rem;
-        color: #ccc;
-        font-size: 1.2rem;
-        letter-spacing: 0.3em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-bottom: 2.5rem;
+        color: var(--border);
+        font-size: 0.9rem;
     }
     .progress .active {
-        color: #1a1a2e;
+        color: var(--accent);
+        transform: scale(1.3);
+        transition: transform 0.2s ease;
     }
 
     .divider {
         border: none;
-        border-top: 1px solid #eee;
-        margin: 2rem 0;
+        border-top: 1px solid var(--border);
+        margin: 2.25rem 0;
     }
 
-    /* Voice Report — the differentiated output, new in v3/v4 */
+    /* Voice Report — the differentiated output, new in v3/v4. Numerals
+       in monospace throughout: this product's whole pitch is
+       deterministic measurement, not model vibes, so the report reads
+       like an instrument panel, not a chat bubble. */
     .voice-report {
-        background: #f8f9ff;
-        border: 1px solid #e4e6f5;
-        border-radius: 10px;
-        padding: 1.2rem 1.4rem;
-        margin-bottom: 1.2rem;
+        position: relative;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 1.4rem 1.5rem 1.2rem;
+        margin-bottom: 1.4rem;
+        overflow: hidden;
+    }
+    .voice-report::before {
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 3px;
+        background: var(--accent);
     }
     .vr-grid {
         display: flex;
-        gap: 1.4rem;
+        gap: 1.6rem;
         flex-wrap: wrap;
-        margin-bottom: 0.8rem;
+        margin-bottom: 1rem;
     }
     .vr-stat {
         min-width: 100px;
     }
     .vr-stat-label {
-        font-size: 0.72rem;
-        color: #888;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        margin-bottom: 0.15rem;
+        letter-spacing: 0.06em;
+        margin-bottom: 0.25rem;
     }
     .vr-stat-value {
+        font-family: var(--font-mono);
         font-size: 1.4rem;
-        font-weight: 700;
-        color: #1a1a2e;
+        font-weight: 600;
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
     }
     .badge {
-        display: inline-block;
-        padding: 0.15rem 0.6rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.2rem 0.7rem;
         border-radius: 999px;
-        font-size: 0.85rem;
-        font-weight: 700;
+        font-size: 0.8rem;
+        font-weight: 600;
+        font-family: var(--font-mono);
     }
-    .badge-green { background: #e3f5ea; color: #1e7d46; }
-    .badge-amber { background: #fdf2df; color: #a5690b; }
-    .badge-red   { background: #fbe4e2; color: #b3382c; }
+    .badge::before {
+        content: "";
+        width: 0.4rem;
+        height: 0.4rem;
+        border-radius: 50%;
+        background: currentColor;
+        flex-shrink: 0;
+    }
+    .badge-green { background: var(--success-soft); color: var(--success); }
+    .badge-amber { background: var(--warning-soft); color: var(--warning); }
+    .badge-red   { background: var(--danger-soft);  color: var(--danger); }
     .vr-changes {
         font-size: 0.85rem;
-        color: #555;
-        border-top: 1px solid #e4e6f5;
-        padding-top: 0.6rem;
-        margin-top: 0.2rem;
+        color: var(--body-text);
+        border-top: 1px solid var(--border);
+        padding-top: 0.7rem;
+        margin-top: 0.3rem;
+        line-height: 1.6;
     }
 
     /* Refinement tags */
     .tag-hint {
         font-size: 0.85rem;
-        color: #666;
+        color: var(--muted);
         margin-bottom: 0.4rem;
+    }
+
+    /* ---------------------------------------------------------------
+       Native Streamlit widgets — targeted via data-testid, which is
+       Streamlit's own stable public contract for this (documented,
+       version-checked against streamlit==1.61.1's compiled frontend
+       via BaseButton.CD99a2NM.js / TextArea.BRlPhbKO.js etc. rather
+       than assumed). Internal CSS class names churn between releases;
+       data-testid is what Streamlit itself recommends for exactly
+       this kind of customisation.
+       --------------------------------------------------------------- */
+    div[data-testid="stButton"] button,
+    button[data-testid^="stBaseButton"] {
+        border-radius: var(--radius-sm);
+        font-weight: 600;
+        transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    }
+    button[data-testid^="stBaseButton"]:active {
+        transform: scale(0.98);
+    }
+    button[data-testid="stBaseButton-primary"] {
+        background: var(--accent);
+        border-color: var(--accent);
+    }
+    button[data-testid="stBaseButton-primary"]:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+    }
+    button[data-testid="stBaseButton-secondary"] {
+        color: var(--ink);
+        border-color: var(--border);
+    }
+    button[data-testid="stBaseButton-secondary"]:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+    }
+
+    div[data-testid="stTextArea"] textarea,
+    div[data-testid="stTextInput"] input {
+        border-radius: var(--radius-sm);
+        border-color: var(--border);
+        font-family: var(--font-sans);
+    }
+    div[data-testid="stTextArea"] textarea:focus,
+    div[data-testid="stTextInput"] input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: var(--radius-sm);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -458,12 +625,12 @@ def screen_paste():
         tier = fitness.get("tier", "thin")
         if nudge:
             st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;color:#C8962E;">{nudge}</div>',
+                f'<div class="microcopy" style="margin-top:0.5rem;color:#A5690B;">{nudge}</div>',
                 unsafe_allow_html=True
             )
         elif tier == "gold":
             st.markdown(
-                '<div class="microcopy" style="margin-top:0.5rem;color:#2e8b57;">Strong sample. Your fingerprint is ready.</div>',
+                '<div class="microcopy" style="margin-top:0.5rem;color:#1E7D46;">Strong sample. Your fingerprint is ready.</div>',
                 unsafe_allow_html=True
             )
         else:
@@ -1318,7 +1485,7 @@ def screen_render():
             swaps = report.get("attribution_swaps", [])
             if swaps:
                 st.markdown(
-                    '<div class="microcopy" style="margin-top:0.5rem;color:#C0392B;">'
+                    '<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
                     '\u26a0 Check who gets credit before sending. The rewrite may have swapped '
                     'whose point this was.</div>',
                     unsafe_allow_html=True
@@ -1386,7 +1553,7 @@ def screen_render():
                         st.rerun()
         else:
             st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;color:#C0392B;">'
+                f'<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
                 f'\u26a0 This render is flagged {risk_level} risk. Review the report above '
                 f'before seeing the rewritten text.</div>',
                 unsafe_allow_html=True

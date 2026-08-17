@@ -1,0 +1,16 @@
+# Theme — sets Voicova's palette at the framework level, so native
+# widgets (buttons, checkboxes, sliders, focus rings, alert accents)
+# match the custom CSS in app.py instead of falling back to
+# Streamlit's default red-tinted theme underneath it. Values mirror
+# the CSS custom properties defined in app.py's <style> block — if
+# either changes, check the other stays in sync.
+[theme]
+base = "light"
+primaryColor = "#2B4C7E"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FA"
+textColor = "#12172B"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
