@@ -945,6 +945,13 @@ def _generate_voice_profile_summary(corpus_text: str) -> str | None:
             messages=[{"role": "user", "content": corpus_text}],
         )
         summary = response.content[0].text.strip()
+        # Same deterministic backstop the render output gets (em dashes,
+        # corporate filler, verbose openers, Claude-isms) - the prompt
+        # guardrails above are the first line of defence, this is the
+        # second. keep_contractions=True: this is a synthesised
+        # description, not a copy of the person's own words, so there's
+        # no baseline to check contraction usage against either way.
+        summary = _regex_sweep(summary, keep_contractions=True)
         log.info("voice_profile_summary_generated", summary_length=len(summary))
         return summary
     except Exception:

@@ -85,3 +85,54 @@ def test_no_auto_retry_on_failure():
             mock_client.messages.create.side_effect = Exception("API down")
             app._generate_voice_profile_summary("some corpus text")
     assert mock_client.messages.create.call_count == 1
+
+
+# ------------------------------------------------------------------
+# AI-tell guardrails on the summary itself.
+#
+# Everything else in the render pipeline (main render, correction
+# pass) gets both a prompt instruction AND a deterministic regex
+# sweep to strip AI tells (em dashes, corporate filler, verbose
+# openers). This call previously had neither - its output feeds
+# directly into every render's system prompt as "WRITER'S
+# DISTINCTIVE HABITS", so AI-toned text here contaminates the exact
+# prompt meant to prevent AI-toned output.
+# ------------------------------------------------------------------
+
+def test_em_dash_in_model_output_gets_swept():
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+        with patch("anthropic.Anthropic") as mock_cls:
+            mock_client = mock_cls.return_value
+            mock_client.messages.create.return_value = _fake_response(
+                "Writes short sentences — often trailing off mid-thought."
+            )
+            result = app._generate_voice_profile_summary("some corpus text")
+    assert "—" not in result
+    assert "-" not in result or "—" not in result  # no em dash survives either way
+
+
+def test_corporate_filler_in_model_output_gets_swept():
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+        with patch("anthropic.Anthropic") as mock_cls:
+            mock_client = mock_cls.return_value
+            mock_client.messages.create.return_value = _fake_response(
+                "It is worth noting that they leverage robust, seamless phrasing."
+            )
+            result = app._generate_voice_profile_summary("some corpus text")
+    lowered = result.lower()
+    assert "it is worth noting" not in lowered
+    assert "leverage" not in lowered
+    assert "robust" not in lowered
+    assert "seamless" not in lowered
+
+
+def test_prompt_instructs_plain_english_and_bans_ai_tells():
+    """The prompt-level guardrail, not just the regex backstop -
+    catches the case where the model would otherwise need the sweep
+    to do all the work."""
+    from prompts import build_voice_profile_summary_prompt
+    prompt = build_voice_profile_summary_prompt()
+    assert "em dash" in prompt.lower()
+    assert "plain" in prompt.lower()
+    assert "leverage" in prompt.lower()  # named as a banned word
+    assert "furthermore" in prompt.lower() or "filler transition" in prompt.lower()

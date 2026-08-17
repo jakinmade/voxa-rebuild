@@ -1377,6 +1377,17 @@ def build_voice_profile_summary_prompt() -> str:
         "used as a compact reference for another model generating text in this "
         "person's voice, not shown to the person themselves — write for that "
         "purpose, not as a compliment or a critique.\n\n"
+        "Write this in plain, simple English yourself — the irony of describing "
+        "someone's authentic voice in stilted, AI-sounding prose defeats the "
+        "point, and this text gets injected directly into the prompt that "
+        "generates their actual output, so any AI tells here contaminate every "
+        "render downstream. Specifically:\n"
+        "- No em dashes.\n"
+        "- No verbose openers ('it is worth noting', 'in today's landscape').\n"
+        "- No filler transitions ('furthermore', 'moreover', 'additionally').\n"
+        "- No corporate or academic filler ('leverage', 'robust', 'holistic', "
+        "'seamlessly', 'underscores').\n"
+        "- Short, plain, declarative sentences. Say the thing directly.\n\n"
         "Return only the profile. Nothing else."
     )
 
@@ -1528,6 +1539,12 @@ def build_correction_prompt(
         "Correct only what is listed. Preserve everything else exactly.\n\n"
         "CORRECTIONS NEEDED:\n"
         + "\n".join(f"{i+1}. {inst}" for i, inst in enumerate(correction_instructions))
-        + "\n\nABSOLUTE RULES: No em dashes. UK English. Return only the corrected text."
+        + "\n\nABSOLUTE RULES — never break these, including in the small edits you make:\n"
+        "No em dashes. UK English throughout. No verbose openers ('it is worth noting', "
+        "'in today's landscape'). No filler transitions ('furthermore', 'moreover', "
+        "'additionally'). No corporate filler ('leverage', 'robust', 'holistic', "
+        "'seamlessly'). These apply to any new wording you introduce while correcting — "
+        "the text you're given has already had these stripped once; do not reintroduce "
+        "them while fixing something else. Return only the corrected text."
     )
 
