@@ -2424,8 +2424,13 @@ _ANALYTICAL_TELL_PHRASES = re.compile(
     # positive class, just a different word in front. Each lookbehind must
     # stay individually fixed-width (Python re constraint), so determiners
     # are listed separately rather than as one alternation.
+    # Third fix in this same false-positive family: "Agent Surface" as
+    # a coined proper-noun compound term (capitalised, no determiner
+    # or possessive before it at all) - same genuine-noun-usage class
+    # as the determiner cases above, just a bare noun-adjunct
+    # construction instead. Confirmed against a live render.
     r"(?<!'s )(?<!its )(?<!the )(?<!this )(?<!that )(?<!any )(?<!our )"
-    r"(?<!her )(?<!his )(?<!each )(?<!a )(?<!an )(?<!no )"
+    r"(?<!her )(?<!his )(?<!each )(?<!a )(?<!an )(?<!no )(?<!Agent )"
     r"surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
     r"unpack(s|ed|ing)?|gestur(e|es|ed|ing) (at|toward|towards)|"
     r"sit(s)? with|push back (on|against)|"

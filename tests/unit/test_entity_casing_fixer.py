@@ -186,3 +186,14 @@ def test_curious_relocated_and_lowercased_is_not_a_false_positive():
     )
     result = score_semantic_drift(original, rewrite)
     assert "Curious" not in result["dropped_entities"]
+
+
+def test_agent_surface_not_flagged_as_ai_tell():
+    """'Agent Surface' is JA's own coined product term - same false-
+    positive class as 'agent's surface' and 'the surface', just a
+    bare noun-adjunct compound with no determiner. Real tell usage
+    ('issues surface') must stay caught."""
+    from voice_engine import score_ai_tells
+    assert score_ai_tells("Agent Surface.")["clean"]
+    assert score_ai_tells("The gap is in the Agent Surface, not the model.")["clean"]
+    assert not score_ai_tells("Issues surface when nobody checks.")["clean"]
