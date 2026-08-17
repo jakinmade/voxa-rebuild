@@ -1507,6 +1507,26 @@ def detect_attribution_swaps(input_text: str, output_text: str) -> list[str]:
     return flags
 
 
+def find_source_sentence(input_text: str, entity: str) -> str | None:
+    """Returns the first sentence in input_text containing entity
+    (case-insensitive, whole word), or None if not found.
+
+    Built for dropped_entities warnings: naming a bare dropped word
+    ("Missing from the rewrite: Curious") is accurate but thin - the
+    actual sentence gives the person something to check against, not
+    just a single word to puzzle over. Deterministic and read-only:
+    does not touch the output text or attempt any splice/restore, on
+    purpose - that's a materially riskier feature (sentence-boundary
+    matching to safely re-insert text) left for a future session with
+    room to test it properly.
+    """
+    pattern = re.compile(r"\b" + re.escape(entity) + r"\b", re.I)
+    for sentence in _extract_sentences(input_text):
+        if pattern.search(sentence):
+            return sentence.strip()
+    return None
+
+
 def score_semantic_drift(input_text: str, output_text: str) -> dict:
     """
     Deterministic proxy for whether the rewrite preserved what was

@@ -33,7 +33,7 @@ from voice_engine import (
     compute_baseline_metrics, _merge_baseline,
     _score_sample_fitness, _fitness_gate,
     _score_ai_signal,
-    score_semantic_drift, compute_confidence, compute_risk, compute_risk_reason,
+    score_semantic_drift, find_source_sentence, compute_confidence, compute_risk, compute_risk_reason,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells,
     compute_dimension_stability, confidence_caveat,
@@ -1524,11 +1524,17 @@ def screen_render():
             dropped = report.get("dropped_entities", [])
             if dropped:
                 listed = ", ".join(dropped)
+                source_sentence = find_source_sentence(
+                    st.session_state.get("render_input_text", ""), dropped[0]
+                )
+                context_line = (
+                    f' Original: "{source_sentence}"' if source_sentence else ""
+                )
                 st.markdown(
                     f'<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
                     f'\u26a0 Missing from the rewrite: {listed}. This can mean the rewrite '
                     f'drifted into different content, not just a different style - read it '
-                    f'in full before sending, don\'t just skim the changes above.</div>',
+                    f'in full before sending, don\'t just skim the changes above.{context_line}</div>',
                     unsafe_allow_html=True
                 )
 
