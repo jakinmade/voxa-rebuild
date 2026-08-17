@@ -24,6 +24,17 @@ from unittest.mock import patch, MagicMock
 
 from streamlit.testing.v1 import AppTest
 
+
+def _system_text(system) -> str:
+    """The real call site now sends `system` as a list of cache-aware
+    content blocks (see _build_system_prompt_blocks) rather than a
+    plain string, so prompt content there and only the correction
+    pass's plain-string form differ. Flatten either shape to a single
+    string for content assertions."""
+    if isinstance(system, str):
+        return system
+    return "".join(block.get("text", "") for block in system)
+
 _APP_PATH = str(Path(__file__).resolve().parents[2] / "app.py")
 
 SAMPLE_TEXT = (
@@ -108,7 +119,7 @@ def test_render_context_reaches_the_real_system_prompt(monkeypatch):
 
     content_calls = [c for c in captured if c.get("max_tokens") != 200]
     assert content_calls, "Expected at least one content (non-profile-summary) call"
-    system = content_calls[0]["system"]
+    system = _system_text(content_calls[0]["system"])
     assert "CONTEXT FOR THIS PIECE" in system
     assert "cold outreach follow-up to Scott" in system
 
@@ -136,7 +147,7 @@ def test_render_context_omitted_when_left_blank(monkeypatch):
         assert not at.exception
 
     content_calls = [c for c in captured if c.get("max_tokens") != 200]
-    assert "CONTEXT FOR THIS PIECE" not in content_calls[0]["system"]
+    assert "CONTEXT FOR THIS PIECE" not in _system_text(content_calls[0]["system"])
 
 
 def test_voice_profile_summary_generated_once_and_cached_across_renders(monkeypatch):
@@ -165,8 +176,8 @@ def test_voice_profile_summary_generated_once_and_cached_across_renders(monkeypa
         assert len(summary_calls_after_first) == 1
 
         first_content_call = [c for c in captured if c.get("max_tokens") != 200][0]
-        assert "WRITER'S DISTINCTIVE HABITS" in first_content_call["system"]
-        assert "Writes short, direct sentences" in first_content_call["system"]
+        assert "WRITER'S DISTINCTIVE HABITS" in _system_text(first_content_call["system"])
+        assert "Writes short, direct sentences" in _system_text(first_content_call["system"])
 
         # Second render, same session.
         at.text_area[0].set_value("Please write a second short note about pricing.")
@@ -205,4 +216,4 @@ def test_render_proceeds_normally_when_profile_summary_generation_fails(monkeypa
         assert at.session_state["render_output"], "Expected a render to still complete"
 
     content_calls = [c for c in captured if c.get("max_tokens") != 200]
-    assert "WRITER'S DISTINCTIVE HABITS" not in content_calls[0]["system"]
+    assert "WRITER'S DISTINCTIVE HABITS" not in _system_text(content_calls[0]["system"])

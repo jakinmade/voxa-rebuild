@@ -24,6 +24,7 @@ import streamlit as st
 
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
+from render_cap import check_and_reserve_render
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
@@ -39,7 +40,7 @@ from voice_engine import (
     compute_burrows_delta,
 )
 from prompts import (
-    _build_voice_dna, _build_system_prompt,
+    _build_voice_dna, _build_system_prompt, _build_system_prompt_blocks,
     _detect_mode, apply_intent_mode, _detect_locale,
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
     build_correction_prompt, merge_starter_evidence,
@@ -994,6 +995,15 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         log.error("render_failed", reason="api_key_missing", is_refinement=is_refinement)
         return False
 
+    allowed, used, limit = check_and_reserve_render()
+    if not allowed:
+        st.session_state.render_error = (
+            "We've hit today's render limit while VOICOVA is in early testing. "
+            "Please try again tomorrow."
+        )
+        log.error("render_blocked", reason="daily_cap_reached", used=used, limit=limit, is_refinement=is_refinement)
+        return False
+
     import anthropic
 
     detected_mode = _detect_mode(input_text)
@@ -1048,7 +1058,7 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
     input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
     input_has_directive_content = input_metrics_signal["directive_ratio"] > 0
 
-    system = _build_system_prompt(
+    system = _build_system_prompt_blocks(
         voice_dna=voice_dna, mode_instruction=mode_instruction,
         word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
         input_text=input_text, render_context=render_context,
