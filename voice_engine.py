@@ -1945,6 +1945,7 @@ def voice_match_label(delta: dict) -> dict:
         tier, badge = "Limited", "badge-red"
 
     hits = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "HIT"]
+    close = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "CLOSE"]
     missed = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "MISSED"]
 
     # "Drifted" was the original wording here — dropped because it's one
@@ -1957,14 +1958,24 @@ def voice_match_label(delta: dict) -> dict:
     # doesn't sound like you" itself use a word the product flags as
     # not sounding human undermines the message. "Off on" reads
     # naturally in the same slot and is clean against score_ai_tells.
-    if hits and not missed:
-        evidence = "Held on " + ", ".join(hits) + "."
-    elif hits and missed:
-        evidence = "Held on " + ", ".join(hits) + ". Off on " + ", ".join(missed) + "."
-    elif missed:
-        evidence = "Off on " + ", ".join(missed) + "."
-    else:
-        evidence = "No baseline comparison available."
+    #
+    # CLOSE dimensions (17 Aug 2026 fix): previously silently omitted
+    # from this sentence entirely - a dimension could sit in neither
+    # "hits" nor "missed" (verdict == CLOSE) and vanish from the prose,
+    # while still appearing as a numeric entry in build_voice_report's
+    # biggest_changes list (which includes anything that isn't HIT).
+    # Spotted live: a report showed "sentence rhythm 31%" as a biggest
+    # change with no corresponding mention in "Held on X. Off on Y." -
+    # the sentence and the numbers next to it told two different
+    # stories. Given its own clause here so the two stay consistent.
+    parts = []
+    if hits:
+        parts.append("Held on " + ", ".join(hits) + ".")
+    if close:
+        parts.append("Close on " + ", ".join(close) + ".")
+    if missed:
+        parts.append("Off on " + ", ".join(missed) + ".")
+    evidence = " ".join(parts) if parts else "No baseline comparison available."
 
     return {"tier": tier, "badge": badge, "evidence": evidence, "_raw_pct": pct}
 
