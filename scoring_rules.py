@@ -42,6 +42,23 @@ HOW TO CHANGE A THRESHOLD
    further wiring needed for a threshold-only change.
 
 CHANGELOG
+1.4.0 (17 Aug 2026) - Added DELTA_BAND_MIN_ABS_DIFF, an absolute-
+    difference floor per dimension in score_render_delta, alongside
+    the existing percentage bands. Prompted by a confirmed-live render
+    (CLEARANCE outreach to Scott) that scored High risk almost
+    entirely off pct_diff blowing up near a baseline close to zero -
+    hedge_density moved 0.5 -> 0.0 (half a hedge word per 100 words)
+    and registered as pct_diff=1.0 (100%, MISSED), the same failure
+    mode as any percentage-of-a-near-zero-denominator calculation.
+    Hits hardest exactly on the writers this product is built to
+    preserve - direct, low-hedging, low-first-person - since their
+    baselines sit closest to zero on the dimensions being measured. A
+    verdict now needs BOTH pct_diff over the HIT band AND an absolute
+    move past the floor to register as CLOSE/MISSED; a trivial
+    absolute move can no longer be inflated into a false drift by a
+    small denominator. Semver: minor, not patch - this is a new rule
+    added alongside the existing bands, not a retuned number within
+    the same rule.
 1.3.0 (16 Aug 2026) - Added PERSONAL_EMAIL_DOMAINS, consumed by the
     new firm_signal.py. Governs which domains extract_domain() refuses
     to treat as a firm signal - not a scoring threshold, but the same
@@ -110,7 +127,7 @@ file's "every threshold governing a render's Confidence/Risk verdict"
 claim inaccurate rather than more complete.
 """
 
-SCORING_RULES_VERSION = "1.3.0"
+SCORING_RULES_VERSION = "1.4.0"
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +144,30 @@ SCORING_RULES_VERSION = "1.3.0"
 # ---------------------------------------------------------------------------
 DELTA_BAND_HIT_MAX_PCT = 0.20    # within 20% of baseline -> HIT
 DELTA_BAND_CLOSE_MAX_PCT = 0.40  # within 40% of baseline -> CLOSE, else MISSED
+
+# pct_diff divides by max(baseline, 0.01) - for a person whose baseline
+# on a dimension is already near zero (a direct writer with low
+# hedge_density or low first_person_ratio to begin with, exactly the
+# style this product is built to preserve), that denominator is tiny,
+# so a trivial absolute move reads as a huge relative one. Confirmed
+# live: a render with hedge_density baseline ~0.5/100 words moving to
+# 0.0 - an absolute change of half a hedge word per 100 words - scored
+# pct_diff=1.0 (100%, MISSED), the single largest driver of a High-risk
+# verdict on a render that read as a faithful, on-voice rewrite.
+# DELTA_BAND_MIN_ABS_DIFF is the floor below which a MISSED can't fire
+# regardless of pct_diff: if the absolute move on a dimension is
+# smaller than a person could plausibly notice, no percentage math
+# should be able to call it a drift. Units match each dimension's own
+# native scale (hedge_density and sentence_length_sd are not 0-1
+# ratios, so a single shared floor across all four would either be too
+# loose for the ratio dimensions or too tight for the other two).
+# ---------------------------------------------------------------------------
+DELTA_BAND_MIN_ABS_DIFF = {
+    "hedge_density": 1.0,        # hedge words per 100 words
+    "sentence_length_sd": 2.0,   # words
+    "first_person_ratio": 0.10,  # proportion of sentences
+    "directive_ratio": 0.10,     # proportion of sentences
+}
 
 
 # ---------------------------------------------------------------------------

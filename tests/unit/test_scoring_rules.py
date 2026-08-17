@@ -45,11 +45,27 @@ def test_version_bumped_for_review_gate_rule():
 
 def test_version_bumped_for_firm_signal_rule():
     """1.3.0 added PERSONAL_EMAIL_DOMAINS - a minor bump (new business
-    rule, no existing threshold changed), consumed by firm_signal.py."""
-    assert sr.SCORING_RULES_VERSION == "1.3.0"
+    rule, no existing threshold changed), consumed by firm_signal.py.
+    The live constant moves forward with each new entry (see the
+    1.4.0 test below for the current value) - this checks the
+    CHANGELOG still documents 1.3.0 rather than pinning it as the
+    current version forever."""
+    assert "1.3.0" in sr.__doc__
     assert hasattr(sr, "PERSONAL_EMAIL_DOMAINS")
     assert "gmail.com" in sr.PERSONAL_EMAIL_DOMAINS
     assert "yahoo.com" in sr.PERSONAL_EMAIL_DOMAINS
+
+
+def test_version_bumped_for_delta_band_min_abs_diff():
+    """1.4.0 added DELTA_BAND_MIN_ABS_DIFF - a minor bump (new rule
+    alongside the existing percentage bands, not a retuned number
+    within the same rule), consumed by voice_engine.score_render_delta."""
+    assert sr.SCORING_RULES_VERSION == "1.4.0"
+    assert hasattr(sr, "DELTA_BAND_MIN_ABS_DIFF")
+    assert sr.DELTA_BAND_MIN_ABS_DIFF["hedge_density"] == 1.0
+    assert sr.DELTA_BAND_MIN_ABS_DIFF["sentence_length_sd"] == 2.0
+    assert sr.DELTA_BAND_MIN_ABS_DIFF["first_person_ratio"] == 0.10
+    assert sr.DELTA_BAND_MIN_ABS_DIFF["directive_ratio"] == 0.10
 
 
 def test_scoring_rules_version_function_matches_constant():
@@ -157,6 +173,46 @@ def test_reason_checks_same_priority_order_as_compute_risk():
     ai_tells = {"clean": False}
     assert ve.compute_risk(delta, semantic, ai_tells) == "High"
     assert ve.compute_risk_reason(delta, semantic, ai_tells) == "ai_tell"
+
+
+# ---------------------------------------------------------------------------
+# DELTA_BAND_MIN_ABS_DIFF — added 1.4.0, prompted by a confirmed-live
+# render (CLEARANCE outreach to Scott, 17 Aug 2026) that scored High
+# risk largely because hedge_density's baseline sat near zero, turning
+# a trivial absolute move into a 100% pct_diff. Pinned here as a
+# regression test, not just documented in the CHANGELOG.
+# ---------------------------------------------------------------------------
+
+def test_near_zero_baseline_trivial_move_is_hit_not_missed():
+    """The actual bug: hedge_density baseline 0.5, output 0.0 - an
+    absolute move of half a hedge word per 100 words - used to score
+    pct_diff=1.0 (100%, MISSED) purely because the baseline denominator
+    was tiny. Below DELTA_BAND_MIN_ABS_DIFF, must be HIT regardless of
+    pct_diff."""
+    baseline = {
+        "hedge_density": 0.5, "sentence_length_sd": 8.25,
+        "first_person_ratio": 0.10, "directive_ratio": 0.0,
+    }
+    output_text = "Short direct sentence. Another one. No hedging here at all."
+    delta = ve.score_render_delta(baseline, output_text)
+    assert delta["hedge_density"]["output"] == 0.0
+    assert delta["hedge_density"]["pct_diff"] == 1.0
+    assert delta["hedge_density"]["verdict"] == "HIT"
+
+
+def test_genuine_large_move_past_the_floor_still_misses():
+    """The floor only protects trivial moves - a real structural shift
+    (sentence rhythm collapsing from varied to uniform) must still
+    register as MISSED, same as before this change."""
+    baseline = {
+        "hedge_density": 0.5, "sentence_length_sd": 8.25,
+        "first_person_ratio": 0.10, "directive_ratio": 0.0,
+    }
+    output_text = (
+        "Short one. Short two. Short three. Short four. Short five."
+    )
+    delta = ve.score_render_delta(baseline, output_text)
+    assert delta["sentence_length_sd"]["verdict"] == "MISSED"
 
 
 def test_semantic_match_weights_sum_to_one():

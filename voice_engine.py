@@ -27,6 +27,7 @@ from collections import Counter
 from scoring_rules import (
     DELTA_BAND_HIT_MAX_PCT,
     DELTA_BAND_CLOSE_MAX_PCT,
+    DELTA_BAND_MIN_ABS_DIFF,
     RISK_HIGH_SEMANTIC_MATCH_BELOW,
     RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST,
     RISK_MEDIUM_SEMANTIC_MATCH_BELOW,
@@ -1867,12 +1868,25 @@ def score_render_delta(baseline: dict, output_text: str) -> dict:
         b_val = baseline[key]
         o_val = output_metrics[key]
         diff = o_val - b_val
-        pct_diff = abs(diff) / max(b_val, 0.01)
-        verdict = (
-            "HIT" if pct_diff <= DELTA_BAND_HIT_MAX_PCT
-            else "CLOSE" if pct_diff <= DELTA_BAND_CLOSE_MAX_PCT
-            else "MISSED"
-        )
+        abs_diff = abs(diff)
+        pct_diff = abs_diff / max(b_val, 0.01)
+
+        # Absolute floor first (see scoring_rules.DELTA_BAND_MIN_ABS_DIFF's
+        # own comment): a baseline near zero makes pct_diff blow up for
+        # a trivially small absolute move, so a move smaller than a
+        # person could plausibly notice is a HIT regardless of what the
+        # percentage says. Only once the absolute move clears that bar
+        # do the existing percentage bands get to decide CLOSE vs MISSED.
+        min_abs = DELTA_BAND_MIN_ABS_DIFF.get(key, 0.0)
+        if abs_diff < min_abs:
+            verdict = "HIT"
+        elif pct_diff <= DELTA_BAND_HIT_MAX_PCT:
+            verdict = "HIT"
+        elif pct_diff <= DELTA_BAND_CLOSE_MAX_PCT:
+            verdict = "CLOSE"
+        else:
+            verdict = "MISSED"
+
         delta[key] = {
             "baseline": b_val, "output": o_val,
             "delta": round(diff, 3), "pct_diff": round(pct_diff, 3),
