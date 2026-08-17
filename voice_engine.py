@@ -1507,6 +1507,35 @@ def detect_attribution_swaps(input_text: str, output_text: str) -> list[str]:
     return flags
 
 
+def highlight_attribution_swaps(output_text: str, attribution_swaps: list[str]) -> str:
+    """HTML-escaped output text with each attribution-swap phrase
+    wrapped in a highlighted, tooltipped span - genuine inline
+    highlighting, safe because the swapped phrase actually exists at
+    a real position in the output (unlike a dropped entity, which by
+    definition isn't in the output anywhere to point at). Each swap
+    string is detect_attribution_swaps' own format ("'your X' became
+    'my X', ..."); the target phrase after "became" is what gets
+    highlighted. Read-only - no restore/splice action, deliberately
+    left for a future session with room to test that safely."""
+    import html
+    escaped = html.escape(output_text)
+    for swap in attribution_swaps:
+        m = re.search(r"became '([^']+)'", swap)
+        if not m:
+            continue
+        phrase = html.escape(m.group(1))
+        pattern = re.compile(r"\b" + re.escape(phrase) + r"\b", re.I)
+        tooltip = html.escape(swap)
+        escaped = pattern.sub(
+            lambda mo, t=tooltip: (
+                f'<span style="background:#FBE4E2;border-bottom:2px solid #B3382C;'
+                f'padding:1px 2px;border-radius:3px;" title="{t}">{mo.group(0)}</span>'
+            ),
+            escaped, count=1,
+        )
+    return escaped
+
+
 def find_source_sentence(input_text: str, entity: str) -> str | None:
     """Returns the first sentence in input_text containing entity
     (case-insensitive, whole word), or None if not found.

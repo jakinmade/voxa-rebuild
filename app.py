@@ -33,7 +33,7 @@ from voice_engine import (
     compute_baseline_metrics, _merge_baseline,
     _score_sample_fitness, _fitness_gate,
     _score_ai_signal,
-    score_semantic_drift, find_source_sentence, compute_confidence, compute_risk, compute_risk_reason,
+    score_semantic_drift, find_source_sentence, highlight_attribution_swaps, compute_confidence, compute_risk, compute_risk_reason,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells,
     compute_dimension_stability, confidence_caveat,
@@ -1540,6 +1540,17 @@ def screen_render():
 
         if show_output:
             st.markdown('<div class="tagline">Your rewritten text</div>', unsafe_allow_html=True)
+            swaps_for_highlight = (report or {}).get("attribution_swaps", [])
+            if swaps_for_highlight:
+                highlighted = highlight_attribution_swaps(output, swaps_for_highlight)
+                st.markdown(
+                    f'<div style="white-space:pre-wrap;line-height:1.6;'
+                    f'background:#fff;border:0.5px solid #E4E7EE;border-radius:10px;'
+                    f'padding:14px 16px;margin-bottom:0.6rem;">{highlighted}</div>'
+                    f'<div class="microcopy">Highlighted: credit may have swapped who said this. '
+                    f'Hover to see what changed.</div>',
+                    unsafe_allow_html=True,
+                )
             st.text_area(
                 label="output", value=output, height=350,
                 label_visibility="collapsed", key=output_key,
