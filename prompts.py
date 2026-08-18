@@ -1387,6 +1387,7 @@ def build_correction_prompt(
     mode: str = "preserve",
     sentence_economy: dict | None = None,
     passive_voice: dict | None = None,
+    linkedin_format: bool = False,
 ) -> str | None:
     """
     Builds the targeted, surgical correction prompt for whatever the
@@ -1411,13 +1412,37 @@ def build_correction_prompt(
     this function returns None whenever correction_instructions ends up
     empty, exactly as before. "elevate" is new (18 Aug 2026 groundwork):
     it adds line-editing instructions — old-to-new sentence ordering
-    (Williams, "Style: Toward Clarity and Grace") and LinkedIn
-    structural conventions — grounded in established editorial craft,
-    not invented case-by-case. These are appended unconditionally when
-    mode == "elevate", so a correction pass now runs even when no
-    voice-dimension target was MISSED. Any other value for mode is
-    treated as "preserve" (fails safe rather than silently applying
-    elevate instructions on a typo).
+    (Williams, "Style: Toward Clarity and Grace") — grounded in
+    established editorial craft, not invented case-by-case. These are
+    appended unconditionally when mode == "elevate", so a correction
+    pass now runs even when no voice-dimension target was MISSED. Any
+    other value for mode is treated as "preserve" (fails safe rather
+    than silently applying elevate instructions on a typo).
+
+    Correction, deliberately, not restructuring: elevate mode never
+    moves sentences relative to each other, never merges or splits
+    them, never touches paragraph order. An earlier version of this
+    docstring claimed elevate also applied "LinkedIn structural
+    conventions" — it never did; nothing in the instructions below
+    touches paragraph-level formatting. That was a documentation bug,
+    not a removed feature. See linkedin_format below for where that
+    capability actually lives now — deliberately NOT inside plain
+    elevate mode, because platform formatting (short paragraphs, a
+    hook-first opening, promoting a later line to the top) requires
+    exactly the sentence-relative movement elevate's own tests
+    guarantee it will never do. Folding the two together would mean
+    either quietly breaking that guarantee or building a silent
+    special case inside a mode that's supposed to behave identically
+    for an email, a proposal section, or a LinkedIn post.
+
+    linkedin_format: opt-in, and only takes effect when mode ==
+    "elevate" — checked explicitly below, not merely UI-gated, so
+    calling this function directly with linkedin_format=True and
+    mode="preserve" is a safe no-op rather than a way to bypass the
+    "never restructure" guarantee some other code path may be relying
+    on. When active, adds paragraph-level restructuring instructions
+    on top of (not instead of) elevate's existing sentence-level ones —
+    the two are meant to compose, line-edit first, then restructure.
 
     sentence_economy / passive_voice: outputs of
     voice_engine.compute_sentence_economy() / compute_passive_voice(),
@@ -1438,6 +1463,12 @@ def build_correction_prompt(
     genuinely dense or passive-heavy text, not nudging every render.
     """
     correction_instructions = []
+    # Single source of truth for the rest of this function — computed
+    # once, referenced both when building the old-to-new instruction's
+    # inline exception clause and when choosing the closing framing,
+    # so the two can never drift apart on whether restructuring is
+    # actually permitted this call.
+    linkedin_active = mode == "elevate" and linkedin_format
 
     for key, d in delta.items():
         if d["verdict"] != "MISSED":
@@ -1521,6 +1552,12 @@ def build_correction_prompt(
     # 18 Aug 2026 research) — voice and word choice are the writer's;
     # only sentence-level packaging is in scope here.
     if mode == "elevate":
+        old_to_new_exception = (
+            " (paragraph-level movement — breaking paragraphs apart, promoting "
+            "a line to the opening — is handled separately below under "
+            "PLATFORM FORMAT; this rule is about word order within a single "
+            "sentence only.)" if linkedin_active else ""
+        )
         correction_instructions.append(
             "LINE EDIT (old-to-new ordering): where a sentence buries "
             "familiar/already-known information after new information, "
@@ -1529,7 +1566,7 @@ def build_correction_prompt(
             "Williams's old-to-new principle). Only reorder within a "
             "sentence — never move sentences relative to each other, "
             "never merge or split sentences, never change what a "
-            "sentence claims."
+            f"sentence claims.{old_to_new_exception}"
         )
         correction_instructions.append(
             "LINE EDIT (economy): cut needless words within a sentence "
@@ -1568,16 +1605,53 @@ def build_correction_prompt(
                 f"the text."
             )
 
+        # LinkedIn-format restructuring — deliberately separate from,
+        # and layered on top of, the line-editing instructions above.
+        # This is the one place in this function permitted to move
+        # content relative to itself (promote a line to the opening,
+        # break long paragraphs apart) — every instruction above this
+        # point explicitly forbids that. Gated on mode == "elevate"
+        # AND the flag, checked here rather than trusted from the
+        # caller, so this can never fire through preserve mode even
+        # if a future call site passes linkedin_format=True by mistake.
+        if linkedin_format:
+            correction_instructions.append(
+                "PLATFORM FORMAT (LinkedIn): restructure for a LinkedIn "
+                "post, now that the line-level edits above are done. "
+                "Break long paragraphs into short ones — 1 to 3 sentences "
+                "each, separated by a blank line — the way LinkedIn posts "
+                "are actually read, in short scannable chunks, not dense "
+                "blocks. If the strongest, most attention-earning line in "
+                "the piece is currently buried partway through, move it "
+                "to the very start as the opening hook. You may reorder "
+                "and re-paragraph freely to achieve this. You may NOT cut "
+                "content, change any claim, or introduce a sentence that "
+                "does not already exist in the text — every word in the "
+                "output must trace back to a word already present in the "
+                "input; this is rearrangement and re-paragraphing, not "
+                "rewriting."
+            )
+
     if not correction_instructions:
         return None
+
+    preservation_line = (
+        "Make only the changes needed to hit the targets. Do not rewrite. Do not improve. "
+        "Correct only what is listed. Preserve everything else exactly.\n\n"
+        if not linkedin_active else
+        "Make only the changes needed to hit the targets — except for the PLATFORM FORMAT "
+        "instruction below, which explicitly permits reordering and re-paragraphing. "
+        "Do not rewrite wording, do not improve phrasing, do not change any claim. "
+        "Every word in your output must trace back to a word already in the input; only "
+        "its position and paragraph breaks may move.\n\n"
+    )
 
     return (
         "You are making precise surgical corrections to a voice restoration. "
         "The text below is close but has missed specific targets from the writer's baseline, "
         "or dropped specific facts from the original. "
-        "Make only the changes needed to hit the targets. Do not rewrite. Do not improve. "
-        "Correct only what is listed. Preserve everything else exactly.\n\n"
-        "CORRECTIONS NEEDED:\n"
+        + preservation_line
+        + "CORRECTIONS NEEDED:\n"
         + "\n".join(f"{i+1}. {inst}" for i, inst in enumerate(correction_instructions))
         + "\n\nABSOLUTE RULES — never break these, including in the small edits you make:\n"
         "No em dashes. UK English throughout. No verbose openers ('it is worth noting', "

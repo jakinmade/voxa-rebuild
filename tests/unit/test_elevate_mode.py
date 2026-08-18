@@ -1,6 +1,7 @@
 """
-Tests for build_correction_prompt's new mode parameter (18 Aug 2026,
-Preserve/Elevate groundwork — not yet wired to any UI control).
+Tests for build_correction_prompt's mode parameter (18 Aug 2026,
+Preserve/Elevate groundwork; wired to the render_mode radio + the
+linkedin_format checkbox on Screen 4 as of this session).
 
 Two things this guards specifically:
 1. mode defaults to "preserve" and that default must be byte-for-byte

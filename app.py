@@ -966,7 +966,7 @@ def _generate_voice_profile_summary(corpus_text: str) -> str | None:
 
 def _run_render(
     input_text: str, is_refinement: bool = False, render_context: str = "",
-    render_mode: str = "preserve",
+    render_mode: str = "preserve", linkedin_format: bool = False,
 ) -> bool:
     """The actual generation pipeline. Kept as one function so the
     refinement re-render below can call the same path.
@@ -984,6 +984,15 @@ def _run_render(
     build_correction_prompt's mode parameter — see that function's
     docstring for what elevate mode actually does (line-editing only:
     old-to-new sentence ordering and economy, never restructuring).
+
+    linkedin_format: opt-in, only offered in the UI once "elevate" is
+    selected (see screen_render) — passed straight through to
+    build_correction_prompt, which itself re-checks mode == "elevate"
+    before honouring it, so this parameter can never trigger paragraph
+    restructuring through the preserve path even if a future caller
+    passes it incorrectly. See build_correction_prompt's docstring for
+    why this is a separate flag rather than folded into elevate mode
+    itself.
     Same as render_context, this doesn't touch the baseline targets.
 
     Returns True on success, False on failure. Callers must check this
@@ -1231,6 +1240,7 @@ def _run_render(
         correction_prompt = build_correction_prompt(
             correction_delta, semantic, input_has_opinion_content, input_has_directive_content,
             mode=render_mode, sentence_economy=sentence_economy, passive_voice=passive_voice,
+            linkedin_format=linkedin_format,
         )
         log.info(
             "correction_pass_decision",
@@ -1506,6 +1516,22 @@ def screen_render():
         key="render_mode_field",
     )
 
+    # Only offered once elevate is selected, on purpose — LinkedIn
+    # formatting restructures paragraphs, which is a materially
+    # different, riskier operation than elevate's line-editing alone.
+    # Making it a sub-choice of elevate rather than an independent
+    # toggle keeps that distinction visible: line-edit first, then
+    # optionally restructure, never restructure-only. See
+    # build_correction_prompt's docstring for why this isn't just
+    # folded into elevate mode itself.
+    linkedin_format = False
+    if render_mode == "elevate":
+        linkedin_format = st.checkbox(
+            "Format for LinkedIn — short paragraphs, hook first",
+            value=False,
+            key="linkedin_format_field",
+        )
+
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
         placeholder="Paste AI-generated text here. An email draft, a LinkedIn post, a proposal section...",
@@ -1523,6 +1549,7 @@ def screen_render():
             st.session_state.render_input_text = input_text
             st.session_state.render_context_input = render_context
             st.session_state.render_mode_input = render_mode
+            st.session_state.linkedin_format_input = linkedin_format
             st.session_state.render_output = ""
             st.session_state.refinement_used = False
             st.session_state.render_in_progress = True
@@ -1533,6 +1560,7 @@ def screen_render():
             st.session_state.get("render_input_text", ""),
             render_context=st.session_state.get("render_context_input", ""),
             render_mode=st.session_state.get("render_mode_input", "preserve"),
+            linkedin_format=st.session_state.get("linkedin_format_input", False),
         )
         st.session_state.render_in_progress = False
         st.rerun()
@@ -1546,6 +1574,7 @@ def screen_render():
                 last_attempt, is_refinement=was_refinement,
                 render_context=st.session_state.get("render_context_input", ""),
                 render_mode=st.session_state.get("render_mode_input", "preserve"),
+                linkedin_format=st.session_state.get("linkedin_format_input", False),
             ) and was_refinement:
                 st.session_state.refinement_used = True
             st.rerun()
@@ -1791,6 +1820,7 @@ def screen_render():
                     refined_input, is_refinement=True,
                     render_context=st.session_state.get("render_context_input", ""),
                     render_mode=st.session_state.get("render_mode_input", "preserve"),
+                    linkedin_format=st.session_state.get("linkedin_format_input", False),
                 ):
                     st.session_state.refinement_used = True
                 st.rerun()
