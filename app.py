@@ -411,6 +411,35 @@ st.markdown("""
         margin-top: 0.4rem;
         line-height: 1.4;
     }
+    .ai-tell-block {
+        margin-top: 0.9rem;
+        padding-top: 0.9rem;
+        border-top: 1px solid var(--border);
+    }
+    .ai-tell-title {
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 0.5rem;
+    }
+    .ai-tell-phrase-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-bottom: 0.6rem;
+    }
+    .ai-tell-phrase {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.6rem;
+        border-radius: 6px;
+        background: var(--danger-soft);
+        color: var(--danger);
+        font-size: 0.8rem;
+        font-family: var(--font-mono);
+    }
     .vr-changes {
         font-size: 0.85rem;
         color: var(--body-text);
@@ -1593,6 +1622,13 @@ def _run_render(
         # check (18 Aug 2026) — this gap existed before that feature,
         # not introduced by it.
         st.session_state.render_insertion_check = insertion_check
+        # Persisted (not recomputed at click-time) for the same reason
+        # as render_insertion_check above: the AI-Slop Firewall "Clean
+        # it up" action needs the exact keep_contractions value THIS
+        # render actually used, not a fresh recomputation that could
+        # drift if the underlying baseline corpus changes between the
+        # render and the click.
+        st.session_state.render_keep_contractions = keep_contractions
         log.info(
             "render_complete", is_refinement=is_refinement,
             confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
@@ -1647,6 +1683,7 @@ def _run_render(
         st.session_state.render_id = None
         st.session_state.render_completed_at = None
         st.session_state.render_insertion_check = None
+        st.session_state.render_keep_contractions = None
 
     st.session_state.render_output = clean
     return True
@@ -1815,6 +1852,42 @@ def _build_voice_match_table_html(delta: dict) -> str:
         f'<div class="voice-match-explain">{" ".join(skip_notes)}</div>' if skip_notes else ""
     )
     return table_html + explain_html
+
+
+def _clean_ai_tells_and_rescore():
+    """
+    AI-Slop Firewall's 'Clean it up' action. Re-runs the same
+    deterministic sweep already trusted elsewhere in the pipeline
+    (_regex_sweep) on the current render output, then re-scores with
+    score_ai_tells — no new removal logic here, this only re-triggers
+    the existing mechanism on demand rather than automatically, so the
+    person can see exactly what was flagged before it's changed.
+
+    keep_contractions read from session_state (persisted at render
+    time, see the comment at that persist point) rather than
+    recomputed here, so this action always matches what the actual
+    render used — recomputing fresh at click-time risks drifting from
+    that if the underlying baseline corpus changes in between.
+
+    Mutates session_state in place; caller is responsible for
+    st.rerun() afterward.
+    """
+    current = st.session_state.get("render_output", "")
+    if not current:
+        return
+    keep_contractions = st.session_state.get("render_keep_contractions", False)
+    cleaned = _regex_sweep(current, keep_contractions=keep_contractions)
+    input_text = st.session_state.get("render_input_text", "")
+    new_ai_tells = score_ai_tells(cleaned, original_input_text=input_text)
+
+    st.session_state.render_output = cleaned
+    report = st.session_state.get("voice_report")
+    if report:
+        report = dict(report)
+        report["ai_tell_clean"] = new_ai_tells["clean"]
+        report["ai_tell_flags"] = new_ai_tells["flagged"]
+        report["ai_tell_phrases"] = new_ai_tells["flagged_phrases"]
+        st.session_state.voice_report = report
 
 
 def screen_render():
@@ -1998,6 +2071,32 @@ def screen_render():
                 {_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
             </div>
             """, unsafe_allow_html=True)
+
+            # AI-Slop Firewall — outside the raw-HTML block above,
+            # since it needs a real st.button (Streamlit widgets can't
+            # live inside an unsafe_allow_html string). ai_tell_phrases
+            # comes from score_ai_tells' flagged_phrases field (18 Aug
+            # 2026) — the raw, individual phrase list, not the
+            # pre-joined "AI-typical phrasing found: X, Y, Z" prose
+            # string ai_tell_flags carries; parsing that string on the
+            # UI side would be fragile against any future wording
+            # change to it.
+            ai_tell_phrases = report.get("ai_tell_phrases", [])
+            if ai_tell_phrases:
+                phrase_chips = "".join(
+                    f'<span class="ai-tell-phrase">{p}</span>' for p in ai_tell_phrases
+                )
+                st.markdown(
+                    f'<div class="ai-tell-block">'
+                    f'<div class="ai-tell-title">AI Tell Check: '
+                    f'{len(ai_tell_phrases)} found</div>'
+                    f'<div class="ai-tell-phrase-list">{phrase_chips}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("Clean it up", key=f"clean_ai_tells_{output_key}"):
+                    _clean_ai_tells_and_rescore()
+                    st.rerun()
 
             swaps = report.get("attribution_swaps", [])
             if swaps:

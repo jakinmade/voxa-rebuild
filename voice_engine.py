@@ -2523,6 +2523,14 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "risk": risk,
         "ai_tell_clean": (ai_tells or {}).get("clean", True),
         "ai_tell_flags": (ai_tells or {}).get("flagged", []),
+        # Raw, individual phrase list — added 18 Aug 2026 for the
+        # AI-Slop Firewall UI, which needs each flagged phrase listed
+        # separately (e.g. for a "clean it up" action), not the
+        # pre-joined "AI-typical phrasing found: X, Y, Z" prose string
+        # ai_tell_flags carries. Distinct field rather than parsing
+        # ai_tell_flags on the UI side, which would be fragile against
+        # any future change to that string's wording.
+        "ai_tell_phrases": (ai_tells or {}).get("flagged_phrases", []),
         "biggest_changes": biggest_changes[:3],
         "dropped_entities": semantic.get("dropped_entities", []),
         "attribution_swaps": semantic.get("attribution_swaps", []),
