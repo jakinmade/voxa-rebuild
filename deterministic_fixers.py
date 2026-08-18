@@ -590,13 +590,33 @@ def _fix_first_person_over_ratio(text: str, target: float, current: float,
         # that distinction is what makes this safe to fire even when
         # the person genuinely used "I think" once, elsewhere, in an
         # unrelated sentence.
+        #
+        # Fail-CLOSED on alignment uncertainty, not fail-open: only
+        # strip when alignment succeeds AND confirms the original did
+        # NOT have "i think" there. Found and fixed during a second-
+        # opinion review (18 Aug 2026, after this session's live
+        # testing round): the previous logic declined only when
+        # alignment succeeded and found "i think" in the aligned
+        # sentence, but fell through to STRIP whenever alignment
+        # failed to find any confident match at all — the opposite
+        # safety direction from ownership_miss_is_content_driven and
+        # restore_fabricated_ownership_sentences below, which both
+        # correctly treat "no confident alignment" as "don't touch
+        # it". Reproduced concretely: a genuine mid-sentence "I think"
+        # in a sentence the render had ALSO legitimately reworded
+        # elsewhere (voice-matching changes wording throughout a
+        # sentence, not just the ownership marker) dropped word
+        # overlap to 0.42, below the 0.5 threshold — alignment failed
+        # to confirm the original's ownership was genuine, and the old
+        # logic then stripped it anyway, deleting real content the
+        # person actually wrote.
         mid_match = _MID_SENTENCE_I_THINK.search(s)
         if mid_match and mid_match.start() > 0:
             new_s = s[:mid_match.start()] + s[mid_match.end():]
             aligned = _matching_original_sentence(new_s, original_sentences)
-            if aligned and "i think" in aligned.lower():
-                return s, False
-            return new_s, True
+            if aligned and "i think" not in aligned.lower():
+                return new_s, True
+            return s, False
 
         return s, False
 

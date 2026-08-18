@@ -593,3 +593,38 @@ def test_documented_boundary_short_sentences_may_not_align():
     fixed, changed = df.restore_fabricated_ownership_sentences(short_render, short_original)
     assert not changed  # declines -- correct, not a false fix
     assert fixed == short_render  # fabrication survives uncorrected by THIS mechanism
+
+
+def test_mid_sentence_i_think_fails_closed_not_open_on_alignment_uncertainty():
+    """Second-opinion review finding (18 Aug 2026): the mid-sentence
+    'I think' fixer previously declined only when alignment SUCCEEDED
+    and found 'i think' in the aligned original, but fell through to
+    STRIP whenever alignment simply failed to find any confident
+    match — the opposite safety direction from ownership_miss_is_
+    content_driven and restore_fabricated_ownership_sentences, both
+    of which correctly treat 'no confident alignment' as 'don't touch
+    it'. Reproduced concretely: a genuine mid-sentence 'I think' in a
+    sentence the render had ALSO legitimately reworded elsewhere
+    dropped word overlap to 0.42 (below the 0.5 threshold) — the old
+    logic then stripped genuine ownership the person actually wrote,
+    simply because alignment couldn't confirm it with confidence."""
+    original = (
+        "Given everything discussed here, I think the whole approach genuinely "
+        "deserves a much closer, more careful second look before anyone commits "
+        "real budget to it."
+    )
+    render = (
+        "Given everything discussed here, I think the whole approach genuinely "
+        "deserves reconsideration."
+    )
+    # Confirm this is genuinely a low-overlap case, not a test that
+    # happens to pass for an unrelated reason.
+    overlap = len(df._sentence_words(render) & df._sentence_words(original)) / \
+        len(df._sentence_words(render) | df._sentence_words(original))
+    assert overlap < 0.5
+
+    fixed, changed = df._fix_first_person_over_ratio(
+        render, target=0.05, current=0.5, original_input_text=original
+    )
+    assert not changed
+    assert fixed == render
