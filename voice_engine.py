@@ -2855,8 +2855,15 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
             f"{spaced_hyphen_hits} spaced hyphen(s) used as a dash substitute "
             f"(the sweep converts em dashes to ' - ' — that's still the tell)"
         )
-    if all_hits:
-        unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in all_hits))
+    # unique_phrases computed once here (not re-derived from the
+    # `flagged` display string below), so flagged_phrases is a genuine
+    # structured list, not a parse of prose meant for a sentence. The
+    # `flagged` entry below truncates to 5 for a compact summary line —
+    # flagged_phrases deliberately does NOT truncate, since a UI
+    # listing each phrase individually (e.g. for one-click removal)
+    # needs the actual complete set, not a display-string's abbreviation.
+    unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in all_hits)) if all_hits else []
+    if unique_phrases:
         flagged.append(f"AI-typical phrasing found: {', '.join(unique_phrases[:5])}")
 
     clean = em_dash_hits == 0 and spaced_hyphen_hits == 0 and len(all_hits) == 0
@@ -2867,5 +2874,6 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
         "spaced_hyphen_count": spaced_hyphen_hits,
         "phrase_hit_count": len(all_hits),
         "flagged": flagged,
+        "flagged_phrases": unique_phrases,
         "register": register,
     }

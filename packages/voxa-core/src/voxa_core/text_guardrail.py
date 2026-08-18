@@ -65,15 +65,35 @@ _AI_TELL_PHRASES = re.compile(
     r"moving forward|circle back|touch base|pain points|"
     r"seamless(ly)?|delve into|tapestry|testament to|boasts|elevate|"
     r"unlock the potential|game.changer|unparalleled|paramount|"
-    # Mirrors voice_engine.py's addition, 16 Aug 2026 — see that
-    # module's inline comment for the live-render case this closes.
-    r"curious (whether|if|how)|does (this|that) (land|resonate)|"
+    # Mirrors voice_engine.py's fix, 18 Aug 2026 — narrowed from
+    # "curious (whether|if|how)" to "curious whether" only. "Curious
+    # if you got a chance to run it" is ordinary, extremely common
+    # human email phrasing; confirmed live against a real render where
+    # a person's own preserved original wording ("curious if") got
+    # flagged as an AI tell despite matching their unedited input. The
+    # tell is the fabricated check-in construction, not the word
+    # "curious" paired with any conjunction. This file previously had
+    # the broader, pre-fix version — exactly the two-way drift this
+    # module's own docstring warns against; mirrored here now.
+    r"curious whether|does (this|that) (land|resonate)|"
     r"(lands|resonates?) (for|with) you)\b",
     re.I
 )
 
 _ANALYTICAL_TELL_PHRASES = re.compile(
-    r"\b(drift(s|ed|ing)?|surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
+    r"\b(drift(s|ed|ing)?|"
+    # Negative lookbehinds mirror voice_engine.py's three rounds of
+    # false-positive fixes on "surface" as a genuine noun ("the
+    # agent's surface", "its surface", "the surface is legible",
+    # "Agent Surface" as a coined compound term) rather than the
+    # AI-essay habit of pressing the noun into service as a verb
+    # ("issues surface", "concerns surfaced") this pattern exists to
+    # catch. This file previously had none of these exclusions —
+    # exactly the two-way drift this module's own docstring warns
+    # against; mirrored here now, in full, not partially.
+    r"(?<!'s )(?<!its )(?<!the )(?<!this )(?<!that )(?<!any )(?<!our )"
+    r"(?<!her )(?<!his )(?<!each )(?<!a )(?<!an )(?<!no )(?<!Agent )"
+    r"surfac(e|es|ed|ing)(?!\s+area)|land(s|ed|ing)? on|"
     r"unpack(s|ed|ing)?|gestur(e|es|ed|ing) (at|toward|towards)|"
     r"sit(s)? with|push back (on|against)|"
     r"worth noting|to be fair|on reflection|"
@@ -151,23 +171,48 @@ def _classify_register(text: str) -> str:
     return "mixed"
 
 
-def score_ai_tells(text: str) -> dict:
+def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     """
     Measured verification that the output doesn't read as AI-written —
     run AFTER sweep(), not instead of it. Confirms the guardrail actually
-    worked rather than trusting that it did. Ported verbatim from
-    voice_engine.py's score_ai_tells.
+    worked rather than trusting that it did.
+
+    original_input_text: mirrors voice_engine.py's exemption fix, 18
+    Aug 2026 — added AFTER this file's initial port, and previously
+    absent here entirely, meaning every flagged phrase was checked
+    with no way to distinguish "the model fabricated this" from "this
+    is the person's own genuine writing", exactly the two-way drift
+    this module's own docstring warns against. Any matched phrase that
+    appears verbatim (case-insensitive) in original_input_text is
+    excluded from flagging. Default "" exempts nothing, so any caller
+    not yet passing this argument keeps identical behaviour to before
+    this parameter existed. Em dash / spaced-hyphen checks are never
+    exempted this way — those enforce house style regardless of the
+    person's own usual habits, not an AI-detection heuristic. See
+    voice_engine.py's score_ai_tells for the full rationale (the
+    "curious whether"/"i suspect"/"i would push back" false-positive
+    class this was built to close).
     """
+    original_lower = original_input_text.lower()
+
+    def _matches_excluding_genuine(pattern: "re.Pattern") -> list:
+        kept = []
+        for m in pattern.finditer(text):
+            if m.group(0).lower() in original_lower:
+                continue
+            kept.append(m.group(1) if m.lastindex else m.group(0))
+        return kept
+
     em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
-    phrase_hits = list(_AI_TELL_PHRASES.findall(text))
-    shield_hits = list(_PLAUSIBILITY_SHIELD_PHRASES.findall(text))
+    phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
+    shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)
 
     register = _classify_register(text)
     analytical_hits = []
     if register in ("analytical", "mixed"):
-        analytical_hits = list(_ANALYTICAL_TELL_PHRASES.findall(text))
-        analytical_hits += list(_FRAGMENT_EMPHASIS_PATTERN.findall(text))
+        analytical_hits = _matches_excluding_genuine(_ANALYTICAL_TELL_PHRASES)
+        analytical_hits += _matches_excluding_genuine(_FRAGMENT_EMPHASIS_PATTERN)
 
     all_hits = phrase_hits + analytical_hits + shield_hits
 
@@ -179,8 +224,11 @@ def score_ai_tells(text: str) -> dict:
             f"{spaced_hyphen_hits} spaced hyphen(s) used as a dash substitute "
             f"(the sweep converts em dashes to ' - ' — that's still the tell)"
         )
-    if all_hits:
-        unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in all_hits))
+    # unique_phrases computed once here, not re-derived from `flagged`
+    # below — mirrors voice_engine.py's flagged_phrases field, 18 Aug
+    # 2026, added the same session this parity gap was found.
+    unique_phrases = sorted(set(p if isinstance(p, str) else p[0] for p in all_hits)) if all_hits else []
+    if unique_phrases:
         flagged.append(f"AI-typical phrasing found: {', '.join(unique_phrases[:5])}")
 
     clean = em_dash_hits == 0 and spaced_hyphen_hits == 0 and len(all_hits) == 0
@@ -191,6 +239,7 @@ def score_ai_tells(text: str) -> dict:
         "spaced_hyphen_count": spaced_hyphen_hits,
         "phrase_hit_count": len(all_hits),
         "flagged": flagged,
+        "flagged_phrases": unique_phrases,
         "register": register,
     }
 

@@ -80,6 +80,47 @@ def test_score_ai_tells_matches_root_voice_engine():
         assert score_ai_tells(text) == root_score_ai_tells(text), f"drift on: {text!r}"
 
 
+def test_score_ai_tells_original_input_text_exemption_matches_root():
+    """Real drift this exact test-and-fix cycle caught (18 Aug 2026):
+    the ORIGINAL parity test above only ever exercised the zero-
+    argument case, so it never noticed original_input_text was
+    entirely absent from this file's score_ai_tells while root had
+    already added it. Extends parity coverage to the exemption path
+    specifically, not just the base case, so the same gap can't recur
+    silently a second time."""
+    from voice_engine import score_ai_tells as root_score_ai_tells
+
+    cases = [
+        # (rendered_text, original_input_text)
+        ("Curious whether your clients have solved that.",
+         "Curious whether your clients have solved that."),
+        ("So I suspect this is not quite right.",
+         "So I suspect this is not quite right."),
+        ("Curious whether that framing lands for you.",
+         "Hi John, thanks for the update."),  # NOT in original -- must still flag
+    ]
+    for text, original in cases:
+        assert score_ai_tells(text, original_input_text=original) == \
+            root_score_ai_tells(text, original_input_text=original), \
+            f"drift on: {text!r} / {original!r}"
+
+
+def test_flagged_phrases_field_matches_root():
+    """Real drift found while adding this field to root for the
+    AI-Slop Firewall UI feature (18 Aug 2026): confirms the ported
+    copy's new field matches structurally, not just that both files
+    happen to compile."""
+    from voice_engine import score_ai_tells as root_score_ai_tells
+
+    text = "We will leverage this holistic, seamless synergy."
+    result = score_ai_tells(text)
+    root_result = root_score_ai_tells(text)
+    assert "flagged_phrases" in result
+    assert result["flagged_phrases"] == root_result["flagged_phrases"]
+    assert isinstance(result["flagged_phrases"], list)
+    assert len(result["flagged_phrases"]) > 0
+
+
 # ---------------------------------------------------------------------
 # Direct coverage — the module's own behaviour, independent of parity,
 # so a change here that breaks something is caught even if the parity
