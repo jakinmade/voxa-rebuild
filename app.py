@@ -348,6 +348,69 @@ st.markdown("""
     .badge-green { background: var(--success-soft); color: var(--success); }
     .badge-amber { background: var(--warning-soft); color: var(--warning); }
     .badge-red   { background: var(--danger-soft);  color: var(--danger); }
+    .content-lock {
+        margin-top: 0.9rem;
+        padding-top: 0.9rem;
+        border-top: 1px solid var(--border);
+    }
+    .content-lock-title {
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 0.5rem;
+    }
+    .content-lock-item {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        margin-bottom: 0.3rem;
+    }
+    .content-lock-item.fail { color: var(--danger); }
+    .content-lock-item.pass { color: var(--ink); }
+    .content-lock-mark {
+        font-family: var(--font-mono);
+        font-weight: 600;
+        flex-shrink: 0;
+    }
+    .voice-match-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 0.6rem;
+        font-size: 0.82rem;
+    }
+    .voice-match-table th {
+        text-align: left;
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+        padding: 0.35rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .voice-match-table td {
+        padding: 0.4rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+    }
+    .voice-match-table tr:last-child td {
+        border-bottom: none;
+    }
+    .voice-match-table .vm-verdict {
+        text-align: right;
+    }
+    .voice-match-explain {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-top: 0.4rem;
+        line-height: 1.4;
+    }
     .vr-changes {
         font-size: 0.85rem;
         color: var(--body-text);
@@ -1518,6 +1581,18 @@ def _run_render(
         )
         risk = compute_risk(delta, semantic, ai_tells, insertion_check)
         risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)
+        # Overwrite with the FINAL, merged insertion_check (initial
+        # render + correction-pass side effects) — line ~1165 above
+        # sets this to the INITIAL check only, before the correction
+        # pass runs, and was never updated afterward. compute_risk
+        # above already correctly uses the merged version; nothing
+        # previously persisted it anywhere the UI could read it back,
+        # so any check built on "did the correction pass add a
+        # sentence" would have silently seen only half the picture.
+        # Found while scoping Content Lock's "no sentences invented"
+        # check (18 Aug 2026) — this gap existed before that feature,
+        # not introduced by it.
+        st.session_state.render_insertion_check = insertion_check
         log.info(
             "render_complete", is_refinement=is_refinement,
             confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
@@ -1571,9 +1646,175 @@ def _run_render(
         st.session_state.voice_report = None
         st.session_state.render_id = None
         st.session_state.render_completed_at = None
+        st.session_state.render_insertion_check = None
 
     st.session_state.render_output = clean
     return True
+
+
+def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
+    """
+    Renders the Content Lock checklist — 'voice can change, meaning
+    can't' made checkable rather than asserted. Every check here reads
+    from data already computed and already tested elsewhere in this
+    file; this function only formats it, it adds no new detection
+    logic of its own.
+
+    Four checks, not five. The original design brief (a market-
+    landscape review, 18 Aug 2026) proposed five: names preserved,
+    numbers preserved, attribution preserved, no new claims detected,
+    no sentences invented. "No new claims detected" doesn't map
+    cleanly onto any single measured signal — score_semantic_drift
+    catches DROPPED content, not fabricated content in general (that's
+    what sentence_growth and score_ai_tells cover, from different
+    angles), so a checkbox literally labelled "no new claims" would be
+    asserting more certainty than the underlying measurement supports.
+    Rather than ship a plausible-sounding checkbox with weak backing,
+    this uses new_hedges (also a real, tested signal — softened
+    qualifiers the correction pass added as a side effect of fixing
+    something else) under its own honest label instead. Four accurate
+    checks beat five where one is aspirational.
+
+    Names/numbers are reported together as "Facts preserved" rather
+    than split into two rows: _entities_and_numbers (voice_engine.py)
+    already tags both under one dropped_entities list without
+    distinguishing type, so splitting them here would require guessing
+    at a distinction the underlying data doesn't actually carry.
+    """
+    dropped = report.get("dropped_entities", [])
+    swaps = report.get("attribution_swaps", [])
+    sentence_growth = (insertion_check or {}).get("sentence_growth", 0)
+    new_hedges = (insertion_check or {}).get("new_hedges", [])
+
+    checks = [
+        (not dropped, "Facts preserved",
+         f"{len(dropped)} dropped: {', '.join(dropped)}" if dropped else None),
+        (not swaps, "Attribution preserved",
+         "Whose point this was may have changed — check before sending." if swaps else None),
+        (sentence_growth == 0, "No sentences invented",
+         f"{sentence_growth} sentence(s) added beyond the original" if sentence_growth else None),
+        (not new_hedges, "No new hedging introduced",
+         f"Added: {', '.join(new_hedges)}" if new_hedges else None),
+    ]
+
+    rows = []
+    for passed, label, detail in checks:
+        state = "pass" if passed else "fail"
+        mark = "\u2713" if passed else "\u2717"
+        detail_html = f" — {detail}" if detail else ""
+        rows.append(
+            f'<div class="content-lock-item {state}">'
+            f'<span class="content-lock-mark">{mark}</span>'
+            f'<span>{label}{detail_html}</span>'
+            f'</div>'
+        )
+
+    return (
+        '<div class="content-lock">'
+        '<div class="content-lock-title">Content Lock</div>'
+        + "".join(rows) +
+        '</div>'
+    )
+
+
+# Mirrors voice_engine.py's own _DIMENSION_LABELS exactly, for display
+# consistency with the evidence sentence ("Held on hedging, ..."). Not
+# imported directly — that dict is underscore-prefixed (module-private
+# by convention) and this file already treats voice_engine as a
+# measurement library, not something to reach into private internals
+# of; a small duplicated mapping for four stable, rarely-changing
+# dimension names is a fair trade against that boundary violation.
+_VOICE_MATCH_LABELS = {
+    "hedge_density": "Hedging",
+    "sentence_length_sd": "Sentence rhythm",
+    "first_person_ratio": "Ownership (first person)",
+    "directive_ratio": "Directness",
+}
+
+_VOICE_MATCH_VERDICT_BADGE = {
+    "HIT": "badge-green", "CLOSE": "badge-amber",
+    "MISSED": "badge-red", "SKIPPED": "badge-amber",
+}
+
+
+def _format_voice_match_value(dimension: str, value: float) -> str:
+    """
+    Per-dimension formatting, not one blanket formatter — hedge_density
+    is already expressed on a percentage-like scale by compute_baseline_
+    metrics (e.g. 4.0 meaning 4%, confirmed against real baseline
+    output), while first_person_ratio/directive_ratio are raw 0-1
+    proportions of sentences, and sentence_length_sd is a word-count
+    standard deviation with no percentage meaning at all. Using one
+    format string for all four would either show hedge_density as
+    "400%" or the two ratios as "0%" for anything under 1% — both
+    wrong, found by actually checking real output values rather than
+    assuming a shared scale.
+    """
+    if dimension == "sentence_length_sd":
+        return f"{value:.1f}"
+    if dimension == "hedge_density":
+        return f"{value:.1f}%"
+    return f"{value:.0%}"
+
+
+def _build_voice_match_table_html(delta: dict) -> str:
+    """
+    The four measured dimensions, baseline vs. this render, side by
+    side — the actual per-dimension evidence behind the single
+    'Voice consistency: Good' badge shown above it. All data here is
+    score_render_delta's own output; this function only formats it.
+
+    Verdict shown as its own column with a distinct badge per state
+    (HIT/CLOSE/MISSED/SKIPPED), not collapsed to a binary check mark —
+    collapsing CLOSE and SKIPPED into the same visual as HIT or MISSED
+    would silently undo two separate pieces of work this session:
+    giving CLOSE its own evidence-sentence clause (so a middling
+    result doesn't vanish from the prose), and giving SKIPPED a
+    skip_reason so 'input never had this content' and 'input has more
+    of this than baseline, unavoidably' don't get told as the same
+    story. A four-state table keeps both distinctions visible here too.
+    """
+    order = ["hedge_density", "sentence_length_sd", "first_person_ratio", "directive_ratio"]
+    rows = []
+    skip_notes = []
+    for dim in order:
+        d = delta.get(dim)
+        if not d:
+            continue
+        label = _VOICE_MATCH_LABELS.get(dim, dim)
+        baseline_display = _format_voice_match_value(dim, d["baseline"])
+        output_display = _format_voice_match_value(dim, d["output"])
+        verdict = d["verdict"]
+        badge = _VOICE_MATCH_VERDICT_BADGE.get(verdict, "badge-amber")
+        rows.append(
+            f"<tr><td>{label}</td><td>{baseline_display}</td>"
+            f"<td>{output_display}</td>"
+            f'<td class="vm-verdict"><span class="badge {badge}">{verdict}</span></td></tr>'
+        )
+        if verdict == "SKIPPED":
+            reason = d.get("skip_reason", "no_content")
+            if reason == "content_ceiling":
+                skip_notes.append(
+                    f"{label}: your own writing here was already more opinionated than "
+                    f"your baseline; further correction would mean cutting real content."
+                )
+            else:
+                skip_notes.append(f"{label}: nothing to convert in the original.")
+
+    if not rows:
+        return ""
+
+    table_html = (
+        '<table class="voice-match-table">'
+        '<thead><tr><th>Dimension</th><th>Your baseline</th>'
+        '<th>This render</th><th class="vm-verdict">Result</th></tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+    )
+    explain_html = (
+        f'<div class="voice-match-explain">{" ".join(skip_notes)}</div>' if skip_notes else ""
+    )
+    return table_html + explain_html
 
 
 def screen_render():
@@ -1753,6 +1994,8 @@ def screen_render():
                 </div>
                 <div class="vr-changes">{vm_evidence}</div>
                 <div class="vr-changes">Biggest changes: {changes_html}</div>
+                {_build_voice_match_table_html(st.session_state.get("render_delta") or {})}
+                {_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
             </div>
             """, unsafe_allow_html=True)
 
