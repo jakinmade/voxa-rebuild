@@ -403,3 +403,193 @@ def test_mixed_case_only_one_genuine_sentence_still_fails():
         "I find nobody catches it through monitoring."
     )
     assert df.ownership_miss_is_content_driven(render, original) is False
+
+
+# ------------------------------------------------------------------
+# restore_fabricated_ownership_sentences — the general, alignment-
+# based fix that supersedes pattern-matching specific verbs for this
+# failure class. Built after THREE successive live failures required
+# THREE separate pattern additions ("I find", "I see", then "I would
+# never find") — the pattern was clear enough to justify a general
+# fix rather than a fourth one-off. See the function's own docstring
+# for the full reasoning.
+# ------------------------------------------------------------------
+
+def test_fixes_every_fabrication_pattern_found_this_session():
+    """The actual 'no holes' test: every distinct phrasing found
+    across this entire session, fixed by the SAME general mechanism,
+    not four separate patterns."""
+    cases = [
+        ("I find nobody catches it through monitoring.",
+         "Nobody finds it through monitoring."),
+        ("I see four reasons not to fold it into governance.",
+         "That is four reasons not to fold it into governance."),
+        ("I would never find it through monitoring, because monitoring confirms it is behaving exactly as built.",
+         "Nobody finds it through monitoring, because monitoring confirms it is behaving exactly as built."),
+        ("What I think nobody has done is extend that from models that predict to models that act.",
+         "What nobody has done is extend that from models that predict to models that act."),
+    ]
+    for render, original in cases:
+        fixed, changed = df.restore_fabricated_ownership_sentences(render, original)
+        assert changed, f"failed to fix: {render}"
+        assert fixed.strip() == original.strip(), f"wrong result for: {render} -> {fixed}"
+
+
+def test_fixes_the_previously_declined_i_see_fragment_case():
+    """_fix_first_person_over_ratio explicitly declines this exact
+    case (see test_declines_i_see_with_a_bare_noun_phrase_object in
+    this same file) because partial stripping produces a sentence
+    fragment. Whole-sentence substitution has no such failure mode —
+    confirms this is a strictly more capable fix, not just a
+    different one."""
+    text = "I see four reasons not to fold it into governance."
+    original = "That is four reasons not to fold it into governance."
+    fixed, changed = df.restore_fabricated_ownership_sentences(text, original)
+    assert changed
+    assert fixed == original
+
+
+def test_does_not_touch_genuine_preserved_ownership():
+    """Safety-critical: must never replace a sentence whose aligned
+    original ALSO carries a first-person marker, regardless of exact
+    wording difference."""
+    cases = [
+        ("Distinct stage, and I think you have found the gap rather than a subdivision of one.",
+         "Distinct stage, and I think you have found the gap rather than a subdivision of one."),
+        ("Where I disagree slightly, or at least add friction.",
+         "Where I would push back slightly, or at least add friction."),
+        ("So I think qualification is not a gate but a gate plus an expiry.",
+         "So I suspect qualification is not a gate but a gate plus an expiry."),
+    ]
+    for render, original in cases:
+        fixed, changed = df.restore_fabricated_ownership_sentences(render, original)
+        assert not changed, f"false positive on genuine ownership: {render}"
+        assert fixed == render
+
+
+def test_does_not_touch_sentences_with_no_first_person_marker():
+    text = "This sentence has no ownership marker at all."
+    fixed, changed = df.restore_fabricated_ownership_sentences(text, "Also neutral.")
+    assert not changed
+    assert fixed == text
+
+
+def test_no_conversion_cap_unlike_the_pattern_based_fixer():
+    """Deliberately no max_conversions limit — every offending
+    sentence gets fixed in one pass, not throttled to 2 like the
+    pattern-based fixer above. A render with many fabricated
+    sentences must have ALL of them fixed, not just the first two.
+
+    Sentences deliberately kept to realistic prose length (10+ words),
+    not compressed to the shortest possible example — alignment
+    confidence is proportional to sentence length here: the "I would
+    never" fabrication overhead (3 extra words) is a small fraction of
+    a 14-word sentence but a decisive fraction of a 7-word one,
+    confirmed directly: the identical fabrication pattern aligns at
+    0.62 Jaccard overlap on a 14-word sentence and drops to 0.40 (below
+    the 0.5 threshold) on a 7-word version of the same idea. That's a
+    genuine, honest boundary of this mechanism on short sentences, not
+    a bug — see restore_fabricated_ownership_sentences' docstring and
+    this session's own findings. This test uses realistic sentence
+    lengths so it isolates the conversion-cap behaviour specifically."""
+    render = (
+        "I find nobody catches the pattern hiding in this quarter's data. "
+        "I see three separate problems buried in the report's appendix. "
+        "I would never find the drift sitting in these adjusted numbers. "
+        "I think there is a real gap somewhere in the review process."
+    )
+    original = (
+        "Nobody catches the pattern hiding in this quarter's data. "
+        "That is three separate problems buried in the report's appendix. "
+        "Nobody finds the drift sitting in these adjusted numbers. "
+        "There is a real gap somewhere in the review process."
+    )
+    fixed, changed = df.restore_fabricated_ownership_sentences(render, original)
+    assert changed
+    assert "I find" not in fixed
+    assert "I see" not in fixed
+    assert "I would never" not in fixed
+    assert "I think" not in fixed
+
+
+def test_full_document_reaches_exact_baseline_match():
+    """End-to-end confirmation against the real session's full email,
+    used verbatim (not a shortened version) — a shortened synthetic
+    version was tried first and landed on CLOSE rather than HIT, not
+    because the fix was incomplete but because a 5-sentence document
+    has too few sentences for first_person_ratio's granularity
+    (fp_sents / total_sents) to land exactly on most baseline values.
+    The real text is long enough that this isn't a factor, and it's
+    the one case actually worth confirming exactly, since it's the
+    literal render this whole mechanism was built against."""
+    original = (
+        "Hi John, Distinct stage, and I think you have found the gap rather than a "
+        "subdivision of one. My test for whether two controls are really one is "
+        "whether they fail the same way. These do not. A governance failure is "
+        "loud. An agent does something it should not have, and there is an "
+        "incident, a trace and someone to ask. A qualification failure is silent. "
+        "The system runs correctly for eighteen months, every action inside "
+        "policy, every log clean, and it should never have been deployed for that "
+        "purpose in the first place. Nobody finds it through monitoring, because "
+        "monitoring confirms it is behaving exactly as built. It surfaces when "
+        "someone finally asks who decided this was suitable, and the answer turns "
+        "out to be nobody in particular. Different failure mode, different "
+        "evidence, different owner, different point in time. That is four reasons "
+        "not to fold it into governance. What nobody has done is extend that from "
+        "models that predict to models that act. In most organisations "
+        "qualification would fall down the same gap the agents themselves fall "
+        "down. Curious whether your clients have solved that, because the "
+        "methodology is the easier half."
+    )
+    render = (
+        "Hi John. Distinct stage, and I think you have found the gap rather than a "
+        "subdivision of one. My test for whether two controls are really one is "
+        "whether they fail the same way. These do not. A governance failure is "
+        "loud. An agent does something it should not have, and there is an "
+        "incident, a trace and someone to ask. A qualification failure is silent. "
+        "The system runs correctly for eighteen months, every action inside "
+        "policy, every log clean, and it should never have been deployed for that "
+        "purpose in the first place. I would never find it through monitoring, "
+        "because monitoring confirms it is behaving exactly as built. It brings "
+        "up when someone finally asks who decided this was suitable, and the "
+        "answer turns out to be nobody in particular. Different failure mode, "
+        "different evidence, different owner, different point in time. That is "
+        "four reasons not to fold it into governance. What nobody has done is "
+        "extend that from models that predict to models that act. In most "
+        "organisations qualification would fall down the same gap the agents "
+        "themselves fall down. Curious whether your clients have solved that, "
+        "because the methodology is the easier half."
+    )
+    baseline = ve.compute_baseline_metrics(original)
+    fixed, changed = df.restore_fabricated_ownership_sentences(render, original)
+    assert changed
+    final = ve.score_render_delta(baseline, fixed)
+    assert final["first_person_ratio"]["verdict"] == "HIT"
+    # Genuine ownership must survive.
+    assert "I think you have found the gap" in fixed
+
+
+def test_returns_unchanged_with_no_original_text():
+    text = "I find this concerning."
+    fixed, changed = df.restore_fabricated_ownership_sentences(text, "")
+    assert not changed
+    assert fixed == text
+
+
+def test_documented_boundary_short_sentences_may_not_align():
+    """Not a defect — a documented, honest limit. On a short sentence
+    (under ~10 words), the fabrication overhead ('I would never' adds
+    3 words) can be enough of the sentence that word-overlap alignment
+    drops below the 0.5 confidence threshold, and the function
+    correctly declines rather than guess at a low-confidence match.
+    This is the same sentence pattern that reliably fixes on a longer
+    version (see test_no_conversion_cap_unlike_the_pattern_based_fixer
+    and test_fixes_every_fabrication_pattern_found_this_session) --
+    length, not the pattern itself, is what determines coverage here.
+    Recorded as a test so this boundary is documented and visible,
+    not just known and unwritten."""
+    short_render = "I would never find the drift in the numbers."
+    short_original = "Nobody finds the drift in the numbers."
+    fixed, changed = df.restore_fabricated_ownership_sentences(short_render, short_original)
+    assert not changed  # declines -- correct, not a false fix
+    assert fixed == short_render  # fabrication survives uncorrected by THIS mechanism

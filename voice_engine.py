@@ -2192,16 +2192,29 @@ def voice_match_label(delta: dict) -> dict:
     hits = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "HIT"]
     close = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "CLOSE"]
     missed = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "MISSED"]
-    # SKIPPED (18 Aug 2026): the input genuinely had nothing of that
-    # kind to convert (no first-person content, no directive content)
-    # — the correction pass correctly declined to fabricate it, rather
-    # than failing to hit an achievable target. Given its own clause
-    # for the same reason CLOSE was above: silently falling into
-    # neither hits/close/missed would mean this dimension vanishes
-    # from the sentence while a stale-looking number could still show
-    # up elsewhere, the exact "two different stories" bug already
-    # fixed once for CLOSE.
-    skipped = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "SKIPPED"]
+    # SKIPPED (18 Aug 2026): originally one reason only — the input
+    # genuinely had nothing of that kind to convert (no first-person
+    # content, no directive content), and the correction pass correctly
+    # declined to fabricate it rather than failing to hit an achievable
+    # target. A second, genuinely different reason was added the same
+    # session: the input has PLENTY of that content, more than the
+    # baseline even, and the residual drift is because it can't be
+    # reduced further without deleting the person's actual stated
+    # content (see ownership_miss_is_content_driven in
+    # deterministic_fixers.py). Conflating the two under one message
+    # was a real, live bug — "nothing to convert in the original" is
+    # actively wrong for the second case, where there's abundant
+    # content, that's the whole point. Split by skip_reason (defaults
+    # to "no_content" if unset, so any caller not yet setting it keeps
+    # the original message rather than silently changing behaviour).
+    skipped_no_content = [
+        _DIMENSION_LABELS.get(k, k) for k, d in delta.items()
+        if d["verdict"] == "SKIPPED" and d.get("skip_reason", "no_content") != "content_ceiling"
+    ]
+    skipped_content_ceiling = [
+        _DIMENSION_LABELS.get(k, k) for k, d in delta.items()
+        if d["verdict"] == "SKIPPED" and d.get("skip_reason") == "content_ceiling"
+    ]
 
     # "Drifted" was the original wording here — dropped because it's one
     # of the exact words voice_engine's own _ANALYTICAL_TELL_PHRASES
@@ -2230,8 +2243,14 @@ def voice_match_label(delta: dict) -> dict:
         parts.append("Close on " + ", ".join(close) + ".")
     if missed:
         parts.append("Off on " + ", ".join(missed) + ".")
-    if skipped:
-        parts.append("N/A on " + ", ".join(skipped) + " (nothing to convert in the original).")
+    if skipped_no_content:
+        parts.append("N/A on " + ", ".join(skipped_no_content) + " (nothing to convert in the original).")
+    if skipped_content_ceiling:
+        parts.append(
+            "N/A on " + ", ".join(skipped_content_ceiling) + " (your own writing here was "
+            "already more opinionated than your baseline; further correction would mean "
+            "cutting real content, not just tightening style)."
+        )
     evidence = " ".join(parts) if parts else "No baseline comparison available."
 
     return {"tier": tier, "badge": badge, "evidence": evidence, "_raw_pct": pct}
@@ -2470,7 +2489,22 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
     """
     biggest_changes = []
     for key, d in sorted(delta.items(), key=lambda kv: kv[1]["pct_diff"], reverse=True):
-        if d["verdict"] in ("HIT", "SKIPPED"):
+        # SKIPPED dimensions are excluded here for the "no_content"
+        # reason (there's genuinely nothing to show — the input never
+        # had this kind of content, a 0-vs-baseline number would be
+        # noise, not signal). "content_ceiling" SKIPPED dimensions are
+        # deliberately NOT excluded: there IS real, substantial drift,
+        # it's just judged unavoidable rather than a defect. Excluding
+        # it here produced a real, live bug — "Biggest changes: No
+        # significant drift" shown to the person when there was in
+        # fact ~37% drift, just silently hidden because the verdict
+        # said SKIPPED. The person deserves to see the number; the
+        # evidence sentence (voice_match_label) is what explains why
+        # it's not being treated as an error, not this list vanishing
+        # it entirely.
+        if d["verdict"] == "HIT":
+            continue
+        if d["verdict"] == "SKIPPED" and d.get("skip_reason", "no_content") != "content_ceiling":
             continue
         label = _DIMENSION_LABELS.get(key, key)
         direction = "+" if d["delta"] > 0 else ""

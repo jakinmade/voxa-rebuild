@@ -659,6 +659,74 @@ def ownership_miss_is_content_driven(render_text: str, original_input_text: str)
     return True
 
 
+def restore_fabricated_ownership_sentences(text: str, original_input_text: str) -> tuple[str, bool]:
+    """
+    General, alignment-based fix for fabricated first-person ownership
+    — deliberately NOT pattern-based, and supersedes the individual
+    verb-pattern fixers above for this specific failure class. Built
+    after three successive live failures (18 Aug 2026, same session):
+    "I find nobody catches...", "I see four reasons...", then "I would
+    never find it through monitoring..." — each a different phrasing
+    of the exact same underlying defect (a sentence that had NO
+    first-person marker in the original gained one in the render), and
+    each requiring a new pattern to be added to catch it. That's not a
+    coincidence to keep patching one verb at a time — it's the correct
+    prediction for any approach that enumerates specific phrasings:
+    there is no finite list of ways to write a sentence in first
+    person, so pattern-matching will always have a gap the model's
+    next rephrasing falls through.
+
+    The question this asks instead doesn't depend on wording at all:
+    does this render sentence carry a first-person marker where the
+    ALIGNED ORIGINAL sentence had none? That's checkable with total
+    certainty regardless of whether the render says "I find", "I
+    would never find", "I personally don't think anyone finds", or a
+    phrasing nobody has hit yet — none of them change the answer to
+    "did the original have a marker here", which is the only thing
+    that actually determines fabrication.
+
+    The fix follows the same logic: don't try to surgically edit the
+    render's specific fabricated phrasing (which is what the pattern
+    fixers above do, and why they need per-verb grammar analysis to
+    stay safe). Replace the whole sentence with the person's own
+    original wording, verbatim. This also resolves a case the pattern
+    fixers had to explicitly decline: "I see four reasons..." (aligned
+    original: "That is four reasons...") couldn't be safely stripped
+    without leaving a sentence fragment with no verb. Whole-sentence
+    substitution has no such failure mode — it always substitutes a
+    complete, already-grammatical sentence, because that sentence is
+    the untouched original.
+
+    Trade-off, stated plainly rather than left implicit: this discards
+    whatever voice-matching rewording the render did elsewhere in that
+    specific sentence (vocabulary substitution, rhythm matching), in
+    favour of the person's exact original wording. For a sentence
+    where ownership was fabricated, restoring their real words is the
+    safer failure mode than shipping a fabricated claim under a
+    polished style match — the whole product's premise is that the
+    words are theirs, and a fabricated first-person claim is the one
+    failure mode that most directly breaks that premise.
+
+    No max_conversions cap, unlike the pattern fixers above — each
+    substitution here is provably safe (grammatical by construction,
+    faithful to the person's own genuine content by construction), so
+    the throttling those fixers need to stay conservative isn't
+    needed here; capping it would just reintroduce the same
+    "only fixes some of them" gap this function exists to close.
+    """
+    original_sentences = _extract_sentences(original_input_text) if original_input_text else []
+
+    def _fix_one(s: str) -> tuple[str, bool]:
+        if not _FIRST_PERSON_MARKER.search(s):
+            return s, False
+        aligned = _matching_original_sentence(s, original_sentences)
+        if aligned and not _FIRST_PERSON_MARKER.search(aligned):
+            return aligned, True
+        return s, False
+
+    return _apply_across_paragraphs(text, _fix_one, max_conversions=None)
+
+
 # ------------------------------------------------------------------
 # Directness (directive_ratio) — under-directive direction only.
 # ------------------------------------------------------------------

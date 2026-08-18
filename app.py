@@ -57,7 +57,7 @@ from deterministic_fixers import (
     _fix_first_person_ratio, _fix_first_person_over_ratio,
     _fix_directive_ratio, _fix_modal_hedge,
     _check_uncorrected_insertions, _fix_entity_casing,
-    ownership_miss_is_content_driven,
+    ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available
@@ -1206,7 +1206,22 @@ def _run_render(
             clean, ownership_over_fixed = _fix_first_person_over_ratio(
                 clean, d["baseline"], d["output"], input_text
             )
-            ownership_fixed = ownership_fixed or ownership_over_fixed
+            # General, alignment-based fallback (18 Aug 2026) — runs
+            # after the pattern-based fixer above, not instead of it,
+            # since it needs the SAME sentence-alignment machinery but
+            # answers a structurally different question (does this
+            # sentence have a marker the original didn't have at all,
+            # regardless of specific wording) rather than matching a
+            # known verb pattern. Catches whatever the pattern fixer's
+            # enumerated list doesn't — see restore_fabricated_
+            # ownership_sentences' own docstring for why pattern
+            # enumeration alone can never be complete for this failure
+            # class. Safe to always run: it only ever touches a
+            # sentence where the aligned original had zero first-person
+            # markers, so it can't touch anything the fixer above
+            # already correctly left alone.
+            clean, ownership_restored = restore_fabricated_ownership_sentences(clean, input_text)
+            ownership_fixed = ownership_fixed or ownership_over_fixed or ownership_restored
         else:
             ownership_fixed = False
         if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
@@ -1413,6 +1428,10 @@ def _run_render(
                 clean, _ = _fix_first_person_over_ratio(
                     clean, d["baseline"], d["output"], input_text
                 )
+                # See the initial-pass call site above for why this
+                # general fallback runs unconditionally after the
+                # pattern-based fixer, not instead of it.
+                clean, _ = restore_fabricated_ownership_sentences(clean, input_text)
             if "directive_ratio" in still_missed:
                 d = delta["directive_ratio"]
                 clean, _ = _fix_directive_ratio(
@@ -1457,8 +1476,10 @@ def _run_render(
         # identically to an achievable target the system failed to hit.
         if not input_has_opinion_content and delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
             delta["first_person_ratio"]["verdict"] = "SKIPPED"
+            delta["first_person_ratio"]["skip_reason"] = "no_content"
         if not input_has_directive_content and delta.get("directive_ratio", {}).get("verdict") == "MISSED":
             delta["directive_ratio"]["verdict"] = "SKIPPED"
+            delta["directive_ratio"]["skip_reason"] = "no_content"
 
         # Mirror case, OVER-owned direction: input DOES have opinion
         # content (so the block above didn't apply), but is more
@@ -1475,9 +1496,21 @@ def _run_render(
         # reasoning. Only checked once still MISSED after everything
         # else has already run, so this never short-circuits a genuine,
         # achievable fix the fixer just hasn't gotten to yet.
+        #
+        # skip_reason="content_ceiling" (distinct from "no_content"
+        # above) — a real, live bug found the same session this was
+        # tested: the report was reusing "nothing to convert in the
+        # original" for THIS case too, which is actively wrong (this
+        # input has abundant opinion content, that's the whole point —
+        # it just can't be reduced further without deleting real
+        # content). voice_match_label and build_voice_report both read
+        # this field to produce distinct, accurate messaging per
+        # reason instead of one generic SKIPPED explanation for two
+        # very different situations.
         if delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
             if ownership_miss_is_content_driven(clean, input_text):
                 delta["first_person_ratio"]["verdict"] = "SKIPPED"
+                delta["first_person_ratio"]["skip_reason"] = "content_ceiling"
 
         confidence = compute_confidence(
             st.session_state.get("sample_fitness"), baseline, len(observations),
@@ -1570,8 +1603,8 @@ def screen_render():
     render_mode = st.radio(
         "mode",
         options=["preserve", "elevate"],
-        format_func=lambda m: "Preserve — keep it close to as-is" if m == "preserve"
-                                else "Elevate — tighten it, keep your voice",
+        format_func=lambda m: "Preserve: keep it close to as-is" if m == "preserve"
+                                else "Elevate: tighten it, keep your voice",
         index=0,  # defaults to "preserve" — the existing behaviour, always
         horizontal=True,
         label_visibility="collapsed",
@@ -1602,8 +1635,8 @@ def screen_render():
             options=["none", "social", "email"],
             format_func=lambda p: {
                 "none": "No platform formatting",
-                "social": "Social post — short paragraphs, hook first",
-                "email": "Email — keep greeting and sign-off in place",
+                "social": "Social post: short paragraphs, hook first",
+                "email": "Email: keep greeting and sign-off in place",
             }[p],
             index=0,
             label_visibility="collapsed",
@@ -1761,7 +1794,7 @@ def screen_render():
                 st.markdown(
                     '<div class="microcopy" style="margin-top:0.5rem;color:#8A6D1D;">'
                     '\u26a0 Platform formatting was attempted but introduced wording that '
-                    'could not be verified, so it was left out — this is your line-edited '
+                    'could not be verified, so it was left out. This is your line-edited '
                     'version, not restructured for the platform. Voice and content are '
                     'still correct; only the platform formatting is missing.</div>',
                     unsafe_allow_html=True
@@ -1801,7 +1834,7 @@ def screen_render():
                 st.markdown(
                     '<div class="microcopy">Optional: if others at your firm use '
                     'VOICOVA too, sharing your work email helps us show your firm '
-                    'this is already in use. We store only the domain — never your '
+                    'this is already in use. We store only the domain, never your '
                     'email address, never anything you write.</div>',
                     unsafe_allow_html=True,
                 )

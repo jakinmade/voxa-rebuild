@@ -336,10 +336,15 @@ def _build_restoration_targets(
         lines.append(
             f"  Ownership: {fp:.0%} of sentences use first-person — where the input ALREADY "
             f"contains a claim, observation, or opinion of yours (stated directly, hedged, or in "
-            f"passive voice), phrase it as first-person ownership at this rate. Never reassign "
-            f"credit for a point, idea, or argument that belongs to someone else in the "
-            f"conversation (e.g. do not turn \"your point\" into \"my point\") — this is a meaning "
-            f"change, not a voice adjustment."
+            f"passive voice), phrase it as first-person ownership at this rate. Do NOT convert a "
+            f"general, impersonal statement (e.g. \"Nobody finds X\", \"It surfaces when...\", "
+            f"\"The system does Y\") into first-person framing just to reach this rate — those are "
+            f"general claims about how something works, not your personal stance, even if "
+            f"converting them would help hit the target. If the input doesn't have enough "
+            f"genuinely personal content to reach this rate, undershoot it — that is correct "
+            f"behaviour, not a miss. Never reassign credit for a point, idea, or argument that "
+            f"belongs to someone else in the conversation (e.g. do not turn \"your point\" into "
+            f"\"my point\") — this is a meaning change, not a voice adjustment."
         )
     else:
         lines.append(
