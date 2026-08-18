@@ -418,10 +418,14 @@ def _fix_first_person_ratio(text: str, target: float, current: float,
 
 
 # Two groups, deliberately handled differently:
-#   - "I think/I believe/I suspect/I imagine/I would say" all take a
-#     complete independent clause as their object, so stripping the
-#     WHOLE opener leaves a grammatically sound sentence on its own
-#     ("I think the plan works" -> "The plan works").
+#   - "I think/I believe/I suspect/I imagine/I would say/I find" all
+#     take a complete independent clause as their object, so stripping
+#     the WHOLE opener leaves a grammatically sound sentence on its own
+#     ("I think the plan works" -> "The plan works"). "I find" added
+#     18 Aug 2026 against a real render ("I find nobody catches it
+#     through monitoring" -> "Nobody catches it through monitoring") —
+#     same shape as the rest of this group, confirmed by hand before
+#     adding, not assumed by analogy alone.
 #   - "I am curious/certain/confident/not sure/unsure" do NOT reduce
 #     the same way — "I am curious whether X" stripped of the whole
 #     opener leaves "whether X", not a sentence. Stripping only "I am "
@@ -431,8 +435,19 @@ def _fix_first_person_ratio(text: str, target: float, current: float,
 #     in the ORIGINAL input this bug was found against ("Curious
 #     whether your clients have solved that..."), which the render had
 #     turned into "I am curious whether..." in the first place.
+#
+# Deliberately NOT added: "I see". Found live in the same 18 Aug 2026
+# render alongside "I find" ("That is four reasons..." -> "I see four
+# reasons..."), but "see" here takes a bare noun phrase as its object,
+# not a clause — stripping "I see " leaves "four reasons not to fold
+# it into governance", which has no verb and is not a complete
+# sentence, unlike every case in the FULL_STRIP group. Reconstructing
+# "That is" would require guessing at wording that isn't recoverable
+# from the render alone. Declining rather than shipping a fragment —
+# left for the LLM correction pass, same as anything else this module
+# won't guess at.
 _FIRST_PERSON_OPENER_FULL_STRIP = re.compile(
-    r"^(I think|I believe|I suspect|I imagine|I would say)\b[,:]?\s*",
+    r"^(I think|I believe|I suspect|I imagine|I would say|I find)\b[,:]?\s*",
     re.I
 )
 _FIRST_PERSON_OPENER_PARTIAL_STRIP = re.compile(
@@ -440,17 +455,73 @@ _FIRST_PERSON_OPENER_PARTIAL_STRIP = re.compile(
     re.I
 )
 
+# Mid-sentence companion to the sentence-initial FULL_STRIP above —
+# found live in the same 18 Aug 2026 render, a genuinely different
+# shape: "I think" inserted as a parenthetical AFTER a fronted phrase
+# rather than at the sentence's start ("What nobody has done..." ->
+# "What I think nobody has done...", "In most organisations
+# qualification..." -> "In most organisations I think qualification
+# ..."). FULL_STRIP is anchored to position 0 and never matches these.
+# Deliberately narrow: bare "I think" only, no comma-wrapped variant
+# ("X, I think, Y") until a real render surfaces that shape — same
+# standard as everything else here, built against confirmed cases,
+# not speculative ones.
+_MID_SENTENCE_I_THINK = re.compile(r"\bI think\s+", re.I)
+
+
+def _sentence_words(s: str) -> set[str]:
+    return set(re.findall(r"[a-z']+", s.lower()))
+
+
+def _matching_original_sentence(candidate: str, original_sentences: list[str]) -> str | None:
+    """Finds the original sentence THIS specific candidate most likely
+    corresponds to, by word overlap (Jaccard) — not just "does this
+    phrase appear anywhere in the document". That distinction is the
+    whole point: a document-wide substring check ("does 'i think'
+    appear anywhere in the original") wrongly blocks a genuine fix
+    whenever the person used "I think" once, ANYWHERE, in an entirely
+    unrelated sentence — found live against a real render (18 Aug
+    2026) where the person's own opening line genuinely says "I think
+    you have found the gap", which silently blocked the mid-sentence
+    fixer below from touching two later, unrelated sentences the model
+    had actually injected "I think" into.
+
+    Requires majority word overlap (>=0.5 Jaccard) before trusting a
+    match — a low-overlap "best available" sentence is worse than no
+    match at all, since it would let a genuinely different original
+    sentence's first-person content wrongly veto a fix. No match found
+    returns None, which the caller treats as "nothing to protect
+    against" rather than "decline out of caution" — a sentence with no
+    real original counterpart is new content either way (a separate,
+    more serious concern _check_uncorrected_insertions already flags
+    via sentence_growth), and stripping an ownership marker from it
+    doesn't make that worse.
+    """
+    candidate_words = _sentence_words(candidate)
+    if not candidate_words:
+        return None
+    best, best_score = None, 0.0
+    for orig_s in original_sentences:
+        orig_words = _sentence_words(orig_s)
+        if not orig_words:
+            continue
+        overlap = len(candidate_words & orig_words) / len(candidate_words | orig_words)
+        if overlap > best_score:
+            best, best_score = orig_s, overlap
+    return best if best_score >= 0.5 else None
+
+
 
 def _fix_first_person_over_ratio(text: str, target: float, current: float,
                                   original_input_text: str = "") -> tuple[str, bool]:
     """
     Deterministic ownership correction, OVER-owned direction —
     companion to _fix_first_person_ratio above, which only ever
-    handled the opposite case. Converts up to two sentences that open
-    with a first-person opinion marker ("I think...", "I am
-    curious...") back to a direct statement, stripping only the
-    opener — the claim inside the sentence is untouched, same
-    principle as the UNDER-owned direction.
+    handled the opposite case. Converts up to two sentences that carry
+    a first-person opinion marker ("I think...", "I am curious...",
+    "I find...") back to a direct statement — stripping the marker,
+    sentence-initial or mid-sentence, the claim inside the sentence
+    untouched, same principle as the UNDER-owned direction.
 
     Confirmed as a real, previously-unhandled gap, not a hypothetical:
     a render added "I am curious whether..." where the original input
@@ -489,6 +560,7 @@ def _fix_first_person_over_ratio(text: str, target: float, current: float,
         return text, False
 
     original_lower = original_input_text.lower()
+    original_sentences = _extract_sentences(original_input_text) if original_input_text else []
 
     def _fix_one(s: str) -> tuple[str, bool]:
         if _HAS_QUOTE.search(s):
@@ -508,6 +580,23 @@ def _fix_first_person_over_ratio(text: str, target: float, current: float,
                 return s, False
             new_s = _FIRST_PERSON_OPENER_PARTIAL_STRIP.sub("", s)
             return (new_s[0].upper() + new_s[1:]) if new_s else new_s, True
+
+        # Mid-sentence injection ("What I think X...", "In most
+        # organisations I think X...") — only reached once the
+        # sentence-initial checks above have both declined, so this
+        # never double-handles a case FULL_STRIP already caught.
+        # Uses sentence-level alignment (see _matching_original_
+        # sentence's docstring), not a whole-document substring check —
+        # that distinction is what makes this safe to fire even when
+        # the person genuinely used "I think" once, elsewhere, in an
+        # unrelated sentence.
+        mid_match = _MID_SENTENCE_I_THINK.search(s)
+        if mid_match and mid_match.start() > 0:
+            new_s = s[:mid_match.start()] + s[mid_match.end():]
+            aligned = _matching_original_sentence(new_s, original_sentences)
+            if aligned and "i think" in aligned.lower():
+                return s, False
+            return new_s, True
 
         return s, False
 

@@ -90,15 +90,16 @@ def test_declines_when_not_over_target():
 
 
 def test_full_strip_openers_reduce_to_a_complete_sentence():
-    """I think/I believe/I suspect/I imagine/I would say all take a
-    complete independent clause as their object — stripping the whole
-    opener must leave a grammatically complete sentence."""
+    """I think/I believe/I suspect/I imagine/I would say/I find all
+    take a complete independent clause as their object — stripping the
+    whole opener must leave a grammatically complete sentence."""
     cases = [
         ("I think this is the right approach.", "This is the right approach."),
         ("I believe the numbers hold up.", "The numbers hold up."),
         ("I suspect that is not quite right.", "That is not quite right."),
         ("I imagine this will take a while.", "This will take a while."),
         ("I would say your approach has merit.", "Your approach has merit."),
+        ("I find nobody catches it through monitoring.", "Nobody catches it through monitoring."),
     ]
     for text, expected in cases:
         fixed, changed = df._fix_first_person_over_ratio(
@@ -177,3 +178,159 @@ def test_respects_max_conversions_per_pass():
     # At most 2 conversions (df._MAX_CONVERSIONS_PER_PASS) -- the third
     # sentence's opener should survive untouched.
     assert "I suspect" in fixed
+
+
+# ------------------------------------------------------------------
+# Mid-sentence "I think" injection — found live 18 Aug 2026,
+# alongside the "I find"/"I see" cases above, in the same render.
+# Genuinely different shape from every case above: "I think" inserted
+# as a parenthetical AFTER a fronted phrase, not at the sentence's
+# start, so the sentence-initial FULL_STRIP regex never sees it.
+# ------------------------------------------------------------------
+
+def test_catches_mid_sentence_i_think_after_a_fronted_wh_clause():
+    original = "What nobody has done is extend that from models that predict to models that act."
+    render = "What I think nobody has done is extend that from models that predict to models that act."
+    fixed, changed = df._fix_first_person_over_ratio(
+        render, target=1.0, current=8.0, original_input_text=original
+    )
+    assert changed
+    assert fixed == original
+
+
+def test_catches_mid_sentence_i_think_after_a_fronted_adverbial():
+    original = "In most organisations qualification would fall down the same gap the agents themselves fall down."
+    render = "In most organisations I think qualification would fall down the same gap the agents themselves fall down."
+    fixed, changed = df._fix_first_person_over_ratio(
+        render, target=1.0, current=8.0, original_input_text=original
+    )
+    assert changed
+    assert fixed == original
+
+
+def test_declines_i_see_with_a_bare_noun_phrase_object():
+    """'see' takes a bare noun phrase here, not a clause -- stripping
+    'I see ' would leave 'four reasons not to fold it into governance',
+    a sentence fragment with no verb. Must decline rather than ship a
+    broken sentence, unlike the FULL_STRIP group where the object is
+    always a complete clause."""
+    text = "I see four reasons not to fold it into governance."
+    fixed, changed = df._fix_first_person_over_ratio(
+        text, target=1.0, current=8.0, original_input_text=""
+    )
+    assert not changed
+    assert fixed == text
+
+
+def test_mid_sentence_check_does_not_block_on_unrelated_genuine_i_think():
+    """The bug this session actually found: a document-wide 'does
+    "i think" appear ANYWHERE in the original' check wrongly blocked
+    fixing a later, unrelated sentence just because the person's own
+    OPENING line genuinely said 'I think you have found the gap' --
+    real text, real failure, confirmed against the live render before
+    fixing. Sentence-level alignment (word overlap against the actual
+    corresponding original sentence) must not carry that false block
+    across to a different sentence with no such content originally."""
+    original = (
+        "Distinct stage, and I think you have found the gap rather than a subdivision of one. "
+        "What nobody has done is extend that from models that predict to models that act."
+    )
+    render = (
+        "Distinct stage, and I think you have found the gap rather than a subdivision of one. "
+        "What I think nobody has done is extend that from models that predict to models that act."
+    )
+    fixed, changed = df._fix_first_person_over_ratio(
+        render, target=1.0, current=8.0, original_input_text=original
+    )
+    assert changed
+    assert "What I think nobody" not in fixed
+    assert "What nobody has done" in fixed
+    # The genuine, unrelated first-person sentence must survive untouched.
+    assert "I think you have found the gap" in fixed
+
+
+def test_mid_sentence_check_still_declines_when_the_aligned_original_sentence_itself_has_it():
+    """Companion to the case above: when the SAME sentence (not a
+    different one elsewhere) genuinely had 'I think' in the original,
+    the aligned check must still catch that and decline -- sentence-
+    level alignment must not become permissive across the board just
+    because it stopped being wrongly document-wide."""
+    original = "Distinct stage, and I think you have found the gap rather than a subdivision of one."
+    render = "Distinct stage, and I think you have found the gap rather than a subdivision of one, given everything."
+    fixed, changed = df._fix_first_person_over_ratio(
+        render, target=1.0, current=8.0, original_input_text=original
+    )
+    assert not changed
+    assert fixed == render
+
+
+def test_full_pipeline_two_pass_simulation_reaches_hit():
+    """End-to-end simulation of app.py's two call sites (initial
+    deterministic pass, then the post-correction still_missed retry)
+    against the real 18 Aug 2026 render this fix was built against,
+    verbatim — not a shortened paraphrase. Kept verbatim deliberately:
+    a shorter synthetic version was tried first and stayed MISSED,
+    because the one sentence this fixer correctly declines to touch
+    ("I see four reasons...", see test_declines_i_see_with_a_bare_
+    noun_phrase_object above) carries proportionally more weight in a
+    short excerpt. The real text is long enough that fixing the other
+    three drags the aggregate back to HIT even with that one gap
+    still open — the actual, verified behaviour, not an idealised one.
+    """
+    original = (
+        "Hi John, Distinct stage, and I think you have found the gap rather than a "
+        "subdivision of one. My test for whether two controls are really one is "
+        "whether they fail the same way. These do not. A governance failure is "
+        "loud. An agent does something it should not have, and there is an "
+        "incident, a trace and someone to ask. A qualification failure is silent. "
+        "The system runs correctly for eighteen months, every action inside "
+        "policy, every log clean, and it should never have been deployed for that "
+        "purpose in the first place. Nobody finds it through monitoring, because "
+        "monitoring confirms it is behaving exactly as built. It surfaces when "
+        "someone finally asks who decided this was suitable, and the answer turns "
+        "out to be nobody in particular. Different failure mode, different "
+        "evidence, different owner, different point in time. That is four reasons "
+        "not to fold it into governance. What nobody has done is extend that from "
+        "models that predict to models that act. In most organisations "
+        "qualification would fall down the same gap the agents themselves fall "
+        "down. Curious whether your clients have solved that, because the "
+        "methodology is the easier half."
+    )
+    render = (
+        "Hi John. Distinct stage, and I think you have found the gap rather than a "
+        "subdivision of one. My test for whether two controls are really one is "
+        "whether they fail the same way. These do not. A governance failure is "
+        "loud. An agent does something it should not have, and there is an "
+        "incident, a trace and someone to ask. A qualification failure is silent. "
+        "The system runs correctly for eighteen months, every action inside "
+        "policy, every log clean, and it should never have been deployed for that "
+        "purpose in the first place. I find nobody catches it through monitoring, "
+        "because monitoring confirms it is behaving exactly as built. It brings up "
+        "when someone finally asks who decided this was suitable, and the answer "
+        "turns out to be nobody in particular. Different failure mode, different "
+        "evidence, different owner, different point in time. I see four reasons "
+        "not to fold it into governance. What I think nobody has done is extend "
+        "that from models that predict to models that act. In most organisations "
+        "I think qualification would fall down the same gap the agents themselves "
+        "fall down. Curious whether your clients have solved that, because the "
+        "methodology is the easier half."
+    )
+    baseline = ve.compute_baseline_metrics(original)
+
+    clean = render
+    delta = ve.score_render_delta(baseline, clean)
+    d = delta["first_person_ratio"]
+    assert d["verdict"] == "MISSED"
+    clean, _ = df._fix_first_person_over_ratio(clean, d["baseline"], d["output"], original)
+
+    delta2 = ve.score_render_delta(baseline, clean)
+    d2 = delta2["first_person_ratio"]
+    if d2["verdict"] == "MISSED":
+        clean, _ = df._fix_first_person_over_ratio(clean, d2["baseline"], d2["output"], original)
+
+    final_delta = ve.score_render_delta(baseline, clean)
+    assert final_delta["first_person_ratio"]["verdict"] == "HIT"
+    # The one intentionally-declined sentence must still be present,
+    # untouched -- this test is about the other three, not about
+    # silently guessing at "I see" too.
+    assert "I see four reasons" in clean
