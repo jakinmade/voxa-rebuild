@@ -1324,6 +1324,61 @@ def merge_starter_evidence(blended_delta: dict, starter_delta: dict | None) -> d
     return merged
 
 
+# Structured-output tool for the correction pass. Forces the model to
+# return the corrected text in a single required field rather than free
+# text, so there is no room for it to narrate its own reasoning
+# ("I notice this doesn't need changes...") alongside or instead of the
+# actual correction — the failure mode that reached a live render on
+# 18 Aug 2026. Tool-choice forcing is stable Anthropic functionality,
+# not a beta feature, so this is the lower-risk of the two structured-
+# output paths available.
+CORRECTION_TOOL = {
+    "name": "return_correction",
+    "description": "Return the corrected text only. No explanation, no preamble, no reasoning about the correction.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "corrected_text": {
+                "type": "string",
+                "description": "The corrected text and nothing else — no commentary, no meta-discussion of what was changed or why.",
+            }
+        },
+        "required": ["corrected_text"],
+    },
+}
+
+# Safety net under the schema fix, not a replacement for it — catches
+# whatever a future model or edge case still slips past the forced
+# tool call. Phrases drawn from the actual leak seen in the 18 Aug 2026
+# incident (see the Scott/CLEARANCE render). Deliberately narrow and
+# first-person-reasoning-specific so it doesn't false-positive on
+# legitimate first-person voice in the user's own text.
+_CONTAMINATION_PATTERNS = re.compile(
+    r"\bi notice\b"
+    r"|\bi believe\b"
+    r"|\bhere is the (?:corrected|rewritten)\b"
+    r"|\bhere's the (?:corrected|rewritten)\b"
+    r"|\bcorrected version\b"
+    r"|\bi should not have\b"
+    r"|\bwhich i should\b"
+    r"|\bdoes not actually need\b"
+    r"|\bthe rules? prohibit\b"
+    r"|\breassign(?:ing|ed)? (?:credit|any)\b",
+    re.IGNORECASE,
+)
+
+
+def response_looks_contaminated(text: str) -> bool:
+    """
+    True if text contains the model narrating its own reasoning rather
+    than just returning the correction. Deliberately conservative —
+    false negatives (a leak that slips through) are the known risk
+    already covered by the schema fix above; this exists to catch
+    obvious cases cheaply, not to be exhaustive on its own.
+    """
+    return bool(_CONTAMINATION_PATTERNS.search(text))
+
+
 def build_correction_prompt(
     delta: dict,
     semantic: dict | None = None,

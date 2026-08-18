@@ -45,6 +45,7 @@ from prompts import (
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
     build_correction_prompt, merge_starter_evidence,
     build_voice_profile_summary_prompt,
+    CORRECTION_TOOL, response_looks_contaminated,
 )
 from components.paste_guard import paste_guard
 from deterministic_fixers import (
@@ -1221,12 +1222,50 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         if correction_prompt:
             try:
                 pre_llm_correction = clean
-                with st.spinner("Refining..."):
-                    correction_response = client.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=4096,
-                        system=correction_prompt, messages=[{"role": "user", "content": clean}],
+                corrected = None
+                # Forced tool call, not a plain text completion — the
+                # model returns corrected_text as a schema field, so
+                # there's no free-text channel for it to narrate
+                # reasoning into. One bounded retry underneath as a
+                # safety net (response_looks_contaminated), then fail
+                # closed to pre_llm_correction rather than ship a
+                # response that failed the check twice. Flagged: not
+                # verified against live model behaviour in this
+                # session — no Anthropic key available here — needs a
+                # real render on Railway to confirm the tool call
+                # behaves as expected before this is trusted.
+                for attempt in range(2):
+                    with st.spinner("Refining..."):
+                        correction_response = client.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=4096,
+                            system=correction_prompt,
+                            messages=[{"role": "user", "content": clean}],
+                            tools=[CORRECTION_TOOL],
+                            tool_choice={"type": "tool", "name": "return_correction"},
+                        )
+                    tool_use_block = next(
+                        (b for b in correction_response.content if b.type == "tool_use"),
+                        None,
                     )
-                corrected = correction_response.content[0].text
+                    if tool_use_block is None:
+                        log.error(
+                            "correction_pass_no_tool_use",
+                            attempt=attempt,
+                            stop_reason=correction_response.stop_reason,
+                        )
+                        continue
+                    candidate = tool_use_block.input.get("corrected_text", "")
+                    if candidate and not response_looks_contaminated(candidate):
+                        corrected = candidate
+                        break
+                    log.error(
+                        "correction_pass_contaminated_response",
+                        attempt=attempt,
+                        candidate_preview=candidate[:200],
+                    )
+                if corrected is None:
+                    log.error("correction_pass_failed_both_attempts")
+                    corrected = pre_llm_correction
                 corrected = _regex_sweep(corrected, keep_contractions=keep_contractions)
                 if st.session_state.get("locale", "uk") == "uk":
                     corrected = _apply_uk_english(corrected)
