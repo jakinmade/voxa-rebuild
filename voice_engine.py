@@ -2136,6 +2136,16 @@ def voice_match_label(delta: dict) -> dict:
     hits = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "HIT"]
     close = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "CLOSE"]
     missed = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "MISSED"]
+    # SKIPPED (18 Aug 2026): the input genuinely had nothing of that
+    # kind to convert (no first-person content, no directive content)
+    # — the correction pass correctly declined to fabricate it, rather
+    # than failing to hit an achievable target. Given its own clause
+    # for the same reason CLOSE was above: silently falling into
+    # neither hits/close/missed would mean this dimension vanishes
+    # from the sentence while a stale-looking number could still show
+    # up elsewhere, the exact "two different stories" bug already
+    # fixed once for CLOSE.
+    skipped = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "SKIPPED"]
 
     # "Drifted" was the original wording here — dropped because it's one
     # of the exact words voice_engine's own _ANALYTICAL_TELL_PHRASES
@@ -2164,6 +2174,8 @@ def voice_match_label(delta: dict) -> dict:
         parts.append("Close on " + ", ".join(close) + ".")
     if missed:
         parts.append("Off on " + ", ".join(missed) + ".")
+    if skipped:
+        parts.append("N/A on " + ", ".join(skipped) + " (nothing to convert in the original).")
     evidence = " ".join(parts) if parts else "No baseline comparison available."
 
     return {"tier": tier, "badge": badge, "evidence": evidence, "_raw_pct": pct}
@@ -2402,7 +2414,7 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
     """
     biggest_changes = []
     for key, d in sorted(delta.items(), key=lambda kv: kv[1]["pct_diff"], reverse=True):
-        if d["verdict"] == "HIT":
+        if d["verdict"] in ("HIT", "SKIPPED"):
             continue
         label = _DIMENSION_LABELS.get(key, key)
         direction = "+" if d["delta"] > 0 else ""

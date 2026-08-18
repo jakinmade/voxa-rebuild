@@ -1389,6 +1389,21 @@ def _run_render(
             clean = _regex_sweep(clean, keep_contractions=keep_contractions)
             ai_tells = score_ai_tells(clean)
 
+        # Downgrade MISSED -> SKIPPED for dimensions the input never
+        # had content for in the first place (input_has_opinion_content
+        # / input_has_directive_content, same signals that already gate
+        # whether a correction is even attempted, see line ~1077). A
+        # genuine 86% ownership "miss" on a product-pitch email with
+        # zero first-person content in the original isn't a defect —
+        # it's the correction pass correctly refusing to fabricate
+        # first-person claims that would misrepresent authorship. Risk/
+        # confidence and the report sentence should say so, not flag it
+        # identically to an achievable target the system failed to hit.
+        if not input_has_opinion_content and delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
+            delta["first_person_ratio"]["verdict"] = "SKIPPED"
+        if not input_has_directive_content and delta.get("directive_ratio", {}).get("verdict") == "MISSED":
+            delta["directive_ratio"]["verdict"] = "SKIPPED"
+
         confidence = compute_confidence(
             st.session_state.get("sample_fitness"), baseline, len(observations),
             st.session_state.get("dimension_stability"),
