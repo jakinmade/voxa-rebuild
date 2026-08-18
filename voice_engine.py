@@ -1696,6 +1696,62 @@ def find_source_sentence(input_text: str, entity: str) -> str | None:
     return None
 
 
+def score_restructure_fidelity(pre_text: str, post_text: str) -> dict:
+    """
+    Verifies a linkedin_format correction call only rearranged and cut
+    words — never added any. Built specifically because that
+    instruction (see build_correction_prompt's PLATFORM FORMAT block
+    in prompts.py) is currently enforced by wording alone, with
+    nothing checking whether the model actually obeyed it. Confirmed
+    live (18 Aug 2026): a real render restructured "A governance
+    failure is loud. An agent does something..." into a "When X...
+    When Y..." conditional construction, introducing "when" and
+    "occurs" — words that don't appear anywhere in the pre-correction
+    text — which is genuine sentence-level rewriting, not the
+    rearrangement the instruction permits. Grammarly flagging the
+    output was a symptom of this, not a separate issue.
+
+    Comparison is word-BAG based (case-insensitive, punctuation
+    stripped), not sequence-based — deliberately, since the whole
+    point of linkedin_format is that word ORDER is allowed to change
+    freely; only word ADDITION is forbidden. "the" appearing one more
+    time in post_text than it did in pre_text is a violation even
+    though "the" trivially exists in both texts — a naive set-based
+    check (does this word appear ANYWHERE in pre_text) would miss
+    that. Word REMOVAL is expected and fine — economy-mode cutting
+    happens in the same correction call — so this only flags words
+    whose count in post_text exceeds their count in pre_text, never
+    flags a drop.
+
+    Compares against pre_text (the text handed INTO the correction
+    call), not the person's original raw input — the correction call's
+    own instruction says "already present in the input", meaning its
+    own input, and elevate mode's earlier line-edits (economy, old-to-
+    new reordering) may have already legitimately changed word choice
+    once before this call ever ran. Checking against the wrong "input"
+    would flag those earlier, already-approved changes as violations.
+    """
+    def _word_bag(text: str) -> dict:
+        bag: dict = {}
+        for w in re.findall(r"[a-z']+", text.lower()):
+            bag[w] = bag.get(w, 0) + 1
+        return bag
+
+    pre_bag = _word_bag(pre_text)
+    post_bag = _word_bag(post_text)
+
+    fabricated = {}
+    for word, count in post_bag.items():
+        excess = count - pre_bag.get(word, 0)
+        if excess > 0:
+            fabricated[word] = excess
+
+    return {
+        "clean": len(fabricated) == 0,
+        "fabricated_words": fabricated,
+    }
+
+
 def score_semantic_drift(input_text: str, output_text: str) -> dict:
     """
     Deterministic proxy for whether the rewrite preserved what was

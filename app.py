@@ -38,7 +38,7 @@ from voice_engine import (
     _score_ai_signal,
     score_semantic_drift, find_source_sentence, highlight_attribution_swaps, compute_confidence, compute_risk, compute_risk_reason,
     score_render_delta, build_voice_report,
-    uses_contractions, score_ai_tells,
+    uses_contractions, score_ai_tells, score_restructure_fidelity,
     compute_dimension_stability, confidence_caveat,
     compute_burrows_delta,
     compute_sentence_economy, compute_passive_voice,
@@ -1015,6 +1015,11 @@ def _run_render(
     st.session_state.render_last_attempt = input_text
     st.session_state.render_last_is_refinement = is_refinement
     st.session_state.render_error = None
+    # Reset unconditionally here, not just inside the linkedin_format
+    # branch further down — otherwise a True from an earlier LinkedIn
+    # render could leak into a later render that never touches
+    # linkedin_format at all (e.g. a subsequent preserve-mode render).
+    st.session_state.linkedin_restructure_declined = False
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     try:
         api_key = st.secrets["ANTHROPIC_API_KEY"] or api_key
@@ -1305,6 +1310,30 @@ def _run_render(
                 if st.session_state.get("locale", "uk") == "uk":
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
+
+                # Word-level fidelity check, linkedin_format only —
+                # verifies the model actually obeyed "rearrange, don't
+                # rewrite" rather than trusting the instruction alone.
+                # Confirmed necessary live (18 Aug 2026): a real render
+                # restructured two declarative sentences into a "When
+                # X... When Y..." conditional, introducing "when" and
+                # "occurs" — real rewriting, not rearrangement, despite
+                # the explicit instruction against it. Fails CLOSED on
+                # the restructuring specifically, not the whole render:
+                # reverts to pre_llm_correction (already voice-correct,
+                # ownership-fixed, just not platform-formatted) rather
+                # than ship fabricated wording. Surfaced honestly to
+                # the user below (linkedin_restructure_declined), not
+                # silently swapped.
+                if linkedin_format:
+                    fidelity = score_restructure_fidelity(pre_llm_correction, clean)
+                    if not fidelity["clean"]:
+                        log.error(
+                            "linkedin_restructure_fidelity_failed",
+                            fabricated_words=fidelity["fabricated_words"],
+                        )
+                        clean = pre_llm_correction
+                        st.session_state.linkedin_restructure_declined = True
 
                 # Catches collateral the LLM correction call introduced
                 # as a side effect of fixing its target dimension — see
@@ -1673,6 +1702,25 @@ def screen_render():
                     f'\u26a0 Missing from the rewrite: {listed}. This can mean the rewrite '
                     f'drifted into different content, not just a different style - read it '
                     f'in full before sending, don\'t just skim the changes above.{context_line}</div>',
+                    unsafe_allow_html=True
+                )
+
+            # Amber, not red — this is a graceful decline, not a
+            # content-integrity failure the person needs to hunt for.
+            # The render still shipped, correctly, just without the
+            # LinkedIn paragraph restructuring — because the
+            # restructuring attempt introduced wording that couldn't
+            # be verified against the pre-correction text and was
+            # discarded rather than risked. See score_restructure_
+            # fidelity in voice_engine.py for what specifically gets
+            # checked.
+            if st.session_state.get("linkedin_restructure_declined"):
+                st.markdown(
+                    '<div class="microcopy" style="margin-top:0.5rem;color:#8A6D1D;">'
+                    '\u26a0 LinkedIn formatting was attempted but introduced wording that '
+                    'could not be verified, so it was left out — this is your line-edited '
+                    'version, not restructured for LinkedIn. Voice and content are still '
+                    'correct; only the platform formatting is missing.</div>',
                     unsafe_allow_html=True
                 )
 
