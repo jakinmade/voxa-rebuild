@@ -1,6 +1,6 @@
 """
 Tests for score_restructure_fidelity (18 Aug 2026) — the deterministic
-check that catches a linkedin_format correction call rewriting rather
+check that catches a platform_format correction call rewriting rather
 than merely rearranging. Built after the wording-only guardrail in
 build_correction_prompt was found live to be insufficient: a real
 render restructured "A governance failure is loud. An agent does
@@ -35,7 +35,7 @@ def test_catches_the_real_fabrication_incident():
 
 def test_pure_reordering_is_not_flagged():
     """Whole-sentence and paragraph-level reordering — exactly what
-    linkedin_format is meant to permit — must never be flagged."""
+    platform_format is meant to permit — must never be flagged."""
     pre = "Distinct stage, and I think you have found the gap. My test is simple."
     post = "My test is simple.\n\nDistinct stage, and I think you have found the gap."
     result = ve.score_restructure_fidelity(pre, post)

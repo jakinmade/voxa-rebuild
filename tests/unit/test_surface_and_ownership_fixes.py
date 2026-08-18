@@ -334,3 +334,72 @@ def test_full_pipeline_two_pass_simulation_reaches_hit():
     # untouched -- this test is about the other three, not about
     # silently guessing at "I see" too.
     assert "I see four reasons" in clean
+
+
+# ------------------------------------------------------------------
+# ownership_miss_is_content_driven — distinguishes a genuine unfixed
+# defect from a residual that's simply the person's own opinion-dense
+# writing, which no safe fixer can reduce further. Found live 18 Aug
+# 2026: a 72% ownership drift on a genuinely opinionated email only
+# dropped to ~37% after both fixer passes, and every remaining
+# first-person sentence traced back to a genuine marker in the
+# original. An initially-proposed fix (restore exact original wording
+# for sentences the fixer can't safely strip) turned out to change
+# nothing, since first_person_ratio counts SENTENCES with a marker,
+# not word density, and the original wording was ALSO first-person in
+# every residual case checked.
+# ------------------------------------------------------------------
+
+def test_content_driven_when_every_residual_sentence_traces_to_original():
+    original = (
+        "Distinct stage, and I think you have found the gap. "
+        "My test for whether two controls are really one is whether they fail the same way. "
+        "Where I would push back slightly, or at least add friction. "
+        "The part I have no good answer to: who owns it."
+    )
+    render = (
+        "Distinct stage, and I think you have found the gap. "
+        "My test for whether two controls are really one is whether they fail the same way. "
+        "Where I disagree slightly, or at least add friction. "
+        "The part I have no good answer to: who owns it."
+    )
+    assert df.ownership_miss_is_content_driven(render, original) is True
+
+
+def test_not_content_driven_when_a_sentence_has_no_original_first_person():
+    """The exact regression this exists to prevent: a genuine defect
+    (first-person injected where the original had none) must NOT get
+    waved through as 'just content'."""
+    original = "Nobody finds it through monitoring. That is four reasons not to fold it into governance."
+    render = "I find nobody catches it through monitoring. I see four reasons not to fold it into governance."
+    assert df.ownership_miss_is_content_driven(render, original) is False
+
+
+def test_not_content_driven_with_no_original_text_at_all():
+    """No original to check against -- must default to treating it as
+    a defect, not silently excusing it. The burden is on demonstrating
+    the marker was genuinely there, not assuming it."""
+    assert df.ownership_miss_is_content_driven("I think this is a problem.", "") is False
+
+
+def test_trivially_content_driven_when_render_has_no_first_person_at_all():
+    """Nothing to excuse if there's no first-person marker left in the
+    render in the first place."""
+    assert df.ownership_miss_is_content_driven("This is neutral.", "Also neutral.") is True
+
+
+def test_mixed_case_only_one_genuine_sentence_still_fails():
+    """One genuinely-fabricated first-person sentence among several
+    genuinely content-driven ones must still fail the whole check --
+    this is a per-render gate for the aggregate verdict, not a
+    per-sentence score, so a single real defect anywhere blocks the
+    downgrade for the whole dimension."""
+    original = (
+        "Distinct stage, and I think you have found the gap. "
+        "Nobody finds it through monitoring."
+    )
+    render = (
+        "Distinct stage, and I think you have found the gap. "
+        "I find nobody catches it through monitoring."
+    )
+    assert df.ownership_miss_is_content_driven(render, original) is False

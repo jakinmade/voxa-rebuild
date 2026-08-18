@@ -1,7 +1,9 @@
 """
 Tests for build_correction_prompt's mode parameter (18 Aug 2026,
 Preserve/Elevate groundwork; wired to the render_mode radio + the
-linkedin_format checkbox on Screen 4 as of this session).
+linkedin_format checkbox on Screen 4 as of this session; that checkbox
+was later generalised into the platform_format selectbox — see
+test_platform_format.py).
 
 Two things this guards specifically:
 1. mode defaults to "preserve" and that default must be byte-for-byte

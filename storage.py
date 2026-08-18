@@ -40,7 +40,7 @@ def init_state():
         "risk": None,
         "voice_report": None,
         "render_id": None,
-        "linkedin_restructure_declined": False,
+        "restructure_declined": False,
         "render_completed_at": None,
 
         # New in v4 — sample 3, one refinement after the rewrite

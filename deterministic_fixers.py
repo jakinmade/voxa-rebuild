@@ -603,6 +603,62 @@ def _fix_first_person_over_ratio(text: str, target: float, current: float,
     return _apply_across_paragraphs(text, _fix_one, max_conversions=_MAX_CONVERSIONS_PER_PASS)
 
 
+_FIRST_PERSON_MARKER = re.compile(r"\b(i|my|me|mine|myself)\b", re.I)
+
+
+def ownership_miss_is_content_driven(render_text: str, original_input_text: str) -> bool:
+    """
+    Distinguishes two very different reasons first_person_ratio can
+    stay MISSED after both deterministic fixer passes have already
+    run: a genuine defect the fixer couldn't reach, versus the input
+    itself simply being more opinion-dense than the person's baseline
+    — in which case no further correction is possible without deleting
+    real content, and the residual isn't a defect at all.
+
+    first_person_ratio (voice_engine.py's compute_baseline_metrics) is
+    SENTENCE-level: the proportion of sentences containing a first-
+    person marker, not a word-density count. That matters here — it
+    means a sentence can only be "fixed" by removing its marker
+    entirely, not diluted by rewording. Confirmed live (18 Aug 2026):
+    an initially-proposed fix (restore the person's exact original
+    wording for a sentence the fixer can't safely strip) turned out to
+    do NOTHING for the metric whenever the original sentence ALSO
+    contains a first-person marker — which, empirically, was every
+    single residual case checked. Substituting "I disagree" for the
+    person's own original "I would push back" doesn't change the
+    sentence-level count at all; both count as one first-person
+    sentence either way.
+
+    Given that, the only meaningful question left is: for every
+    remaining first-person sentence in the render, was there ALREADY
+    a first-person marker in the corresponding original sentence? If
+    yes for all of them, this dimension being MISSED reflects the
+    input's genuine content, not something the render did wrong — the
+    person's own original writing was this opinion-dense, and nothing
+    short of deleting or rewriting their actual stated position would
+    close the gap. If even one remaining first-person sentence has NO
+    corresponding first-person marker in its aligned original
+    sentence, that's a genuine unfixed defect (something the fixer
+    should have caught, or a fabricated marker), and this returns
+    False so risk/confidence still see it as a real miss.
+
+    Sentences with no confident original alignment (see
+    _matching_original_sentence's own threshold) are treated as
+    defects, not content — the burden is on demonstrating the marker
+    was genuinely there, not on assuming it was.
+    """
+    original_sentences = _extract_sentences(original_input_text) if original_input_text else []
+    render_sentences = _extract_sentences(render_text)
+
+    for s in render_sentences:
+        if not _FIRST_PERSON_MARKER.search(s):
+            continue
+        aligned = _matching_original_sentence(s, original_sentences)
+        if not aligned or not _FIRST_PERSON_MARKER.search(aligned):
+            return False
+    return True
+
+
 # ------------------------------------------------------------------
 # Directness (directive_ratio) — under-directive direction only.
 # ------------------------------------------------------------------

@@ -1388,6 +1388,7 @@ def build_correction_prompt(
     sentence_economy: dict | None = None,
     passive_voice: dict | None = None,
     linkedin_format: bool = False,
+    platform_format: str | None = None,
 ) -> str | None:
     """
     Builds the targeted, surgical correction prompt for whatever the
@@ -1425,7 +1426,7 @@ def build_correction_prompt(
     docstring claimed elevate also applied "LinkedIn structural
     conventions" — it never did; nothing in the instructions below
     touches paragraph-level formatting. That was a documentation bug,
-    not a removed feature. See linkedin_format below for where that
+    not a removed feature. See platform_format below for where that
     capability actually lives now — deliberately NOT inside plain
     elevate mode, because platform formatting (short paragraphs, a
     hook-first opening, promoting a later line to the top) requires
@@ -1433,16 +1434,35 @@ def build_correction_prompt(
     guarantee it will never do. Folding the two together would mean
     either quietly breaking that guarantee or building a silent
     special case inside a mode that's supposed to behave identically
-    for an email, a proposal section, or a LinkedIn post.
+    for an email, a proposal section, or a social post.
 
-    linkedin_format: opt-in, and only takes effect when mode ==
-    "elevate" — checked explicitly below, not merely UI-gated, so
-    calling this function directly with linkedin_format=True and
-    mode="preserve" is a safe no-op rather than a way to bypass the
-    "never restructure" guarantee some other code path may be relying
-    on. When active, adds paragraph-level restructuring instructions
-    on top of (not instead of) elevate's existing sentence-level ones —
-    the two are meant to compose, line-edit first, then restructure.
+    platform_format: opt-in, only takes effect when mode == "elevate"
+    — checked explicitly below, not merely UI-gated, so calling this
+    function directly with a value set and mode="preserve" is a safe
+    no-op rather than a way to bypass the "never restructure" guarantee
+    some other code path may be relying on. One of "social" or "email"
+    (any other value, including None, is treated as off — same
+    fail-safe pattern as an unrecognised mode). Two targets, not more,
+    deliberately: each needs its own tailored, tested instruction, not
+    a generic one stretched to cover cases that weren't actually
+    checked. "social" generalises what was originally built LinkedIn-
+    specific (18 Aug 2026) — the actual convention (short paragraphs,
+    blank-line breaks, hook-first opening) isn't unique to LinkedIn at
+    all, it's shared by X/Twitter and Threads too, so the instruction
+    itself didn't need to change, only its scope and label. "email"
+    is a genuinely different convention added the same session,
+    deliberately NOT sharing the "hook-first" instruction — an email
+    wants a clear greeting and sign-off kept in their conventional
+    place, not restructured to lead with the strongest line the way a
+    social post should. When active, adds paragraph-level restructuring
+    instructions on top of (not instead of) elevate's existing
+    sentence-level ones — the two are meant to compose, line-edit
+    first, then restructure.
+
+    linkedin_format: deprecated, kept only so any caller still passing
+    it doesn't break — treated as an alias for platform_format="social"
+    when platform_format itself is not set. New call sites should use
+    platform_format directly.
 
     sentence_economy / passive_voice: outputs of
     voice_engine.compute_sentence_economy() / compute_passive_voice(),
@@ -1462,13 +1482,16 @@ def build_correction_prompt(
     Both thresholds are deliberately conservative — only firing on
     genuinely dense or passive-heavy text, not nudging every render.
     """
+    if platform_format is None and linkedin_format:
+        platform_format = "social"
+
     correction_instructions = []
     # Single source of truth for the rest of this function — computed
     # once, referenced both when building the old-to-new instruction's
     # inline exception clause and when choosing the closing framing,
     # so the two can never drift apart on whether restructuring is
     # actually permitted this call.
-    linkedin_active = mode == "elevate" and linkedin_format
+    platform_active = mode == "elevate" and platform_format in ("social", "email")
 
     for key, d in delta.items():
         if d["verdict"] != "MISSED":
@@ -1528,7 +1551,7 @@ def build_correction_prompt(
             " This instruction is NOT optional and is not overridden by the "
             "platform-format instruction below — a name, greeting, or fact does "
             "not get cut to make room for restructuring; restructure around it "
-            "instead." if linkedin_active else ""
+            "instead." if platform_active else ""
         )
         correction_instructions.append(
             f"The rewrite dropped specific facts from the original: {named}. "
@@ -1564,7 +1587,7 @@ def build_correction_prompt(
             " (paragraph-level movement — breaking paragraphs apart, promoting "
             "a line to the opening — is handled separately below under "
             "PLATFORM FORMAT; this rule is about word order within a single "
-            "sentence only.)" if linkedin_active else ""
+            "sentence only.)" if platform_active else ""
         )
         correction_instructions.append(
             "LINE EDIT (old-to-new ordering): where a sentence buries "
@@ -1613,36 +1636,75 @@ def build_correction_prompt(
                 f"the text."
             )
 
-        # LinkedIn-format restructuring — deliberately separate from,
+        # Platform-format restructuring — deliberately separate from,
         # and layered on top of, the line-editing instructions above.
         # This is the one place in this function permitted to move
-        # content relative to itself (promote a line to the opening,
-        # break long paragraphs apart) — every instruction above this
+        # content relative to itself — every instruction above this
         # point explicitly forbids that. Gated on mode == "elevate"
-        # AND the flag, checked here rather than trusted from the
-        # caller, so this can never fire through preserve mode even
-        # if a future call site passes linkedin_format=True by mistake.
-        if linkedin_format:
+        # AND platform_format being a recognised value, checked here
+        # rather than trusted from the caller, so this can never fire
+        # through preserve mode even if a future call site passes a
+        # value by mistake.
+        #
+        # Two targets, each genuinely different, not one instruction
+        # stretched to cover both:
+        #  - "social" (LinkedIn/X/Threads): short paragraphs, blank-
+        #    line breaks, promote the strongest line to a hook-first
+        #    opening. This is the original 18 Aug 2026 instruction,
+        #    unchanged — the convention was never LinkedIn-specific,
+        #    only its label was.
+        #  - "email": a genuinely different convention added the same
+        #    session. Deliberately does NOT get the hook-first
+        #    instruction — restructuring an email to lead with its
+        #    strongest line, the way a social post should, would be
+        #    wrong; a greeting belongs at the top and a sign-off at
+        #    the bottom, not repositioned for attention. Still permits
+        #    breaking a dense paragraph into shorter ones for
+        #    readability, just without the "promote to the top" move.
+        if platform_format == "social":
             correction_instructions.append(
-                "PLATFORM FORMAT (LinkedIn): restructure for a LinkedIn "
-                "post, now that the line-level edits above are done. "
-                "Break long paragraphs into short ones — 1 to 3 sentences "
-                "each, separated by a blank line — the way LinkedIn posts "
-                "are actually read, in short scannable chunks, not dense "
-                "blocks. If the strongest, most attention-earning line in "
-                "the piece is currently buried partway through, move it "
-                "to the very start as the opening hook. You may reorder "
-                "and re-paragraph freely to achieve this. You may NOT cut "
+                "PLATFORM FORMAT (social post — LinkedIn/X/Threads): "
+                "restructure for a short-form social post, now that the "
+                "line-level edits above are done. Break long paragraphs "
+                "into short ones — 1 to 3 sentences each, separated by a "
+                "blank line — the way social posts are actually read, in "
+                "short scannable chunks, not dense blocks. If the "
+                "strongest, most attention-earning line in the piece is "
+                "currently buried partway through, move it to the very "
+                "start as the opening hook. You may reorder and "
+                "re-paragraph freely to achieve this. You may NOT cut "
                 "content, change any claim, or introduce a sentence that "
                 "does not already exist in the text — every word in the "
                 "output must trace back to a word already present in the "
                 "input; this is rearrangement and re-paragraphing, not "
                 "rewriting. A greeting or name feeling unconventional for "
-                "LinkedIn is not grounds to cut it — reposition it (e.g. "
-                "after the hook, or as a closing line) rather than delete "
-                "it. If any correction above told you to restore a dropped "
-                "fact or name, that instruction still applies here too — "
-                "restructuring is never a reason to drop it again."
+                "a social post is not grounds to cut it — reposition it "
+                "(e.g. after the hook, or as a closing line) rather than "
+                "delete it. If any correction above told you to restore a "
+                "dropped fact or name, that instruction still applies "
+                "here too — restructuring is never a reason to drop it "
+                "again."
+            )
+        elif platform_format == "email":
+            correction_instructions.append(
+                "PLATFORM FORMAT (email): restructure for an email, now "
+                "that the line-level edits above are done. Keep any "
+                "greeting at the very start and any sign-off at the very "
+                "end, in their conventional places — do NOT move a "
+                "greeting or sign-off elsewhere and do NOT promote a "
+                "later line ahead of the greeting the way a social post's "
+                "hook-first opening would. Within the body, you may break "
+                "a dense paragraph into shorter ones where that genuinely "
+                "improves readability, and you may reorder within a "
+                "paragraph if it clarifies the sequence of points. You "
+                "may NOT cut content, change any claim, or introduce a "
+                "sentence that does not already exist in the text — every "
+                "word in the output must trace back to a word already "
+                "present in the input; this is rearrangement and "
+                "re-paragraphing, not rewriting. If any correction above "
+                "told you to restore a dropped fact or name, that "
+                "instruction still applies here too — restructuring is "
+                "never a reason to drop it again."
             )
 
     if not correction_instructions:
@@ -1651,7 +1713,7 @@ def build_correction_prompt(
     preservation_line = (
         "Make only the changes needed to hit the targets. Do not rewrite. Do not improve. "
         "Correct only what is listed. Preserve everything else exactly.\n\n"
-        if not linkedin_active else
+        if not platform_active else
         "Make only the changes needed to hit the targets — except for the PLATFORM FORMAT "
         "instruction below, which explicitly permits reordering and re-paragraphing. "
         "Do not rewrite wording, do not improve phrasing, do not change any claim. "

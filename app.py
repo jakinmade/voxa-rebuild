@@ -57,6 +57,7 @@ from deterministic_fixers import (
     _fix_first_person_ratio, _fix_first_person_over_ratio,
     _fix_directive_ratio, _fix_modal_hedge,
     _check_uncorrected_insertions, _fix_entity_casing,
+    ownership_miss_is_content_driven,
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available
@@ -966,7 +967,7 @@ def _generate_voice_profile_summary(corpus_text: str) -> str | None:
 
 def _run_render(
     input_text: str, is_refinement: bool = False, render_context: str = "",
-    render_mode: str = "preserve", linkedin_format: bool = False,
+    render_mode: str = "preserve", platform_format: str | None = None,
 ) -> bool:
     """The actual generation pipeline. Kept as one function so the
     refinement re-render below can call the same path.
@@ -985,15 +986,17 @@ def _run_render(
     docstring for what elevate mode actually does (line-editing only:
     old-to-new sentence ordering and economy, never restructuring).
 
-    linkedin_format: opt-in, only offered in the UI once "elevate" is
-    selected (see screen_render) — passed straight through to
-    build_correction_prompt, which itself re-checks mode == "elevate"
-    before honouring it, so this parameter can never trigger paragraph
-    restructuring through the preserve path even if a future caller
-    passes it incorrectly. See build_correction_prompt's docstring for
-    why this is a separate flag rather than folded into elevate mode
-    itself.
-    Same as render_context, this doesn't touch the baseline targets.
+    platform_format: opt-in, one of "social" or "email" (or None,
+    off), only offered in the UI once "elevate" is selected (see
+    screen_render) — passed straight through to build_correction_
+    prompt, which itself re-checks mode == "elevate" before honouring
+    it, so this parameter can never trigger paragraph restructuring
+    through the preserve path even if a future caller passes it
+    incorrectly. Originally built LinkedIn-only (18 Aug 2026), then
+    generalised the same session once it became clear the underlying
+    convention wasn't LinkedIn-specific (see build_correction_prompt's
+    docstring). Same as render_context, this doesn't touch the
+    baseline targets.
 
     Returns True on success, False on failure. Callers must check this
     before treating the render as having happened (e.g. before marking
@@ -1015,11 +1018,12 @@ def _run_render(
     st.session_state.render_last_attempt = input_text
     st.session_state.render_last_is_refinement = is_refinement
     st.session_state.render_error = None
-    # Reset unconditionally here, not just inside the linkedin_format
-    # branch further down — otherwise a True from an earlier LinkedIn
-    # render could leak into a later render that never touches
-    # linkedin_format at all (e.g. a subsequent preserve-mode render).
-    st.session_state.linkedin_restructure_declined = False
+    # Reset unconditionally here, not just inside the platform_format
+    # branch further down — otherwise a True from an earlier
+    # platform-formatted render could leak into a later render that
+    # never touches platform_format at all (e.g. a subsequent
+    # preserve-mode render).
+    st.session_state.restructure_declined = False
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     try:
         api_key = st.secrets["ANTHROPIC_API_KEY"] or api_key
@@ -1245,7 +1249,7 @@ def _run_render(
         correction_prompt = build_correction_prompt(
             correction_delta, semantic, input_has_opinion_content, input_has_directive_content,
             mode=render_mode, sentence_economy=sentence_economy, passive_voice=passive_voice,
-            linkedin_format=linkedin_format,
+            platform_format=platform_format,
         )
         log.info(
             "correction_pass_decision",
@@ -1311,7 +1315,7 @@ def _run_render(
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
 
-                # Word-level fidelity check, linkedin_format only —
+                # Word-level fidelity check, platform_format only —
                 # verifies the model actually obeyed "rearrange, don't
                 # rewrite" rather than trusting the instruction alone.
                 # Confirmed necessary live (18 Aug 2026): a real render
@@ -1323,17 +1327,21 @@ def _run_render(
                 # reverts to pre_llm_correction (already voice-correct,
                 # ownership-fixed, just not platform-formatted) rather
                 # than ship fabricated wording. Surfaced honestly to
-                # the user below (linkedin_restructure_declined), not
-                # silently swapped.
-                if linkedin_format:
+                # the user below (restructure_declined), not silently
+                # swapped. Applies to both platform_format targets
+                # (social and email) equally — the check itself is
+                # generic (any new word is a problem), it doesn't care
+                # which instruction produced the restructuring.
+                if platform_format in ("social", "email"):
                     fidelity = score_restructure_fidelity(pre_llm_correction, clean)
                     if not fidelity["clean"]:
                         log.error(
-                            "linkedin_restructure_fidelity_failed",
+                            "platform_restructure_fidelity_failed",
+                            platform_format=platform_format,
                             fabricated_words=fidelity["fabricated_words"],
                         )
                         clean = pre_llm_correction
-                        st.session_state.linkedin_restructure_declined = True
+                        st.session_state.restructure_declined = True
 
                 # Catches collateral the LLM correction call introduced
                 # as a side effect of fixing its target dimension — see
@@ -1452,6 +1460,25 @@ def _run_render(
         if not input_has_directive_content and delta.get("directive_ratio", {}).get("verdict") == "MISSED":
             delta["directive_ratio"]["verdict"] = "SKIPPED"
 
+        # Mirror case, OVER-owned direction: input DOES have opinion
+        # content (so the block above didn't apply), but is more
+        # opinion-dense than the person's baseline. Confirmed live (18
+        # Aug 2026): a 72% ownership drift on a genuinely opinionated
+        # email dropped to ~37% after both fixer passes ran their full
+        # course, and every remaining first-person sentence checked out
+        # as the person's own genuine wording, not a defect — an
+        # initially-proposed fix (restoring exact original wording for
+        # the unfixable sentences) turned out to change nothing, since
+        # first_person_ratio counts sentences, not words, and the
+        # original wording was ALSO first-person in every case. See
+        # ownership_miss_is_content_driven's docstring for the full
+        # reasoning. Only checked once still MISSED after everything
+        # else has already run, so this never short-circuits a genuine,
+        # achievable fix the fixer just hasn't gotten to yet.
+        if delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
+            if ownership_miss_is_content_driven(clean, input_text):
+                delta["first_person_ratio"]["verdict"] = "SKIPPED"
+
         confidence = compute_confidence(
             st.session_state.get("sample_fitness"), baseline, len(observations),
             st.session_state.get("dimension_stability"),
@@ -1551,7 +1578,7 @@ def screen_render():
         key="render_mode_field",
     )
 
-    # Only offered once elevate is selected, on purpose — LinkedIn
+    # Only offered once elevate is selected, on purpose — platform
     # formatting restructures paragraphs, which is a materially
     # different, riskier operation than elevate's line-editing alone.
     # Making it a sub-choice of elevate rather than an independent
@@ -1559,13 +1586,30 @@ def screen_render():
     # optionally restructure, never restructure-only. See
     # build_correction_prompt's docstring for why this isn't just
     # folded into elevate mode itself.
-    linkedin_format = False
+    #
+    # Originally LinkedIn-only (18 Aug 2026); generalised the same
+    # session once it was clear the underlying convention (short
+    # paragraphs, hook-first) wasn't LinkedIn-specific, and a second,
+    # genuinely different target (email) was worth adding alongside
+    # it rather than stretching one instruction to cover both. A
+    # selectbox rather than a second checkbox, since these are
+    # mutually exclusive targets, not independent toggles — a render
+    # is formatted for exactly one destination or none.
+    platform_format = None
     if render_mode == "elevate":
-        linkedin_format = st.checkbox(
-            "Format for LinkedIn — short paragraphs, hook first",
-            value=False,
-            key="linkedin_format_field",
+        platform_choice = st.selectbox(
+            "platform format",
+            options=["none", "social", "email"],
+            format_func=lambda p: {
+                "none": "No platform formatting",
+                "social": "Social post — short paragraphs, hook first",
+                "email": "Email — keep greeting and sign-off in place",
+            }[p],
+            index=0,
+            label_visibility="collapsed",
+            key="platform_format_field",
         )
+        platform_format = None if platform_choice == "none" else platform_choice
 
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
@@ -1584,7 +1628,7 @@ def screen_render():
             st.session_state.render_input_text = input_text
             st.session_state.render_context_input = render_context
             st.session_state.render_mode_input = render_mode
-            st.session_state.linkedin_format_input = linkedin_format
+            st.session_state.platform_format_input = platform_format
             st.session_state.render_output = ""
             st.session_state.refinement_used = False
             st.session_state.render_in_progress = True
@@ -1595,7 +1639,7 @@ def screen_render():
             st.session_state.get("render_input_text", ""),
             render_context=st.session_state.get("render_context_input", ""),
             render_mode=st.session_state.get("render_mode_input", "preserve"),
-            linkedin_format=st.session_state.get("linkedin_format_input", False),
+            platform_format=st.session_state.get("platform_format_input"),
         )
         st.session_state.render_in_progress = False
         st.rerun()
@@ -1609,7 +1653,7 @@ def screen_render():
                 last_attempt, is_refinement=was_refinement,
                 render_context=st.session_state.get("render_context_input", ""),
                 render_mode=st.session_state.get("render_mode_input", "preserve"),
-                linkedin_format=st.session_state.get("linkedin_format_input", False),
+                platform_format=st.session_state.get("platform_format_input"),
             ) and was_refinement:
                 st.session_state.refinement_used = True
             st.rerun()
@@ -1708,19 +1752,18 @@ def screen_render():
             # Amber, not red — this is a graceful decline, not a
             # content-integrity failure the person needs to hunt for.
             # The render still shipped, correctly, just without the
-            # LinkedIn paragraph restructuring — because the
-            # restructuring attempt introduced wording that couldn't
-            # be verified against the pre-correction text and was
-            # discarded rather than risked. See score_restructure_
-            # fidelity in voice_engine.py for what specifically gets
-            # checked.
-            if st.session_state.get("linkedin_restructure_declined"):
+            # platform restructuring — because the restructuring
+            # attempt introduced wording that couldn't be verified
+            # against the pre-correction text and was discarded rather
+            # than risked. See score_restructure_fidelity in
+            # voice_engine.py for what specifically gets checked.
+            if st.session_state.get("restructure_declined"):
                 st.markdown(
                     '<div class="microcopy" style="margin-top:0.5rem;color:#8A6D1D;">'
-                    '\u26a0 LinkedIn formatting was attempted but introduced wording that '
+                    '\u26a0 Platform formatting was attempted but introduced wording that '
                     'could not be verified, so it was left out — this is your line-edited '
-                    'version, not restructured for LinkedIn. Voice and content are still '
-                    'correct; only the platform formatting is missing.</div>',
+                    'version, not restructured for the platform. Voice and content are '
+                    'still correct; only the platform formatting is missing.</div>',
                     unsafe_allow_html=True
                 )
 
@@ -1874,7 +1917,7 @@ def screen_render():
                     refined_input, is_refinement=True,
                     render_context=st.session_state.get("render_context_input", ""),
                     render_mode=st.session_state.get("render_mode_input", "preserve"),
-                    linkedin_format=st.session_state.get("linkedin_format_input", False),
+                    platform_format=st.session_state.get("platform_format_input"),
                 ):
                     st.session_state.refinement_used = True
                 st.rerun()
