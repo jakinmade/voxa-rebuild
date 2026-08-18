@@ -180,7 +180,7 @@ def run_condition(label: str, participant: dict, api_key: str | None,
 
     delta = ve.score_render_delta(baseline, clean)
     semantic = ve.score_semantic_drift(render_input, clean)
-    ai_tells = ve.score_ai_tells(clean)
+    ai_tells = ve.score_ai_tells(clean, original_input_text=render_input)
     confidence = ve.compute_confidence(fingerprint["fitness"], baseline, len(observations))
     risk = ve.compute_risk(delta, semantic, ai_tells)
     voice_report = ve.build_voice_report(delta, semantic, confidence, risk, ai_tells)

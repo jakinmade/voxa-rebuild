@@ -2674,7 +2674,7 @@ def uses_contractions(text: str) -> bool:
     return (hits / words) > 0.01  # roughly 1+ contraction per 100 words
 
 
-def score_ai_tells(text: str) -> dict:
+def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     """
     Measured verification that the output doesn't read as AI-written —
     run AFTER the regex sweep and grammar pass, not instead of them.
@@ -2689,20 +2689,71 @@ def score_ai_tells(text: str) -> dict:
     register — leverage, synergy, robust) always runs. _ANALYTICAL_TELL_
     PHRASES (essay/argumentative register — drift, surface, land on)
     runs when _classify_register says the text is 'analytical' or
-    'mixed'. Return shape is unchanged from before this check existed,
-    so every existing caller (app.py, dev_tools/harness.py) keeps
-    working without modification.
+    'mixed'.
+
+    original_input_text: the person's own actual input for this
+    render, optional but strongly recommended by every caller that
+    has it available. Confirmed as a real, repeated false-positive
+    class (18 Aug 2026): several phrases in these lists — "curious
+    whether", "i suspect", "i would push back" — are also just
+    ordinary things a person might genuinely write. Two earlier
+    sessions "fixed" instances of this by narrowing individual regexes
+    (excluding "curious if" but not "curious whether", excluding
+    possessive/determiner forms of "surface") — that approach caps out
+    the moment the SAME phrase is both a genuine tell in one render and
+    someone's authentic voice in another, which is exactly what
+    happened here: a real render's own original input said "Curious
+    whether your clients have solved that" verbatim, and continued to
+    get flagged as an AI tell even after the render correctly preserved
+    it unedited. No regex narrowing fixes that — only checking against
+    what the person actually wrote does. Any matched phrase that
+    appears verbatim (case-insensitive) in original_input_text is
+    excluded from flagging: same principle as the ownership fixer's
+    own original-input safety check in deterministic_fixers.py, now
+    applied here too. Em dash / spaced-hyphen checks are NOT exempted
+    this way — those enforce VOICOVA's own house style regardless of
+    the person's usual habits, a deliberate product rule, not an
+    AI-detection heuristic, so there is no "genuine" exception for them.
+
+    Return shape is unchanged from before this parameter existed
+    (original_input_text defaults to "", which exempts nothing — every
+    existing caller that doesn't pass it keeps its current behaviour
+    exactly), so every existing caller (app.py, dev_tools/harness.py)
+    keeps working without modification, though callers with input_text
+    available should be updated to pass it.
     """
+    original_lower = original_input_text.lower()
+
+    def _matches_excluding_genuine(pattern: "re.Pattern") -> list:
+        """Same shape as the old .findall() call this replaces
+        (returns the captured group content, not the raw match, to
+        keep the exact display text every existing test/caller
+        expects) — but first drops any match whose full matched text
+        already appears verbatim in the person's own original input.
+        Uses finditer + group(0) for the exemption check specifically
+        because these patterns are always a single outer group
+        wrapped in \\b...\\b (verified against every pattern this
+        function uses), so group(0) and the captured group content
+        are the same text; group(0) is used for the check since it's
+        the actual matched substring, not a display convenience.
+        """
+        kept = []
+        for m in pattern.finditer(text):
+            if m.group(0).lower() in original_lower:
+                continue
+            kept.append(m.group(1) if m.lastindex else m.group(0))
+        return kept
+
     em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
-    phrase_hits = list(_AI_TELL_PHRASES.findall(text))
-    shield_hits = list(_PLAUSIBILITY_SHIELD_PHRASES.findall(text))
+    phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
+    shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)
 
     register = _classify_register(text)
     analytical_hits = []
     if register in ("analytical", "mixed"):
-        analytical_hits = list(_ANALYTICAL_TELL_PHRASES.findall(text))
-        analytical_hits += list(_FRAGMENT_EMPHASIS_PATTERN.findall(text))
+        analytical_hits = _matches_excluding_genuine(_ANALYTICAL_TELL_PHRASES)
+        analytical_hits += _matches_excluding_genuine(_FRAGMENT_EMPHASIS_PATTERN)
 
     all_hits = phrase_hits + analytical_hits + shield_hits
 

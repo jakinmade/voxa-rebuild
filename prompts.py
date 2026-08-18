@@ -1524,9 +1524,17 @@ def build_correction_prompt(
     dropped = (semantic or {}).get("dropped_entities", [])
     if dropped:
         named = ", ".join(dropped[:5])
+        priority_note = (
+            " This instruction is NOT optional and is not overridden by the "
+            "platform-format instruction below — a name, greeting, or fact does "
+            "not get cut to make room for restructuring; restructure around it "
+            "instead." if linkedin_active else ""
+        )
         correction_instructions.append(
             f"The rewrite dropped specific facts from the original: {named}. "
-            f"Add them back in naturally. Do not invent replacements — restore what was actually said.")
+            f"Add them back in naturally. Do not invent replacements — restore "
+            f"what was actually said.{priority_note}"
+        )
 
     # Attribution swaps ('your point' -> 'my point' or reverse) are a
     # meaning change disguised as a style change - score_semantic_drift's
@@ -1629,7 +1637,12 @@ def build_correction_prompt(
                 "does not already exist in the text — every word in the "
                 "output must trace back to a word already present in the "
                 "input; this is rearrangement and re-paragraphing, not "
-                "rewriting."
+                "rewriting. A greeting or name feeling unconventional for "
+                "LinkedIn is not grounds to cut it — reposition it (e.g. "
+                "after the hook, or as a closing line) rather than delete "
+                "it. If any correction above told you to restore a dropped "
+                "fact or name, that instruction still applies here too — "
+                "restructuring is never a reason to drop it again."
             )
 
     if not correction_instructions:

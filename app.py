@@ -1397,10 +1397,16 @@ def _run_render(
         # pass (free, no API call) and re-measure. If it's still not
         # clean after that, say so honestly in the report rather than
         # shipping AI-tell contaminated text as if it were verified.
-        ai_tells = score_ai_tells(clean)
+        # original_input_text=input_text: exempts phrases genuinely
+        # present in the person's own input from being flagged as an
+        # AI tell — see score_ai_tells' docstring for the real
+        # false-positive this fixes (18 Aug 2026: "curious whether",
+        # "i suspect", "i would push back" all appeared verbatim in a
+        # real original input and were flagged anyway).
+        ai_tells = score_ai_tells(clean, original_input_text=input_text)
         if not ai_tells["clean"]:
             clean = _regex_sweep(clean, keep_contractions=keep_contractions)
-            ai_tells = score_ai_tells(clean)
+            ai_tells = score_ai_tells(clean, original_input_text=input_text)
 
         # Downgrade MISSED -> SKIPPED for dimensions the input never
         # had content for in the first place (input_has_opinion_content

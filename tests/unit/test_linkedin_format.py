@@ -215,3 +215,33 @@ def test_old_to_new_instruction_has_no_inline_exception_when_linkedin_inactive()
     result = build_correction_prompt(_delta_with_one_miss(), mode="elevate")
     assert "handled separately below under" not in result
     assert "PLATFORM FORMAT" not in result
+
+
+def test_dropped_entity_restoration_has_priority_language_when_linkedin_active():
+    """Real bug, found live: a render dropped 'Hi John,' entirely under
+    linkedin_format restructuring, despite the dropped-entity
+    restoration instruction already being present in the same
+    correction call. The model prioritised platform convention over
+    an explicit restore instruction. Fixed by making both instructions
+    reference each other explicitly rather than trusting numbered-list
+    order to imply priority."""
+    delta = {}
+    semantic = {"dropped_entities": ["John"], "attribution_swaps": []}
+    result = build_correction_prompt(delta, semantic, mode="elevate", linkedin_format=True)
+    assert result is not None
+    assert "dropped specific facts from the original: John" in result
+    assert "NOT optional and is not overridden by the platform-format instruction" in result
+    assert "restructuring is never a reason to drop it again" in result
+
+
+def test_dropped_entity_restoration_has_no_priority_language_without_linkedin():
+    """Companion regression guard: the priority cross-reference only
+    makes sense when a PLATFORM FORMAT instruction actually exists --
+    must not appear (referencing a non-existent instruction) when
+    linkedin_format is off."""
+    delta = {}
+    semantic = {"dropped_entities": ["John"], "attribution_swaps": []}
+    result = build_correction_prompt(delta, semantic, mode="elevate", linkedin_format=False)
+    assert result is not None
+    assert "dropped specific facts from the original: John" in result
+    assert "NOT optional and is not overridden by the platform-format instruction" not in result
