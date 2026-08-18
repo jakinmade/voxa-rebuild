@@ -20,6 +20,8 @@ fully self-contained.
 
 import os
 import re
+import uuid
+from datetime import datetime, timezone
 import streamlit as st
 
 from scoring_rules import scoring_rules_version
@@ -28,6 +30,7 @@ from render_cap import check_and_reserve_render
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
+from authenticity_report import build_authenticity_report, export_authenticity_report_json
 from voice_engine import (
     analyse_writing, _analyse_intro,
     compute_baseline_metrics, _merge_baseline,
@@ -1450,9 +1453,19 @@ def _run_render(
         st.session_state.voice_report = build_voice_report(
             delta, semantic, confidence, risk, ai_tells, burrows_delta
         )
+        # One id + timestamp per completed render — generated here
+        # (not inside authenticity_report.py, which stays a pure
+        # function) so the authenticity report built from this render
+        # can be uniquely referenced without needing the render text
+        # itself. Regenerated on every render/refinement, same as
+        # voice_report above — never reused across renders.
+        st.session_state.render_id = str(uuid.uuid4())
+        st.session_state.render_completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     else:
         st.session_state.render_delta = None
         st.session_state.voice_report = None
+        st.session_state.render_id = None
+        st.session_state.render_completed_at = None
 
     st.session_state.render_output = clean
     return True
@@ -1783,7 +1796,7 @@ def screen_render():
                 st.rerun()
 
         st.markdown("")
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
         with col1:
             if st.button("Write again", use_container_width=True):
                 st.session_state.render_input_text = ""
@@ -1802,6 +1815,28 @@ def screen_render():
                 mime="application/json",
                 use_container_width=True,
             )
+        with col4:
+            # Proof this render matches your baseline — not a bare AI
+            # score, a comparison against a fingerprint built before
+            # this text existed. See authenticity_report.py's docstring
+            # for why that distinction matters (the Pangram/deBoer
+            # case). Only offered once a completed render + report
+            # actually exist — same gating as the Export button above.
+            if report and st.session_state.get("render_id"):
+                authenticity_report = build_authenticity_report(
+                    report,
+                    st.session_state.get("baseline_fingerprint"),
+                    render_id=st.session_state["render_id"],
+                    created_at=st.session_state["render_completed_at"],
+                    scoring_rules_version=scoring_rules_version(),
+                )
+                st.download_button(
+                    "Authenticity report",
+                    data=export_authenticity_report_json(authenticity_report),
+                    file_name="voicova-authenticity-report.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
 
     st.markdown(
         '<div class="microcopy" style="margin-top:2rem;">Voicova keeps your voice.</div>',
