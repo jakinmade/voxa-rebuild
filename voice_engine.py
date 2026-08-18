@@ -642,6 +642,146 @@ def compute_baseline_metrics(text: str) -> dict:
     }
 
 
+_BE_FORMS = r"\b(?:am|is|are|was|were|be|being|been)\b"
+
+# Common irregular past participles — regular ones are caught by the
+# \w+ed pattern below, this list covers the frequent irregulars that
+# don't end in -ed (written, given, taken, etc). Not exhaustive by
+# design: this is a heuristic flag, the same precision/simplicity
+# trade-off _ANALYTICAL_TELL_PHRASES and _HEDGE_PATTERN already make
+# elsewhere in this codebase, not a linguistically complete parser.
+_IRREGULAR_PARTICIPLES = (
+    r"written|given|taken|done|made|seen|known|shown|chosen|spoken|"
+    r"broken|driven|eaten|fallen|forgotten|hidden|ridden|risen|sung|"
+    r"drunk|run|held|told|sold|bought|brought|caught|taught|thought|"
+    r"built|sent|spent|kept|left|felt|meant|met|paid|said|stood|"
+    r"understood|won|begun|come|gone|found|grown|drawn|flown|worn|"
+    r"torn|born|frozen|stolen|thrown|swum"
+)
+
+# Allows up to one intervening word (usually an adverb: "was quickly
+# written") between the be-form and the participle.
+_PASSIVE_PATTERN = re.compile(
+    _BE_FORMS + r"\s+(?:\w+\s+){0,1}(?:\w+ed\b|" + _IRREGULAR_PARTICIPLES + r")\b",
+    re.IGNORECASE,
+)
+
+
+def compute_passive_voice(text: str) -> dict:
+    """
+    Passive-voice heuristic — regex-based "be-form + past participle"
+    matching, deliberately not a dependency-parse-based tool (PassivePy
+    needs spaCy; ispassive needs a ~46s cold-start tagger train, both
+    unsuitable for a Railway app that can spin down between requests).
+    Same category of trade-off as this codebase's other deterministic
+    text checks: simple pattern matching over full linguistic parsing.
+
+    Known false positives: adjectival be+participle that isn't
+    grammatically passive (e.g. "the window was closed" as a state,
+    not an action). This is a heuristic flag for a line-editing
+    signal, not a grammatical ground truth — same caveat that already
+    applies to _ANALYTICAL_TELL_PHRASES and the other regex-based
+    checks in this file.
+
+    Standalone and read-only, like compute_sentence_economy: does NOT
+    feed into compute_baseline_metrics, score_render_delta, or the
+    correction-pass targeting pipeline.
+
+    Returns:
+        passive_count          — total regex matches in the text
+        passive_sentence_ratio — proportion of sentences containing
+                                  at least one match
+    """
+    sentences = _extract_sentences(text)
+    if not sentences:
+        return {"passive_count": 0, "passive_sentence_ratio": 0.0}
+
+    per_sentence_matches = [_PASSIVE_PATTERN.findall(s) for s in sentences]
+    passive_sentences = sum(1 for m in per_sentence_matches if m)
+    total_matches = sum(len(m) for m in per_sentence_matches)
+
+    return {
+        "passive_count": total_matches,
+        "passive_sentence_ratio": round(passive_sentences / len(sentences), 3),
+    }
+
+
+def _count_syllables(word: str) -> int:
+    """
+    Heuristic syllable counter — vowel-group counting with the standard
+    silent-e adjustment. This is the same approach used by common
+    readability libraries (e.g. textstat's fallback counter); it isn't
+    a phonetic dictionary lookup, so it will be off by one on some
+    irregular words, but it's accurate enough for a sentence-level
+    economy signal, not exact phonetic transcription.
+    """
+    word = word.lower().strip(".,;:!?\"'()[]")
+    if not word:
+        return 0
+    vowels = "aeiouy"
+    count = 0
+    prev_was_vowel = False
+    for ch in word:
+        is_vowel = ch in vowels
+        if is_vowel and not prev_was_vowel:
+            count += 1
+        prev_was_vowel = is_vowel
+    if word.endswith("e") and count > 1:
+        count -= 1
+    return max(count, 1)
+
+
+def compute_sentence_economy(text: str) -> dict | None:
+    """
+    Flesch-Kincaid Grade Level, hand-rolled — deliberately not the
+    textstat library. Adding a new pip dependency to the live Streamlit
+    app is a separate, higher-risk decision (requirements.txt change,
+    full Railway redeploy retest) that this change explicitly avoids;
+    see the equivalent reasoning already documented in
+    packages/voxa-core/src/voxa_core/text_guardrail.py for the same
+    call made on a different dependency. The formula itself is public
+    domain (Kincaid et al., 1975, developed for the US Navy) so
+    reimplementing it directly carries none of that risk.
+
+    Standalone and read-only: this does NOT feed into
+    compute_baseline_metrics, score_render_delta, or the correction-
+    pass targeting pipeline. It's a separate, additive signal — the
+    18 Aug 2026 research into automated readability scoring (Gruteke
+    Klein et al., arXiv:2502.11150) found these formulas are weak
+    predictors of real-time reading ease, so this should be surfaced
+    as a rough sentence-economy proxy (in the spirit of Strunk &
+    White's "omit needless words"), never as a validated "how easy
+    this is to read" claim.
+
+    Returns None for empty/near-empty input (fewer than 3 sentences),
+    since the underlying formula is unstable on very short samples —
+    same threshold textstat itself uses for its SMOG equivalent.
+    """
+    sentences = _extract_sentences(text)
+    if len(sentences) < 3:
+        return None
+
+    words = [w.strip(".,;:!?\"'()[]") for w in text.split()]
+    words = [w for w in words if w]
+    total_words = len(words)
+    if total_words == 0:
+        return None
+
+    total_syllables = sum(_count_syllables(w) for w in words)
+    avg_sentence_length = total_words / len(sentences)
+    avg_syllables_per_word = total_syllables / total_words
+
+    grade_level = (
+        0.39 * avg_sentence_length + 11.8 * avg_syllables_per_word - 15.59
+    )
+
+    return {
+        "grade_level": round(grade_level, 1),
+        "avg_sentence_length": round(avg_sentence_length, 1),
+        "avg_syllables_per_word": round(avg_syllables_per_word, 2),
+    }
+
+
 def fingerprint_hash(baseline: dict) -> str:
     """
     Deterministic hash of the baseline metrics dict. Same input text

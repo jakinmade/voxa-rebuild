@@ -1384,6 +1384,9 @@ def build_correction_prompt(
     semantic: dict | None = None,
     input_has_opinion_content: bool = True,
     input_has_directive_content: bool = True,
+    mode: str = "preserve",
+    sentence_economy: dict | None = None,
+    passive_voice: dict | None = None,
 ) -> str | None:
     """
     Builds the targeted, surgical correction prompt for whatever the
@@ -1403,6 +1406,36 @@ def build_correction_prompt(
     ("Watch a few matches...") from this correction pass alone, added
     after the initial render had already (correctly) stayed descriptive.
     When False, the directive_ratio correction is skipped the same way.
+
+    mode: "preserve" (default) is the original, unchanged behaviour —
+    this function returns None whenever correction_instructions ends up
+    empty, exactly as before. "elevate" is new (18 Aug 2026 groundwork):
+    it adds line-editing instructions — old-to-new sentence ordering
+    (Williams, "Style: Toward Clarity and Grace") and LinkedIn
+    structural conventions — grounded in established editorial craft,
+    not invented case-by-case. These are appended unconditionally when
+    mode == "elevate", so a correction pass now runs even when no
+    voice-dimension target was MISSED. Any other value for mode is
+    treated as "preserve" (fails safe rather than silently applying
+    elevate instructions on a typo).
+
+    sentence_economy / passive_voice: outputs of
+    voice_engine.compute_sentence_economy() / compute_passive_voice(),
+    both standalone deterministic checks with no coupling to the
+    baseline/delta pipeline (see those functions' docstrings). Only
+    consulted when mode == "elevate" — preserve-mode behaviour is
+    unaffected by these params regardless of what's passed in, so
+    passing None (or nothing) here always keeps the old behaviour.
+    Thresholds are absolute, not baseline-relative, because elevate
+    mode's job is to tighten toward a general professional-writing
+    standard, not to match the writer's own baseline (that's what
+    preserve mode and the voice-dimension deltas above already do).
+    Grade level > 12 (college level, per the readability literature's
+    own convention — see 18 Aug 2026 research into Flesch-Kincaid and
+    its arXiv:2502.11150 caveat) triggers an economy instruction.
+    Passive-sentence ratio > 0.3 triggers an active-voice instruction.
+    Both thresholds are deliberately conservative — only firing on
+    genuinely dense or passive-heavy text, not nudging every render.
     """
     correction_instructions = []
 
@@ -1479,6 +1512,61 @@ def build_correction_prompt(
             f"CREDIT ERROR — fix this first: {listed}. Restore who the original text actually "
             f"credited. This is not a style choice; check the original wording and correct it exactly."
         )
+
+    # Elevate mode — line editing, not developmental editing. Scoped
+    # deliberately narrow: sentence-level economy and ordering, never
+    # restructuring content, argument, or paragraph order. "Preserve
+    # what makes you sound like you, then help you sound like the best
+    # version of you" (the established line-editing distinction, see
+    # 18 Aug 2026 research) — voice and word choice are the writer's;
+    # only sentence-level packaging is in scope here.
+    if mode == "elevate":
+        correction_instructions.append(
+            "LINE EDIT (old-to-new ordering): where a sentence buries "
+            "familiar/already-known information after new information, "
+            "reorder so the sentence starts with what the reader already "
+            "knows and ends with what's new or important (Joseph "
+            "Williams's old-to-new principle). Only reorder within a "
+            "sentence — never move sentences relative to each other, "
+            "never merge or split sentences, never change what a "
+            "sentence claims."
+        )
+        correction_instructions.append(
+            "LINE EDIT (economy): cut needless words within a sentence "
+            "without changing its meaning or claim strength (e.g. "
+            "redundant qualifiers, throat-clearing openers). Do not "
+            "shorten a sentence by removing a genuine hedge, caveat, or "
+            "piece of nuance the writer intended — economy means "
+            "removing clutter, not removing content."
+        )
+
+        # Deterministic signals, only consulted here — not baseline-
+        # relative like the voice dimensions above, since elevate mode
+        # targets a general professional-writing standard rather than
+        # the writer's own baseline. See this function's docstring for
+        # the threshold rationale.
+        if sentence_economy and sentence_economy.get("grade_level") is not None:
+            grade = sentence_economy["grade_level"]
+            if grade > 12:
+                correction_instructions.append(
+                    f"Reading grade level is {grade:.1f} (college level or "
+                    f"above) — denser than typical professional writing. "
+                    f"Shorten some sentences and prefer simpler words where "
+                    f"a simpler word carries the same meaning, without "
+                    f"removing any content or softening any claim."
+                )
+
+        if passive_voice and passive_voice.get("passive_sentence_ratio", 0) > 0.3:
+            ratio = passive_voice["passive_sentence_ratio"]
+            correction_instructions.append(
+                f"{ratio:.0%} of sentences use passive-voice constructions. "
+                f"Convert clearly passive sentences to active voice where "
+                f"the actor is known or implied by context. Leave a "
+                f"sentence in passive voice if the actor is genuinely "
+                f"unknown, irrelevant, or was deliberately omitted by the "
+                f"writer — do not invent or force an actor that isn't in "
+                f"the text."
+            )
 
     if not correction_instructions:
         return None

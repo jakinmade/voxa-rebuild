@@ -38,6 +38,7 @@ from voice_engine import (
     uses_contractions, score_ai_tells,
     compute_dimension_stability, confidence_caveat,
     compute_burrows_delta,
+    compute_sentence_economy, compute_passive_voice,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -960,7 +961,10 @@ def _generate_voice_profile_summary(corpus_text: str) -> str | None:
         return None
 
 
-def _run_render(input_text: str, is_refinement: bool = False, render_context: str = "") -> bool:
+def _run_render(
+    input_text: str, is_refinement: bool = False, render_context: str = "",
+    render_mode: str = "preserve",
+) -> bool:
     """The actual generation pipeline. Kept as one function so the
     refinement re-render below can call the same path.
 
@@ -971,6 +975,13 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
     stay verifying against the person's own blended voice regardless
     of register. See the field's own comment in screen_render() for
     why these are kept as two separate signals.
+
+    render_mode: "preserve" (default) or "elevate", from the toggle
+    above the paste box on Screen 4. Passed straight through to
+    build_correction_prompt's mode parameter — see that function's
+    docstring for what elevate mode actually does (line-editing only:
+    old-to-new sentence ordering and economy, never restructuring).
+    Same as render_context, this doesn't touch the baseline targets.
 
     Returns True on success, False on failure. Callers must check this
     before treating the render as having happened (e.g. before marking
@@ -1204,8 +1215,19 @@ def _run_render(input_text: str, is_refinement: bool = False, render_context: st
         starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
         correction_delta = merge_starter_evidence(delta, starter_delta)
 
+        # Only computed in elevate mode — preserve mode does none of
+        # this extra work and build_correction_prompt's own params
+        # default to None, so preserve-mode behaviour is byte-for-byte
+        # what it was before these signals existed.
+        sentence_economy = None
+        passive_voice = None
+        if render_mode == "elevate":
+            sentence_economy = compute_sentence_economy(clean)
+            passive_voice = compute_passive_voice(clean)
+
         correction_prompt = build_correction_prompt(
-            correction_delta, semantic, input_has_opinion_content, input_has_directive_content
+            correction_delta, semantic, input_has_opinion_content, input_has_directive_content,
+            mode=render_mode, sentence_economy=sentence_economy, passive_voice=passive_voice,
         )
         log.info(
             "correction_pass_decision",
@@ -1445,6 +1467,17 @@ def screen_render():
         label_visibility="collapsed", key="render_context_field",
     )
 
+    render_mode = st.radio(
+        "mode",
+        options=["preserve", "elevate"],
+        format_func=lambda m: "Preserve — keep it close to as-is" if m == "preserve"
+                                else "Elevate — tighten it, keep your voice",
+        index=0,  # defaults to "preserve" — the existing behaviour, always
+        horizontal=True,
+        label_visibility="collapsed",
+        key="render_mode_field",
+    )
+
     input_text = st.text_area(
         "input", value=st.session_state.get("render_input_text", ""),
         placeholder="Paste AI-generated text here. An email draft, a LinkedIn post, a proposal section...",
@@ -1461,6 +1494,7 @@ def screen_render():
         else:
             st.session_state.render_input_text = input_text
             st.session_state.render_context_input = render_context
+            st.session_state.render_mode_input = render_mode
             st.session_state.render_output = ""
             st.session_state.refinement_used = False
             st.session_state.render_in_progress = True
@@ -1470,6 +1504,7 @@ def screen_render():
         _run_render(
             st.session_state.get("render_input_text", ""),
             render_context=st.session_state.get("render_context_input", ""),
+            render_mode=st.session_state.get("render_mode_input", "preserve"),
         )
         st.session_state.render_in_progress = False
         st.rerun()
@@ -1482,6 +1517,7 @@ def screen_render():
             if _run_render(
                 last_attempt, is_refinement=was_refinement,
                 render_context=st.session_state.get("render_context_input", ""),
+                render_mode=st.session_state.get("render_mode_input", "preserve"),
             ) and was_refinement:
                 st.session_state.refinement_used = True
             st.rerun()
@@ -1726,6 +1762,7 @@ def screen_render():
                 if _run_render(
                     refined_input, is_refinement=True,
                     render_context=st.session_state.get("render_context_input", ""),
+                    render_mode=st.session_state.get("render_mode_input", "preserve"),
                 ):
                     st.session_state.refinement_used = True
                 st.rerun()

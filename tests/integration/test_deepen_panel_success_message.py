@@ -59,10 +59,21 @@ def _click(at, label_substr):
 
 
 def _fake_response(text: str):
+    # Single block satisfies both response shapes the pipeline uses:
+    # .text for the plain-text calls (initial render, grammar-fix,
+    # voice-profile-summary — unchanged), and .type/.input for the
+    # correction call, which now uses a forced tool_choice response
+    # (see prompts.CORRECTION_TOOL / app.py's correction-pass fix,
+    # 18 Aug 2026). Without both, the correction call's tool_use
+    # extraction finds nothing, silently retries, and inflates the
+    # call count — exactly the regression this fix closes.
     block = MagicMock()
     block.text = text
+    block.type = "tool_use"
+    block.input = {"corrected_text": text}
     resp = MagicMock()
     resp.content = [block]
+    resp.stop_reason = "tool_use"
     return resp
 
 
