@@ -27,6 +27,7 @@ import streamlit as st
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from render_cap import check_and_reserve_render
+from render_history import write_render_history
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
@@ -61,7 +62,7 @@ from deterministic_fixers import (
     ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
 )
 from logging_config import get_logger
-from persistence import restore_profile_if_available, save_profile_if_available
+from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id
 
 log = get_logger(__name__)
 
@@ -1729,6 +1730,25 @@ def _run_render(
         # voice_report above — never reused across renders.
         st.session_state.render_id = str(uuid.uuid4())
         st.session_state.render_completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Section 9.4 / Step 4 (VOICOVA_Product_2.0_Consolidated.docx):
+        # write path for the History screen. Called here, after the
+        # render has fully succeeded and the voice report is built —
+        # matches write_render_history's own docstring, which is
+        # explicit that this must never run before success is known.
+        # Fails open and silently inside write_render_history itself,
+        # so no try/except needed at this call site.
+        device_id = st.session_state.get("_device_id") or get_or_create_device_id()
+        st.session_state["_device_id"] = device_id
+        write_render_history(
+            device_id=device_id,
+            input_text=input_text,
+            output_text=clean,
+            context=render_context,
+            mode=render_mode,
+            voice_match=st.session_state.voice_report.get("voice_match_badge"),
+            content_lock_pass=not content_integrity_hard_fail,
+        )
     else:
         st.session_state.render_delta = None
         st.session_state.voice_report = None
@@ -2048,8 +2068,20 @@ def screen_render():
     # the person's own blended voice, this only steers word choice and
     # formality at generation time. Same fast-path-by-default pattern as
     # the deepen-fingerprint panel: visible, not gated, easy to ignore.
+    # Section 9.1 / Section 11 decision (19 Aug 2026): default to the
+    # last-used context rather than forcing a choice every render.
+    # Seeded into session_state BEFORE the widget is created, not
+    # passed via value= below — Streamlit ignores a keyed widget's
+    # value= after its first run, session_state is what actually
+    # controls it from then on. Same pattern already used for
+    # render_input_field's initial value elsewhere on this screen.
+    # Still fully editable/clearable per render; this only changes
+    # what's pre-filled, never forces the previous context to stick.
+    if "render_context_field" not in st.session_state:
+        st.session_state["render_context_field"] = st.session_state.get("render_context_input", "")
+
     render_context = st.text_input(
-        "context", value="",
+        "context",
         placeholder="Optional. Who's this for, and what's it for?",
         label_visibility="collapsed", key="render_context_field",
     )
