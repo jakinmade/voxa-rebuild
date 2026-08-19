@@ -36,7 +36,7 @@ from voice_engine import (
     compute_baseline_metrics, _merge_baseline,
     _score_sample_fitness, _fitness_gate,
     _score_ai_signal,
-    score_semantic_drift, find_source_sentence, highlight_attribution_swaps, compute_confidence, compute_risk, compute_risk_reason,
+    score_semantic_drift, find_source_sentence, splice_dropped_sentence, highlight_attribution_swaps, compute_confidence, compute_risk, compute_risk_reason,
     has_content_integrity_hard_fail,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells, score_restructure_fidelity,
@@ -2265,6 +2265,13 @@ def screen_render():
                     f'in full before sending, don\'t just skim the changes above.{context_line}</div>',
                     unsafe_allow_html=True
                 )
+                if source_sentence and st.button(
+                    "Restore this sentence", key=f"restore_sentence_{output_key}"
+                ):
+                    st.session_state.render_output = splice_dropped_sentence(
+                        output, source_sentence
+                    )
+                    st.rerun()
 
             # Amber, not red — this is a graceful decline, not a
             # content-integrity failure the person needs to hunt for.

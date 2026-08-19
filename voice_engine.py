@@ -1696,6 +1696,46 @@ def find_source_sentence(input_text: str, entity: str) -> str | None:
     return None
 
 
+def splice_dropped_sentence(output_text: str, source_sentence: str) -> str:
+    """Appends a dropped original sentence to the end of output_text,
+    clearly marked, so the person can see and reposition it themselves.
+
+    Deliberately the safe subset of the splice/restore feature
+    find_source_sentence's docstring flags as deferred: the risky half
+    is picking WHERE inside the rewrite the sentence belongs, which
+    needs judgement about paragraph structure and flow that a regex
+    can't safely make and that isn't being attempted here. This
+    function makes no positional decision at all - it appends, once,
+    at the end, with a visible marker, and leaves placement entirely
+    to the person. Deterministic, no API call, no model in the loop.
+
+    Guards:
+    - Empty/whitespace-only source_sentence returns output_text
+      unchanged (nothing to add).
+    - If source_sentence (case-insensitive, whitespace-normalised)
+      already appears in output_text, returns output_text unchanged -
+      never appends a duplicate, since a second live-model call earlier
+      in the render pipeline could have already restored it before
+      this button is ever clicked.
+    - Never trims or rewords source_sentence - it is inserted exactly
+      as extracted by find_source_sentence, since altering wording
+      here would be a second uncontrolled edit stacked on top of the
+      one this feature exists to catch.
+    """
+    if not source_sentence or not source_sentence.strip():
+        return output_text
+
+    sentence = source_sentence.strip()
+    normalised_output = re.sub(r"\s+", " ", output_text).lower()
+    normalised_sentence = re.sub(r"\s+", " ", sentence).lower()
+    if normalised_sentence in normalised_output:
+        return output_text
+
+    separator = "\n\n" if output_text and not output_text.endswith("\n\n") else ""
+    marker = "[Restored - not repositioned, check placement]"
+    return f"{output_text}{separator}{marker} {sentence}"
+
+
 def score_restructure_fidelity(pre_text: str, post_text: str) -> dict:
     """
     Verifies a linkedin_format correction call only rearranged and cut
