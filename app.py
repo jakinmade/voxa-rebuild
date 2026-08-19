@@ -395,6 +395,14 @@ st.markdown("""
         font-size: 0.82rem;
         line-height: 1.4;
     }
+    .content-lock-banner-note {
+        font-size: 0.82rem;
+        line-height: 1.4;
+        margin-top: 0.35rem;
+        padding-top: 0.35rem;
+        border-top: 1px solid rgba(0, 0, 0, 0.08);
+        color: var(--warning);
+    }
     .content-lock {
         margin-top: 0.9rem;
         padding-top: 0.9rem;
@@ -1856,9 +1864,21 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
     Reasons list mirrors _build_content_lock_html's four checks so the
     banner's summary and the checklist below it can never disagree
     about what failed.
+
+    lexical_fidelity_breaks (19 Aug 2026) is deliberately NOT one of
+    the four "reasons" above and never flips this banner to fail —
+    that would contradict the explicit decision (detect_lexical_
+    fidelity_breaks' own docstring) that a watchlist hit is informational,
+    not a content-integrity failure. Fixing the earlier gap where this
+    signal was computed but shown nowhere: it now renders as its own
+    amber note, in the SAME banner position either state lands in, so
+    it's visible either way rather than silently swallowed - but it's
+    styled and worded as a lower-severity notice, not folded into the
+    red fail state or the checklist below it.
     """
     dropped = report.get("dropped_entities", [])
     swaps = report.get("attribution_swaps", [])
+    lexical_breaks = report.get("lexical_fidelity_breaks", [])
     sentence_growth = (insertion_check or {}).get("sentence_growth", 0)
     new_hedges = (insertion_check or {}).get("new_hedges", [])
 
@@ -1872,12 +1892,21 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
     if new_hedges:
         reasons.append(f"New hedging added: {', '.join(new_hedges)}")
 
+    note_html = ""
+    if lexical_breaks:
+        note_lines = "".join(
+            f'<div class="content-lock-banner-note">\u26a0 Worth a look: {b}</div>'
+            for b in lexical_breaks
+        )
+        note_html = note_lines
+
     if reasons:
         reason_html = "".join(f'<div class="content-lock-banner-reason">{r}</div>' for r in reasons)
         return (
             '<div class="content-lock-banner fail">'
             '<div class="content-lock-banner-title">\u26a0 Needs your eyes</div>'
             f'{reason_html}'
+            f'{note_html}'
             '</div>'
         )
 
@@ -1885,6 +1914,7 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
         '<div class="content-lock-banner pass">'
         '<div class="content-lock-banner-title">\u2713 Content safe</div>'
         '<div class="content-lock-banner-reason">Facts, attribution, and structure preserved.</div>'
+        f'{note_html}'
         '</div>'
     )
 

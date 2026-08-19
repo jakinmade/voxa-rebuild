@@ -130,6 +130,75 @@ def test_banner_missing_insertion_check_defaults_to_safe():
 
 
 # ---------------------------------------------------------------------------
+# lexical_fidelity_breaks note (19 Aug 2026) — fixes the gap where this
+# signal was computed (voice_engine.detect_lexical_fidelity_breaks) but
+# never actually shown anywhere. Deliberately a separate amber note,
+# not one of the four fail reasons - a watchlist hit must never flip
+# this banner to fail on its own, per detect_lexical_fidelity_breaks'
+# own docstring (informational only, JA: "flag it for review rather
+# than block").
+# ---------------------------------------------------------------------------
+
+def test_lexical_fidelity_break_shows_as_note_not_failure_when_otherwise_clean():
+    report = {
+        "dropped_entities": [], "attribution_swaps": [],
+        "lexical_fidelity_breaks": ["'surfaces' became 'brings up' - breaks grammar"],
+    }
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    # Still reads as safe overall - the whole point is this must not
+    # be treated as a content-integrity failure.
+    assert "content-lock-banner pass" in html
+    assert "content-lock-banner fail" not in html
+    assert "content-lock-banner-note" in html
+    assert "Worth a look" in html
+    assert "brings up" in html
+
+
+def test_lexical_fidelity_break_still_shows_alongside_a_real_failure():
+    # A real hard-fail (dropped entity) and a lexical-fidelity note can
+    # both be true of the same render - the note must not get lost
+    # inside the fail state either.
+    report = {
+        "dropped_entities": ["Scott"], "attribution_swaps": [],
+        "lexical_fidelity_breaks": ["'surfaces' became 'brings up' - breaks grammar"],
+    }
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "content-lock-banner fail" in html
+    assert "Scott" in html
+    assert "content-lock-banner-note" in html
+    assert "brings up" in html
+
+
+def test_no_lexical_fidelity_note_when_list_empty():
+    report = {"dropped_entities": [], "attribution_swaps": [], "lexical_fidelity_breaks": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "content-lock-banner-note" not in html
+
+
+def test_missing_lexical_fidelity_breaks_key_does_not_crash():
+    # Older report dicts (or any call site that hasn't been touched)
+    # won't have this key at all - must default cleanly, not KeyError.
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "content-lock-banner pass" in html
+    assert "content-lock-banner-note" not in html
+
+
+def test_multiple_lexical_fidelity_breaks_all_shown():
+    report = {
+        "dropped_entities": [], "attribution_swaps": [],
+        "lexical_fidelity_breaks": [
+            "'surfaces' became 'brings up' - breaks grammar",
+            "'if' became 'whether' - unforced swap",
+        ],
+    }
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert html.count("content-lock-banner-note") == 2
+    assert "brings up" in html
+    assert "whether" in html
+
+
+# ---------------------------------------------------------------------------
 # _build_what_changed_html — the leading chip row summarising
 # biggest_changes ("Label +NN%" strings) as direction-only chips.
 # ---------------------------------------------------------------------------
