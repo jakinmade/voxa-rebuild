@@ -71,6 +71,29 @@ def test_no_watchlist_words_no_flags():
 
 
 # ---------------------------------------------------------------------------
+# Wiring - screen_render calls the combined highlighter, not the old
+# single-signal one, with both report fields. Source-inspection, same
+# pattern already used in this file for exactly this kind of check
+# (test_write_as_me_button_wired_to_disable_on_render_in_progress) -
+# AppTest resolves the full render synchronously so there's no hook to
+# freeze on the intermediate highlighted-block state the way a real
+# browser would show it.
+# ---------------------------------------------------------------------------
+
+def test_screen_render_calls_combined_highlighter_with_both_signals():
+    import inspect
+    import app as app_module
+    source = inspect.getsource(app_module.screen_render)
+    assert "highlight_flagged_phrases(" in source
+    assert "highlight_attribution_swaps(" not in source, (
+        "screen_render should call the combined highlighter, not the "
+        "old single-signal one, now that lexical_fidelity_breaks also "
+        "needs inline highlighting."
+    )
+    assert 'report or {}).get("lexical_fidelity_breaks"' in source.replace("\n", " ").replace("  ", " ")
+
+
+# ---------------------------------------------------------------------------
 # score_semantic_drift - carries the new field through
 # ---------------------------------------------------------------------------
 

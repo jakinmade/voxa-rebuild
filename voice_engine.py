@@ -1738,6 +1738,95 @@ def highlight_attribution_swaps(output_text: str, attribution_swaps: list[str]) 
     return escaped
 
 
+def highlight_flagged_phrases(
+    output_text: str,
+    attribution_swaps: list[str] | None = None,
+    lexical_fidelity_breaks: list[str] | None = None,
+) -> str:
+    """
+    Combined, single-pass inline highlighter for every signal whose
+    flagged phrase genuinely exists in the output text: attribution
+    swaps (red, matches highlight_attribution_swaps' existing colour -
+    a hard content-integrity fail) and lexical-fidelity-break
+    watchlist hits (amber, matches the Content Lock banner's
+    .content-lock-banner-note colour - informational only, see
+    detect_lexical_fidelity_breaks' own docstring).
+
+    Built as ONE combined pass rather than calling
+    highlight_attribution_swaps twice in sequence for two different
+    signals. That would mean a second independent regex running
+    against text that already has a <span> injected into it from the
+    first pass - a real collision risk (an already-wrapped phrase, or
+    one that partially overlaps a prior match, could get double-
+    wrapped or corrupted). This never mattered before tonight because
+    only one signal was ever highlighted at a time. Instead: every
+    match's position is resolved ONCE against a single escaped string,
+    any match overlapping an already-claimed span is dropped, then the
+    string is reconstructed in one left-to-right pass.
+
+    Both signal strings share the same "X became 'Y'" format
+    (detect_attribution_swaps and detect_lexical_fidelity_breaks were
+    both built to that convention), so one extraction pattern covers
+    both - no new parsing logic needed. attribution_swaps is resolved
+    first, so it wins any overlap: a real content-integrity failure
+    should never be hidden behind a lower-severity note claiming the
+    same span.
+
+    Same read-only contract as highlight_attribution_swaps: no
+    restore/splice action. Fixing an attribution swap or a lexical-
+    fidelity break in place is a materially different, riskier
+    feature (editing text, not appending to it) - explicitly out of
+    scope for this pass, same distinction find_source_sentence's own
+    docstring already draws for why dropped-entity restoration is
+    append-only rather than positional.
+
+    highlight_attribution_swaps itself is left untouched - this is a
+    new, additive function, not a modification of one that's already
+    shipped and tested.
+    """
+    import html
+    escaped = html.escape(output_text)
+
+    def _phrase(entry: str) -> str | None:
+        m = re.search(r"became '([^']+)'", entry)
+        return m.group(1) if m else None
+
+    RED = "background:#FBE4E2;border-bottom:2px solid #B3382C;"
+    AMBER = "background:#FDF2DF;border-bottom:2px solid #A5690B;"
+
+    spans: list[tuple[int, int, str, str]] = []
+
+    def _claim(entries: list[str] | None, style: str) -> None:
+        for entry in entries or []:
+            phrase = _phrase(entry)
+            if not phrase:
+                continue
+            pattern = re.compile(r"\b" + re.escape(html.escape(phrase)) + r"\b", re.I)
+            for m in pattern.finditer(escaped):
+                if not any(m.start() < e and s < m.end() for s, e, _, _ in spans):
+                    spans.append((m.start(), m.end(), style, html.escape(entry)))
+                    break
+
+    _claim(attribution_swaps, RED)
+    _claim(lexical_fidelity_breaks, AMBER)
+
+    if not spans:
+        return escaped
+
+    spans.sort(key=lambda s: s[0])
+    out: list[str] = []
+    cursor = 0
+    for start, end, style, tooltip in spans:
+        out.append(escaped[cursor:start])
+        out.append(
+            f'<span style="{style}padding:1px 2px;border-radius:3px;" '
+            f'title="{tooltip}">{escaped[start:end]}</span>'
+        )
+        cursor = end
+    out.append(escaped[cursor:])
+    return "".join(out)
+
+
 def find_source_sentence(input_text: str, entity: str) -> str | None:
     """Returns the first sentence in input_text containing entity
     (case-insensitive, whole word), or None if not found.
