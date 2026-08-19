@@ -65,6 +65,21 @@ from persistence import restore_profile_if_available, save_profile_if_available
 
 log = get_logger(__name__)
 
+# Human-readable labels for compute_risk_reason()'s internal codes, for
+# the report card's "What we checked" stat — replaces the raw Semantic
+# Match percentage (see 19 Aug 2026 discussion: that number never
+# actually drove the Risk verdict here, the hard-fail checks below did;
+# see compute_risk's own docstring for the confirmed-live incident
+# where a 96-97% semantic_match sat next to a real content error).
+_RISK_REASON_LABEL = {
+    "ai_tell": "AI phrasing found",
+    "attribution_swap": "Credit may have shifted",
+    "dropped_entity": "Something may be missing",
+    "sentence_growth": "New content may be added",
+    "aggregate_band": "Broader drift from your voice",
+    "clean": "Nothing flagged",
+}
+
 # ---- Page config — must be first ----
 st.set_page_config(
     page_title="Voicova - Communication Identity",
@@ -2192,8 +2207,8 @@ def screen_render():
                         <span class="badge {vm_badge}">{vm_tier}</span>
                     </div>
                     <div class="vr-stat">
-                        <div class="vr-stat-label">Semantic Match</div>
-                        <div class="vr-stat-value">{report['semantic_match']}%</div>
+                        <div class="vr-stat-label">What we checked</div>
+                        <div class="vr-stat-value">{_RISK_REASON_LABEL.get(st.session_state.get("risk_reason", ""), "Clean")}</div>
                     </div>
                     <div class="vr-stat">
                         <div class="vr-stat-label">Confidence</div>
