@@ -156,7 +156,12 @@ def test_write_render_history_called_on_successful_render():
             assert payload["mode"] == "preserve"
             assert payload["input_text"] == "Please write a short note about the launch plan."
             assert payload["output_text"] == at.session_state["render_output"]
-            assert "voice_match" in payload
+            # voice_match_tier (human-readable, e.g. "Strong match"),
+            # not voice_match_badge (a CSS class name like
+            # "badge-green") - caught and fixed 19 Aug 2026, this
+            # assertion is what should have caught it the first time.
+            assert payload["voice_match"] == at.session_state["voice_report"]["voice_match_tier"]
+            assert not payload["voice_match"].startswith("badge-")
             assert isinstance(payload["content_lock_pass"], bool)
 
 

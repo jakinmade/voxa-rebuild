@@ -1746,7 +1746,11 @@ def _run_render(
             output_text=clean,
             context=render_context,
             mode=render_mode,
-            voice_match=st.session_state.voice_report.get("voice_match_badge"),
+            # voice_match_tier, not voice_match_badge - the latter is a
+            # CSS class name (e.g. "badge-green"), not a display label.
+            # See voice_match_tier's use in screen_render's own HTML
+            # (vm_tier) for the human-readable string this mirrors.
+            voice_match=st.session_state.voice_report.get("voice_match_tier"),
             content_lock_pass=not content_integrity_hard_fail,
         )
     else:
