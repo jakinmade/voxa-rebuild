@@ -1847,6 +1847,20 @@ def _build_what_changed_html(biggest_changes: list[str]) -> str:
     return '<div class="what-changed-row">' + "".join(chips) + '</div>'
 
 
+def _sentence_growth_label(count: int) -> str:
+    """Shared phrasing for both the banner and the full checklist, so
+    they can never say this two different ways. Plain pluralisation
+    instead of the "sentence(s)" construct that was here before -
+    part of what was flagged as reading heavy (19 Aug 2026, F1 test
+    render). The reported count itself is still the raw sentence-
+    count delta from _check_uncorrected_insertions - an attempt to
+    attribute it to specific sentences was tried and reverted the
+    same session after it proved unreliable against heavily-
+    paraphrased real text (see that function's own docstring)."""
+    noun = "sentence" if count == 1 else "sentences"
+    return f"Added {count} new {noun} not in the original"
+
+
 def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) -> str:
     """
     Leading summary state for Content Lock — 'CONTENT SAFE' or 'NEEDS
@@ -1888,7 +1902,7 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
     if swaps:
         reasons.append("Attribution may have changed — check before sending.")
     if sentence_growth:
-        reasons.append(f"{sentence_growth} sentence(s) added beyond the original")
+        reasons.append(_sentence_growth_label(sentence_growth))
     if new_hedges:
         reasons.append(f"New hedging added: {', '.join(new_hedges)}")
 
@@ -1959,7 +1973,7 @@ def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
         (not swaps, "Attribution preserved",
          "Whose point this was may have changed — check before sending." if swaps else None),
         (sentence_growth == 0, "No sentences invented",
-         f"{sentence_growth} sentence(s) added beyond the original" if sentence_growth else None),
+         _sentence_growth_label(sentence_growth) if sentence_growth else None),
         (not new_hedges, "No new hedging introduced",
          f"Added: {', '.join(new_hedges)}" if new_hedges else None),
     ]

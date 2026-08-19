@@ -1103,6 +1103,24 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
             count, floored at 0, and reported only when accompanied by
             new words (see docstring) — a pure punctuation split isn't
             a fabrication signal, so it's not reported here.
+
+            19 Aug 2026: tried attributing this to specific sentences
+            that individually carry new content, instead of the raw
+            delta, after a real render (F1 test) reported "3 sentence
+            (s) added" when only one sentence actually contained a
+            genuine fabrication. Reverted after testing against that
+            same render: the same text also did heavy synonym
+            substitution throughout ("gain"->"find", "highlight"->
+            "demonstrate", "reinforces"->"shows"), and a per-sentence
+            word-budget can't tell a swapped word from a fabricated
+            one - it flagged 6 of 14 sentences, not 1. Shipping that
+            would have traded one inaccuracy for a worse one. Raw
+            delta stays as the honest, if blunt, number until there's
+            a genuinely reliable way to separate "reworded" from
+            "fabricated" per sentence - see detect_lexical_fidelity_
+            breaks' own docstring for why that's deliberately scoped
+            as a narrow watchlist rather than a general synonym
+            detector, same reasoning applies here.
         "flagged": bool          — True if either signal fired.
       }
     """

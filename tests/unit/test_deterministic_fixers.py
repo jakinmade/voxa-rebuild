@@ -627,6 +627,76 @@ def test_sentence_growth_with_new_content_still_flagged():
     assert result["flagged"] is True
 
 
+def test_heavily_paraphrased_render_reports_raw_delta_not_a_lower_attributed_count():
+    """Regression anchor for the 19 Aug 2026 F1 test render: a heavily
+    reworded render (synonym substitution in nearly every sentence,
+    two harmless rhythm splits, and one genuinely fabricated closing
+    clause) must still report the raw sentence-count delta.
+
+    This exists specifically because a same-session attempt to report
+    a more precise per-sentence-attributed count was tried against
+    this exact text and reverted - it flagged 6 of 14 sentences (word-
+    swap and fabrication look identical to a per-sentence word-budget
+    check), capped right back to the same raw delta anyway. If a
+    future attempt at per-sentence attribution is tried again, this
+    test is the one that should catch whether it's actually reliable
+    against real heavily-paraphrased text, not just a clean synthetic
+    example."""
+    before = (
+        "Formula One stands as the world's premier single-seater racing "
+        "championship, combining cutting-edge engineering, elite athletic "
+        "performance, and a global entertainment footprint. Each season "
+        "brings a blend of technological innovation, strategic complexity, "
+        "and high-speed drama that continues to captivate millions of fans "
+        "across continents."
+        "\nAt its core, Formula One is defined by precision and "
+        "optimisation. Teams invest heavily in aerodynamics, power unit "
+        "efficiency, and data-driven race strategy to gain even the "
+        "smallest competitive edge. Drivers operate at the limits of "
+        "human reflex, endurance, and decision-making, navigating circuits "
+        "that test every aspect of skill \u2014 from tight street tracks to "
+        "high-speed purpose-built venues."
+        "\nBeyond the racing itself, Formula One has become a major force "
+        "in media, fashion, sustainability initiatives, and digital fan "
+        "engagement. Teams and drivers maintain massive online followings, "
+        "while the sport's technical narratives continue to inspire "
+        "innovation across automotive and engineering sectors."
+        "\nAs regulations shift and new talent emerges, Formula One "
+        "remains a dynamic ecosystem \u2014 one where competition, "
+        "technology, and global storytelling intersect to create one of "
+        "the most compelling sporting experiences in the world."
+    )
+    after = (
+        "Formula One is the world's premier single-seater racing "
+        "championship. It combines serious engineering, elite athletic "
+        "performance, and a global entertainment footprint. Each season "
+        "brings technological innovation, strategic complexity, and "
+        "high-speed drama that continues to pull in millions of fans "
+        "across continents."
+        "\nAt its core, Formula One is about precision and optimisation. "
+        "Teams invest heavily in aerodynamics, power unit efficiency, and "
+        "data-driven race strategy to find even the smallest competitive "
+        "edge. Drivers operate at the limits of human reflex, endurance, "
+        "and decision-making, navigating circuits that test every aspect "
+        "of skill, from tight street tracks to high-speed purpose-built "
+        "venues."
+        "\nBeyond the racing, Formula One has become a significant force "
+        "in media, fashion, sustainability, and digital fan engagement. "
+        "Teams and drivers maintain massive online followings. The "
+        "sport's technical story could continue to inspire innovation "
+        "across automotive and engineering sectors."
+        "\nAs regulations shift and new talent emerges, Formula One might "
+        "remain one of the most dynamic environments where competition, "
+        "technology, and global storytelling come together. It is, "
+        "though most sporting experiences would claim as much, amongst "
+        "the most compelling in the world."
+    )
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 3
+    assert result["new_hedges"] == ["could", "might"]
+    assert result["flagged"] is True
+
+
 def test_clean_correction_pass_not_flagged():
     """The common case: LLM correction genuinely just fixes the target
     dimension with no collateral. Must not false-positive."""

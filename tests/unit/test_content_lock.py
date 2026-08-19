@@ -12,7 +12,7 @@ Deliberately four checks, not the five in the original design brief —
 see the function's own docstring for why "no new claims detected"
 was dropped rather than mapped weakly onto an unrelated signal.
 """
-from app import _build_content_lock_html, _build_content_lock_banner_html, _build_what_changed_html
+from app import _build_content_lock_html, _build_content_lock_banner_html, _build_what_changed_html, _sentence_growth_label
 
 
 def test_all_pass_shows_four_pass_states_zero_fail():
@@ -53,7 +53,7 @@ def test_sentence_growth_shows_as_fail_with_count():
     insertion_check = {"sentence_growth": 2, "new_hedges": []}
     html = _build_content_lock_html(report, insertion_check)
     assert "No sentences invented" in html
-    assert "2 sentence(s) added" in html
+    assert "Added 2 new sentences not in the original" in html
 
 
 def test_new_hedges_shows_as_fail_with_words_listed():
@@ -119,7 +119,7 @@ def test_banner_lists_every_failure_reason_not_just_first():
     assert html.count("content-lock-banner-reason") == 4
     assert "Scott" in html
     assert "Attribution may have changed" in html
-    assert "1 sentence(s)" in html
+    assert "Added 1 new sentence not in the original" in html
     assert "perhaps" in html
 
 
@@ -226,3 +226,37 @@ def test_what_changed_caps_at_three_chips():
     html = _build_what_changed_html(changes)
     assert html.count("what-changed-chip") == 3
     assert "Directness" not in html
+
+
+# ---------------------------------------------------------------------------
+# _sentence_growth_label (19 Aug 2026) — plain pluralisation, replacing
+# the "sentence(s)" construct flagged as reading heavy. Shared by the
+# banner and the full checklist so they can never word this two ways.
+# ---------------------------------------------------------------------------
+
+def test_sentence_growth_label_singular():
+    assert _sentence_growth_label(1) == "Added 1 new sentence not in the original"
+
+
+def test_sentence_growth_label_plural():
+    assert _sentence_growth_label(3) == "Added 3 new sentences not in the original"
+
+
+def test_sentence_growth_label_never_uses_parenthetical_s():
+    for n in (1, 2, 5):
+        assert "(s)" not in _sentence_growth_label(n)
+
+
+def test_banner_uses_shared_sentence_growth_label():
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 3, "new_hedges": []})
+    assert "Added 3 new sentences not in the original" in html
+    assert "sentence(s)" not in html
+
+
+def test_checklist_uses_shared_sentence_growth_label():
+    from app import _build_content_lock_html
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_html(report, {"sentence_growth": 2, "new_hedges": []})
+    assert "Added 2 new sentences not in the original" in html
+    assert "sentence(s)" not in html
