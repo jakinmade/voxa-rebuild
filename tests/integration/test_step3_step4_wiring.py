@@ -319,3 +319,201 @@ def test_history_back_to_write_button_navigates():
         back_button = next(b for b in at.sidebar.button if b.key == "nav_back_to_write_from_history")
         back_button.click().run()
         assert at.session_state["screen"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Step 4 (subscription half) - paywall UI and checkout-success banner
+# ---------------------------------------------------------------------------
+
+def test_paywall_shows_upgrade_buttons_not_try_again():
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}), \
+         patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)), \
+         patch("render_history.get_supabase_client", return_value=MagicMock()):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+        assert not at.exception
+
+        assert any("used all 15 free renders" in e.value for e in at.error)
+        button_keys = [b.key for b in at.button]
+        assert "upgrade_monthly" in button_keys
+        assert "upgrade_annual" in button_keys
+        assert "retry_render" not in button_keys
+
+
+def test_non_paywall_error_still_shows_try_again_not_upgrade():
+    # Ordinary daily-cap failure must keep the existing Try again path -
+    # the paywall branch must not swallow every render_error.
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}), \
+         patch("render_cap.check_and_reserve_render", return_value=(False, 40, 40)):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+        assert not at.exception
+
+        button_keys = [b.key for b in at.button]
+        assert "retry_render" in button_keys
+        assert "upgrade_monthly" not in button_keys
+
+
+def test_upgrade_monthly_button_calls_checkout_with_correct_plan_and_shows_link():
+    # Patches the same low-level seam stripe_subscription's own unit
+    # tests patch (stripe.checkout.Session.create), not app.
+    # create_subscription_checkout - AppTest runs app.py through its
+    # own script-runner rather than a normal `import app`, so a patch
+    # on app's bound name (imported via `from stripe_subscription
+    # import ...`) is never seen by that execution path, same issue
+    # documented above for write_render_history. This also exercises
+    # the real create_subscription_checkout end to end, which is a
+    # stronger integration test than mocking it away entirely.
+    import stripe
+    fake_session = MagicMock(url="https://checkout.stripe.com/pay/sess_1")
+    with patch.dict(os.environ, {
+             "ANTHROPIC_API_KEY": "test-key-not-real",
+             "STRIPE_API_KEY": "sk_test_fake", "VOICOVA_APP_URL": "https://app.example.com",
+         }), \
+         patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)), \
+         patch.object(stripe.checkout.Session, "create", return_value=fake_session) as mock_create:
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+        assert not at.exception
+
+        upgrade_button = next(b for b in at.button if b.key == "upgrade_monthly")
+        upgrade_button.click().run()
+        assert not at.exception
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["metadata"]["device_id"] == "test-device-1"
+        assert kwargs["metadata"]["plan"] == "monthly"
+        # No dedicated .link_button accessor on this Streamlit version's
+        # AppTest - .get("link_button") is the documented generic
+        # fallback for element types without one.
+        link_urls = [lb.url for lb in at.get("link_button")]
+        assert "https://checkout.stripe.com/pay/sess_1" in link_urls
+
+
+def test_upgrade_annual_button_calls_checkout_with_correct_plan():
+    import stripe
+    fake_session = MagicMock(url="https://checkout.stripe.com/pay/sess_2")
+    with patch.dict(os.environ, {
+             "ANTHROPIC_API_KEY": "test-key-not-real",
+             "STRIPE_API_KEY": "sk_test_fake", "VOICOVA_APP_URL": "https://app.example.com",
+         }), \
+         patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)), \
+         patch.object(stripe.checkout.Session, "create", return_value=fake_session) as mock_create:
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+
+        upgrade_button = next(b for b in at.button if b.key == "upgrade_annual")
+        upgrade_button.click().run()
+        assert not at.exception
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["metadata"]["plan"] == "annual"
+
+
+def test_upgrade_button_shows_error_when_checkout_fails():
+    # No STRIPE_API_KEY configured -> create_subscription_checkout
+    # returns None -> the button's own failure branch fires.
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}), \
+         patch("stripe_subscription._get_secret", return_value=None), \
+         patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+
+        upgrade_button = next(b for b in at.button if b.key == "upgrade_monthly")
+        upgrade_button.click().run()
+        assert not at.exception
+        assert any("Couldn't start checkout" in e.value for e in at.error)
+
+
+def test_checkout_success_query_param_shows_confirmation_banner():
+    import stripe
+    session = stripe.checkout.Session.construct_from(
+        {
+            "id": "sess_1", "object": "checkout.session", "status": "complete",
+            "customer": "cus_1", "metadata": {"device_id": "test-device-1"},
+        },
+        "sk_test_fake",
+    )
+    subscription = stripe.Subscription.construct_from(
+        {"id": "sub_1", "object": "subscription", "status": "active"}, "sk_test_fake",
+    )
+    session["subscription"] = subscription
+    client = MagicMock()
+    with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_fake"}), \
+         patch.object(stripe.checkout.Session, "retrieve", return_value=session), \
+         patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("persistence.get_or_create_device_id", return_value="test-device-1"):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        # The banner lives on screen_render (screen 4) - in production
+        # this is exactly where a returning device lands, because
+        # restore_profile_if_available() (which runs before this
+        # query-param handling) already sent it to screen 4 before the
+        # checkout redirect ever fires. Seeded here for the same
+        # reason, not as a workaround - a fresh screen-1 session would
+        # never have hit the paywall this checkout came from.
+        at.session_state["screen"] = 4
+        at.session_state["baseline_fingerprint"] = {}
+        at.query_params["payment"] = "success"
+        at.query_params["session_id"] = "sess_1"
+        at.run()
+        assert not at.exception
+        assert any("You're subscribed" in s.value for s in at.success)
+
+
+def test_checkout_success_query_param_shows_failure_banner_when_verify_fails():
+    import stripe
+    with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_fake"}), \
+         patch.object(stripe.checkout.Session, "retrieve", side_effect=Exception("boom")), \
+         patch("persistence.get_or_create_device_id", return_value="test-device-1"):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        at.session_state["screen"] = 4
+        at.session_state["baseline_fingerprint"] = {}
+        at.query_params["payment"] = "success"
+        at.query_params["session_id"] = "sess_1"
+        at.run()
+        assert not at.exception
+        assert any("couldn't confirm that payment" in e.value for e in at.error)
+
+
+def test_checkout_cancelled_query_param_shows_no_banner():
+    at = AppTest.from_file(_APP_PATH)
+    at.run()
+    at.session_state["screen"] = 4
+    at.session_state["baseline_fingerprint"] = {}
+    at.query_params["payment"] = "cancelled"
+    at.run()
+    assert not at.exception
+    assert not any("subscribed" in s.value for s in at.success)
+    assert not any("confirm that payment" in e.value for e in at.error)

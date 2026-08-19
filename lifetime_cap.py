@@ -28,6 +28,14 @@ SCHEMA (create once in Supabase's SQL editor):
         count integer not null default 0
     );
 
+    -- Added 19 Aug 2026 (stripe_subscription.py) — same row per
+    -- device, not a new table. See that module's docstring for why
+    -- subscription identity is bridged onto this existing table
+    -- rather than a separate one.
+    alter table lifetime_render_cap
+        add column stripe_customer_id text,
+        add column subscription_status text;
+
 CONCURRENCY NOTE: same read-then-write pattern and same accepted
 undercounting-on-true-race caveat as render_cap.py — acceptable for a
 soft lifetime ceiling, not a billing-exact counter.
@@ -65,18 +73,21 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
 
     If allowed is True, the caller may proceed; the render already
     counts toward this device's lifetime total (reserved optimistically
-    before the API call, matching render_cap.py's convention).
+    before the API call, matching render_cap.py's convention) - UNLESS
+    the device has an active subscription, in which case nothing is
+    counted or checked at all (see subscription check below).
 
     If allowed is False, the device has used all free renders and has
     not yet paid — the caller shows the paywall instead of rendering.
 
-    A device_id belonging to a PAID subscriber must be checked against
-    subscription status BEFORE this function is called at all — this
-    module has no concept of payment, it only counts. Wiring that
-    check is a Stripe-integration task, out of scope here; until it
-    exists, this function alone would incorrectly cap paying users
-    too, so do not wire this into _run_render without the subscription
-    check landing in the same change.
+    Subscription check (19 Aug 2026, stripe_subscription.py): reads the
+    SAME row this function already queries for `count` - one extra
+    column (subscription_status), no extra Supabase call. An active
+    subscription short-circuits before the limit check and before any
+    count increment, so paying subscribers are never capped and their
+    lifetime count stops moving once they've paid (nothing left for it
+    to gate). See stripe_subscription.py's docstring for why this
+    couldn't be wired in without that module landing first.
 
     Fails OPEN: no Supabase configured, or any error, returns
     (True, 0, limit) — same contract as render_cap.py, same reasoning
@@ -91,13 +102,16 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
     try:
         existing = (
             client.table(_TABLE)
-            .select("count")
+            .select("count, subscription_status")
             .eq("device_id", device_id)
             .limit(1)
             .execute()
         )
         rows = existing.data or []
         current = rows[0]["count"] if rows else 0
+
+        if rows and rows[0].get("subscription_status") == "active":
+            return True, current, limit
 
         if current >= limit:
             log.info("lifetime_cap_reached", used=current, limit=limit)
@@ -109,6 +123,30 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
     except Exception:
         log.error("lifetime_cap_check_unavailable", reason="supabase_error", exc_info=True)
         return True, 0, limit
+
+
+def device_has_active_subscription(device_id: str) -> bool:
+    """Read-only check for UI purposes (e.g. hiding the upgrade prompt
+    for someone who's already subscribed). Fails open to False on any
+    error - same direction as every other read in this module; a
+    missed read here just means the UI offers to upgrade someone who
+    already has, which they can dismiss, not a lockout."""
+    client = get_supabase_client()
+    if client is None:
+        return False
+    try:
+        existing = (
+            client.table(_TABLE)
+            .select("subscription_status")
+            .eq("device_id", device_id)
+            .limit(1)
+            .execute()
+        )
+        rows = existing.data or []
+        return bool(rows) and rows[0].get("subscription_status") == "active"
+    except Exception:
+        log.error("subscription_status_read_failed", reason="supabase_error", exc_info=True)
+        return False
 
 
 def get_lifetime_render_count(device_id: str) -> tuple[int, int]:

@@ -27,6 +27,7 @@ import streamlit as st
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from render_cap import check_and_reserve_render
+from lifetime_cap import check_and_reserve_lifetime_render, device_has_active_subscription
 from render_history import write_render_history, get_render_history
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
@@ -63,6 +64,7 @@ from deterministic_fixers import (
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id
+from stripe_subscription import create_subscription_checkout, verify_and_record_subscription
 
 log = get_logger(__name__)
 
@@ -563,6 +565,26 @@ init_state()
 # onboarding, exactly as it worked before this existed).
 if restore_profile_if_available():
     st.session_state.screen = 4
+
+# Checkout success/cancel handling - runs on every script pass, same
+# top-level query-param pattern as AQE/CLEARANCE's own Stripe redirect
+# handling. Only fires once per successful checkout: verify_and_record_
+# subscription's own upsert makes a second verify of the same session_id
+# harmless (idempotent), but query_params.clear() below avoids re-firing
+# on every subsequent rerun of this same browser tab regardless.
+if st.query_params.get("payment") == "success":
+    _checkout_session_id = st.query_params.get("session_id")
+    _device_id_for_checkout = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = _device_id_for_checkout
+    if _checkout_session_id and verify_and_record_subscription(
+        _checkout_session_id, _device_id_for_checkout
+    ):
+        st.session_state["subscription_just_confirmed"] = True
+    else:
+        st.session_state["subscription_confirm_failed"] = True
+    st.query_params.clear()
+elif st.query_params.get("payment") == "cancelled":
+    st.query_params.clear()
 
 
 def progress_dots(current: int, total: int = 4):
@@ -1181,6 +1203,26 @@ def _run_render(
         log.error("render_blocked", reason="daily_cap_reached", used=used, limit=limit, is_refinement=is_refinement)
         return False
 
+    # Step 4 (Section 5.2 / Section 13): the 15-lifetime-render free
+    # tier. Resolved here, once, not just inside this check - the same
+    # device_id is reused for the render_history write later in this
+    # function (see the success path below), rather than each call
+    # site resolving its own copy.
+    device_id = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = device_id
+    lifetime_allowed, lifetime_used, lifetime_limit = check_and_reserve_lifetime_render(device_id)
+    if not lifetime_allowed:
+        st.session_state.render_error = (
+            "You've used all 15 free renders. Upgrade to keep writing as you."
+        )
+        st.session_state.render_paywall_hit = True
+        log.error(
+            "render_blocked", reason="lifetime_cap_reached",
+            used=lifetime_used, limit=lifetime_limit, is_refinement=is_refinement,
+        )
+        return False
+    st.session_state.render_paywall_hit = False
+
     import anthropic
 
     detected_mode = _detect_mode(input_text)
@@ -1737,9 +1779,9 @@ def _run_render(
         # matches write_render_history's own docstring, which is
         # explicit that this must never run before success is known.
         # Fails open and silently inside write_render_history itself,
-        # so no try/except needed at this call site.
-        device_id = st.session_state.get("_device_id") or get_or_create_device_id()
-        st.session_state["_device_id"] = device_id
+        # so no try/except needed at this call site. device_id already
+        # resolved once, near the top of this function (see the
+        # lifetime-cap check above) - reused here, not re-resolved.
         write_render_history(
             device_id=device_id,
             input_text=input_text,
@@ -2052,6 +2094,9 @@ def screen_render():
     progress_dots(4)
     _show_deepen_success_if_pending()
 
+    device_id_for_ui = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = device_id_for_ui
+
     if st.session_state.get("baseline_fingerprint"):
         with st.sidebar:
             if st.button("My Voice \u2192", key="nav_to_my_voice"):
@@ -2172,17 +2217,50 @@ def screen_render():
 
     if st.session_state.get("render_error"):
         st.error(st.session_state.render_error)
-        if st.button("Try again", key="retry_render"):
-            last_attempt = st.session_state.get("render_last_attempt", input_text)
-            was_refinement = st.session_state.get("render_last_is_refinement", False)
-            if _run_render(
-                last_attempt, is_refinement=was_refinement,
-                render_context=st.session_state.get("render_context_input", ""),
-                render_mode=st.session_state.get("render_mode_input", "preserve"),
-                platform_format=st.session_state.get("platform_format_input"),
-            ) and was_refinement:
-                st.session_state.refinement_used = True
-            st.rerun()
+        if st.session_state.get("render_paywall_hit"):
+            # Paywall, not a transient failure - "Try again" would just
+            # hit the same cap again. Two plan buttons, same Session.
+            # create → redirect → Session.retrieve pattern proven on
+            # AQE/CLEARANCE (see stripe_subscription.py's docstring for
+            # why this reuses that pattern rather than building new
+            # Stripe surface for a subscription specifically).
+            pay_col1, pay_col2 = st.columns(2)
+            with pay_col1:
+                if st.button("Upgrade — £6.99/month", key="upgrade_monthly", use_container_width=True):
+                    checkout_url = create_subscription_checkout(device_id_for_ui, plan="monthly")
+                    if checkout_url:
+                        st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
+                    else:
+                        st.error("Couldn't start checkout. Please try again shortly.")
+            with pay_col2:
+                if st.button("Upgrade — £49/year", key="upgrade_annual", use_container_width=True):
+                    checkout_url = create_subscription_checkout(device_id_for_ui, plan="annual")
+                    if checkout_url:
+                        st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
+                    else:
+                        st.error("Couldn't start checkout. Please try again shortly.")
+        else:
+            if st.button("Try again", key="retry_render"):
+                last_attempt = st.session_state.get("render_last_attempt", input_text)
+                was_refinement = st.session_state.get("render_last_is_refinement", False)
+                if _run_render(
+                    last_attempt, is_refinement=was_refinement,
+                    render_context=st.session_state.get("render_context_input", ""),
+                    render_mode=st.session_state.get("render_mode_input", "preserve"),
+                    platform_format=st.session_state.get("platform_format_input"),
+                ) and was_refinement:
+                    st.session_state.refinement_used = True
+                st.rerun()
+
+    if st.session_state.get("subscription_just_confirmed"):
+        st.success("You're subscribed. Thanks for backing VOICOVA — write away.")
+        st.session_state.subscription_just_confirmed = False
+    if st.session_state.get("subscription_confirm_failed"):
+        st.error(
+            "We couldn't confirm that payment. If you were charged, "
+            "contact support and we'll sort it out."
+        )
+        st.session_state.subscription_confirm_failed = False
 
     output = st.session_state.get("render_output", "")
     if output:

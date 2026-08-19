@@ -171,3 +171,81 @@ def test_zero_or_negative_env_var_floors_to_one():
 
 def test_missing_env_var_uses_default():
     assert lifetime_cap._max_lifetime_renders() == lifetime_cap._DEFAULT_MAX_LIFETIME_RENDERS
+
+
+# ------------------------------------------------------------------
+# Subscription bypass (19 Aug 2026, stripe_subscription.py) — an
+# active subscription must short-circuit the cap entirely: never
+# blocked even over the limit, and never counted (no upsert at all).
+# ------------------------------------------------------------------
+
+def _mock_supabase_client_with_subscription(existing_count, subscription_status):
+    client = MagicMock()
+    table = MagicMock()
+    client.table.return_value = table
+    result = MagicMock()
+    result.data = [{"count": existing_count, "subscription_status": subscription_status}]
+    table.select.return_value.eq.return_value.limit.return_value.execute.return_value = result
+    return client
+
+
+def test_active_subscription_bypasses_cap_even_over_limit():
+    client = _mock_supabase_client_with_subscription(existing_count=999, subscription_status="active")
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        allowed, used, limit = lifetime_cap.check_and_reserve_lifetime_render("device-1")
+    assert allowed is True
+    assert used == 999
+
+
+def test_active_subscription_does_not_increment_count():
+    client = _mock_supabase_client_with_subscription(existing_count=3, subscription_status="active")
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        lifetime_cap.check_and_reserve_lifetime_render("device-1")
+    client.table.return_value.upsert.assert_not_called()
+
+
+def test_inactive_subscription_status_still_gets_capped():
+    # Any status other than "active" (None, "cancelled", "past_due",
+    # etc.) must fall through to the ordinary count/limit check - not
+    # treated as paid.
+    client = _mock_supabase_client_with_subscription(existing_count=15, subscription_status="cancelled")
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        allowed, used, limit = lifetime_cap.check_and_reserve_lifetime_render("device-1")
+    assert allowed is False
+
+
+def test_no_subscription_column_value_still_gets_capped():
+    # A device that's never touched the subscription flow at all -
+    # subscription_status key absent entirely, not just None - must
+    # not accidentally bypass the cap.
+    client = _mock_supabase_client(existing_count=15)
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        allowed, used, limit = lifetime_cap.check_and_reserve_lifetime_render("device-1")
+    assert allowed is False
+
+
+# ------------------------------------------------------------------
+# device_has_active_subscription — read-only UI helper
+# ------------------------------------------------------------------
+
+def test_device_has_active_subscription_true():
+    client = _mock_supabase_client_with_subscription(existing_count=0, subscription_status="active")
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        assert lifetime_cap.device_has_active_subscription("device-1") is True
+
+
+def test_device_has_active_subscription_false_when_not_subscribed():
+    client = _mock_supabase_client(existing_count=2)
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        assert lifetime_cap.device_has_active_subscription("device-1") is False
+
+
+def test_device_has_active_subscription_fails_open_to_false():
+    with patch("lifetime_cap.get_supabase_client", return_value=None):
+        assert lifetime_cap.device_has_active_subscription("device-1") is False
+
+
+def test_device_has_active_subscription_fails_open_on_error():
+    client = _mock_supabase_client(raise_on_select=True)
+    with patch("lifetime_cap.get_supabase_client", return_value=client):
+        assert lifetime_cap.device_has_active_subscription("device-1") is False

@@ -22,3 +22,11 @@ pytest-asyncio==1.4.0
 # Cross-session persistence — device cookie + Supabase, see persistence.py
 supabase==2.31.0
 streamlit-cookies-controller==0.0.4
+
+# Subscription checkout/verification (Step 4, stripe_subscription.py) —
+# same version pinned on aqe-app/clearance-app, the two other products
+# in this account already using it. Kept in sync deliberately: this
+# pin has already been the source of one cross-product debugging loop
+# (metadata.get() vs subscript access) and drifting it here would risk
+# repeating that with a fresh version's behaviour.
+stripe==15.3.0
