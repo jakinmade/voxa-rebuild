@@ -37,6 +37,7 @@ from voice_engine import (
     _score_sample_fitness, _fitness_gate,
     _score_ai_signal,
     score_semantic_drift, find_source_sentence, highlight_attribution_swaps, compute_confidence, compute_risk, compute_risk_reason,
+    has_content_integrity_hard_fail,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells, score_restructure_fidelity,
     compute_dimension_stability, confidence_caveat,
@@ -1610,6 +1611,12 @@ def _run_render(
         )
         risk = compute_risk(delta, semantic, ai_tells, insertion_check)
         risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)
+        # The ONLY thing that gates the rewritten text behind
+        # review_gate.py's confirmation wall as of 19 Aug 2026 — see
+        # has_content_integrity_hard_fail's docstring. risk above still
+        # reflects style-drift severity too (informational badge), but
+        # style drift alone must never block delivery.
+        content_integrity_hard_fail = has_content_integrity_hard_fail(semantic, ai_tells, insertion_check)
         # Overwrite with the FINAL, merged insertion_check (initial
         # render + correction-pass side effects) — line ~1165 above
         # sets this to the INITIAL check only, before the correction
@@ -1667,7 +1674,8 @@ def _run_render(
         st.session_state.ai_tells = ai_tells
         st.session_state.function_word_delta = burrows_delta
         st.session_state.voice_report = build_voice_report(
-            delta, semantic, confidence, risk, ai_tells, burrows_delta
+            delta, semantic, confidence, risk, ai_tells, burrows_delta,
+            content_integrity_hard_fail=content_integrity_hard_fail,
         )
         # One id + timestamp per completed render — generated here
         # (not inside authenticity_report.py, which stays a pure
@@ -2021,7 +2029,8 @@ def screen_render():
         # not just the confirmation click.
         report = st.session_state.get("voice_report")
         risk_level = report.get("risk") if report else None
-        gated = requires_review(risk_level)
+        hard_fail = report.get("content_integrity_hard_fail") if report else None
+        gated = requires_review(hard_fail)
         confirm_flag_key = f"reviewed_{output_key}"
         already_confirmed = st.session_state.get(confirm_flag_key, False)
         show_output = (not gated) or already_confirmed

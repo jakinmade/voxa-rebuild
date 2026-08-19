@@ -200,6 +200,20 @@ RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1
 # produce when something concrete already didn't match the baseline or
 # the source text - see compute_risk's own docstring for what drives
 # each level.
+#
+# SUPERSEDED 19 Aug 2026 — review_gate.requires_review() no longer
+# reads this constant. Gating narrowed from "Risk level is Medium or
+# High" to "voice_engine.has_content_integrity_hard_fail() is True" —
+# a real content-integrity failure (AI tell, attribution swap, dropped
+# entity, invented sentence), not style-drift severity. Risk going
+# Medium purely from missing one of four style dimensions
+# (RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1) was gating nearly every
+# render, not just genuinely risky ones — the opposite of what this
+# constant's own "Low is excluded deliberately" reasoning above was
+# trying to achieve. Left defined (not deleted) since it still
+# describes what the Risk badge itself can show; just no longer wired
+# to the confirmation wall. See review_gate.py's module docstring for
+# the full incident.
 # ---------------------------------------------------------------------------
 REVIEW_REQUIRED_RISK_LEVELS = {"Medium", "High"}
 

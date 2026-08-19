@@ -1,43 +1,48 @@
 """
 review_gate.requires_review() and log_review_confirmation() — the
-business rule deciding which risk verdicts require explicit human
+business rule deciding which renders require explicit human
 confirmation before the rewritten text is shown, and the anonymous,
 fail-open logging of that confirmation once given.
 
 Mirrors tests/unit/test_render_events.py's mocking pattern exactly,
 since log_review_confirmation() follows the same fail-open contract.
+
+19 Aug 2026: requires_review()'s contract changed from a risk-level
+string ("Low"/"Medium"/"High") to a plain bool — whether
+voice_engine.has_content_integrity_hard_fail() fired. See
+review_gate.py's module docstring for why (style drift alone was
+gating nearly every render). log_review_confirmation()'s own contract
+is unchanged — it still logs the risk string for the aggregate
+question of what fraction of gated renders get confirmed.
 """
 from unittest.mock import patch, MagicMock
 
 import review_gate
-from scoring_rules import REVIEW_REQUIRED_RISK_LEVELS
 
 
-def test_low_risk_does_not_require_review():
-    assert review_gate.requires_review("Low") is False
+def test_no_hard_fail_does_not_require_review():
+    assert review_gate.requires_review(False) is False
 
 
-def test_medium_risk_requires_review():
-    assert review_gate.requires_review("Medium") is True
+def test_hard_fail_requires_review():
+    assert review_gate.requires_review(True) is True
 
 
-def test_high_risk_requires_review():
-    assert review_gate.requires_review("High") is True
-
-
-def test_none_risk_does_not_require_review():
-    """No baseline yet / no report computed — nothing to have missed
-    against, so gating here would be friction with no signal behind
-    it."""
+def test_none_does_not_require_review():
+    """No report computed yet — nothing to have failed against, so
+    gating here would be friction with no signal behind it."""
     assert review_gate.requires_review(None) is False
 
 
-def test_requires_review_matches_scoring_rules_constant():
-    """Pinned so a future change to REVIEW_REQUIRED_RISK_LEVELS is a
-    deliberate, changelogged edit in scoring_rules.py rather than a
-    silent behavior change discovered here."""
-    for level in ("Low", "Medium", "High"):
-        assert review_gate.requires_review(level) == (level in REVIEW_REQUIRED_RISK_LEVELS)
+def test_style_drift_alone_never_gates():
+    """The actual bug this change fixes: Risk going Medium purely
+    from missing one style dimension must never gate the output on
+    its own. requires_review only ever looks at the hard_fail bool,
+    never at a risk level string, so there's no way for a Risk badge
+    of 'Medium' or even 'High' driven by missed dimensions/semantic
+    match alone to reach this function and gate anything - only
+    has_content_integrity_hard_fail's own True/False decides it."""
+    assert review_gate.requires_review(False) is False
 
 
 def test_no_client_configured_is_silent():

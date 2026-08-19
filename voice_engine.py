@@ -1995,6 +1995,49 @@ def confidence_caveat(stability: dict | None) -> str | None:
     return None
 
 
+def has_content_integrity_hard_fail(
+    semantic: dict | None, ai_tells: dict | None = None,
+    insertion_check: dict | None = None,
+) -> bool:
+    """
+    True only for the genuine content-integrity failures: a surviving
+    AI tell, an attribution swap, a dropped entity, or an invented
+    sentence out of the correction pass. These are the "wrong name in
+    the email" class of error — factually or attributionally wrong,
+    not just stylistically off.
+
+    Extracted out of compute_risk (19 Aug 2026) so this exact same
+    check can gate the review-confirmation wall in review_gate.py
+    without also gating on style drift. Root cause this fixes: Risk
+    used to conflate two different things under one badge — genuine
+    integrity failures AND missing a single style-voice dimension
+    (RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1, out of 4 tracked
+    dimensions) — and review_gate.py gated the rewritten text behind a
+    checkbox for BOTH cases equally. Since real renders miss at least
+    one of four style targets constantly, the gate was firing on
+    nearly every render, not just the genuinely risky ones. JA (19 Aug
+    2026): "user friction is front and centre of VOICOVA, nothing
+    should contribute to friction" — style drift alone must never
+    block the rewritten text from showing immediately; only a real
+    integrity failure should.
+
+    compute_risk's own Low/Medium/High badge is UNCHANGED by this —
+    it still folds in style-drift severity for the informational
+    badge shown to the user. This function is deliberately narrower:
+    it answers one question only ("does this need to be gated"), not
+    "how risky does this look overall."
+    """
+    if ai_tells and not ai_tells.get("clean", True):
+        return True
+    if (semantic or {}).get("attribution_swaps"):
+        return True
+    if (semantic or {}).get("dropped_entities"):
+        return True
+    if (insertion_check or {}).get("sentence_growth", 0) > 0:
+        return True
+    return False
+
+
 def compute_risk(
     delta: dict | None, semantic: dict | None, ai_tells: dict | None = None,
     insertion_check: dict | None = None,
@@ -2003,6 +2046,14 @@ def compute_risk(
     How much this specific rewrite moved from the person's normal style
     and content — distinct from Confidence. Confidence is about the
     measurement; Risk is about this particular result.
+
+    Informational badge only as of 19 Aug 2026 — see
+    has_content_integrity_hard_fail's docstring for why gating was
+    split out of this function's return value. This function's own
+    Low/Medium/High logic is otherwise unchanged: it still folds in
+    both hard fails and missed-dimension/semantic-match severity, so
+    the badge itself still tells the full story. What changed is which
+    of these two things review_gate.py listens to.
 
     A surviving AI tell (em dash, banned phrase) is a hard failure on
     its own — High risk regardless of how the voice/semantic scores
@@ -2042,16 +2093,7 @@ def compute_risk(
     can't be silently corrected the way new hedges are — it has to
     surface as risk instead, same as the other two hard failures here.
     """
-    if ai_tells and not ai_tells.get("clean", True):
-        return "High"
-
-    if (semantic or {}).get("attribution_swaps"):
-        return "High"
-
-    if (semantic or {}).get("dropped_entities"):
-        return "High"
-
-    if (insertion_check or {}).get("sentence_growth", 0) > 0:
+    if has_content_integrity_hard_fail(semantic, ai_tells, insertion_check):
         return "High"
 
     missed = sum(1 for d in (delta or {}).values() if d.get("verdict") == "MISSED")
@@ -2473,7 +2515,7 @@ def compute_burrows_delta(baseline_samples: list[str], output_text: str, n: int 
     }
 
 
-def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, ai_tells: dict | None = None, burrows_delta: dict | None = None) -> dict:
+def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, ai_tells: dict | None = None, burrows_delta: dict | None = None, content_integrity_hard_fail: bool = False) -> dict:
     """
     Assembles the Voice Report — the actual differentiated output, per
     the v4 spec. Not just rewritten text: Voice Match, Semantic Match,
@@ -2534,6 +2576,12 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "biggest_changes": biggest_changes[:3],
         "dropped_entities": semantic.get("dropped_entities", []),
         "attribution_swaps": semantic.get("attribution_swaps", []),
+        # 19 Aug 2026: the ONLY thing that should gate the rewritten
+        # text behind review_gate.py's confirmation wall — see
+        # has_content_integrity_hard_fail's docstring. "risk" above
+        # still reflects style-drift severity too (informational
+        # badge), but style drift alone must never block delivery.
+        "content_integrity_hard_fail": content_integrity_hard_fail,
     }
 
     if burrows_delta is not None:
