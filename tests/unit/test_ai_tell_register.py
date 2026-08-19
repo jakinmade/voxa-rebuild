@@ -179,6 +179,81 @@ class TestRegexSweepFixesAnalyticalTells:
         assert "seamless" not in result.lower()
 
 
+class TestRegexSweepExemptsGenuineUserPhrasing:
+    """
+    Regression: 19 Aug 2026 live render. score_ai_tells already
+    exempted phrases appearing verbatim in original_input_text (added
+    18 Aug for the same reason — 'I suspect', 'I would push back',
+    'curious whether' were being flagged even as the user's own
+    genuine wording). But _regex_sweep — the function that actually
+    performs the analytical/corporate replacements, not just flags
+    them — never received the same fix, so it mechanically rewrote a
+    real person's own 'Where I would push back slightly' to 'Where I
+    disagree slightly' and 'closer to X than to Y' to 'more like X
+    than Y', both verbatim from their input. Confirms the fix: passing
+    original_input_text now protects genuine phrasing from every
+    replace-list in the sweep, while leaving the no-exemption
+    (default "") behaviour untouched for existing callers.
+    """
+
+    def test_push_back_preserved_when_genuine(self):
+        text = "Where I would push back slightly, or at least add friction."
+        result = pr._regex_sweep(text, original_input_text=text)
+        assert "i would push back" in result.lower()
+        assert "disagree" not in result.lower()
+
+    def test_push_back_still_fixed_when_not_genuine(self):
+        # No original_input_text passed — old, pre-fix behaviour must
+        # still hold so every caller that doesn't pass it is unaffected.
+        text = "Where I would push back slightly, or at least add friction."
+        result = pr._regex_sweep(text)
+        assert "disagree" in result.lower()
+        assert "i would push back" not in result.lower()
+
+    def test_i_suspect_preserved_when_genuine(self):
+        text = "I suspect qualification is not a gate but a gate plus an expiry."
+        result = pr._regex_sweep(text, original_input_text=text)
+        assert "i suspect" in result.lower()
+
+    def test_closer_to_than_to_preserved_when_genuine(self):
+        text = "Which is closer to how banks handle revalidation than to how anyone handles software."
+        result = pr._regex_sweep(text, original_input_text=text)
+        assert "closer to" in result.lower()
+        assert "more like" not in result.lower()
+
+    def test_drift_preserved_when_genuine(self):
+        text = "An agent's context drifts underneath it."
+        result = pr._regex_sweep(text, original_input_text=text)
+        assert "drift" in result.lower()
+
+    def test_exemption_is_case_insensitive(self):
+        original = "Where I Would Push Back slightly on that."
+        text = "Where I would push back slightly on that."
+        result = pr._regex_sweep(text, original_input_text=original)
+        assert "disagree" not in result.lower()
+
+    def test_non_genuine_phrase_still_fixed_alongside_genuine_one(self):
+        """
+        Mixed case: one flagged phrase is genuine (exempt), a
+        different one in the same text is not (still fixed). Confirms
+        the exemption is per-match, not an all-or-nothing switch for
+        the whole render.
+        """
+        original = "I suspect this is right."
+        text = "I suspect this is right. Where I would push back is on timing."
+        result = pr._regex_sweep(text, original_input_text=original)
+        assert "i suspect" in result.lower()  # genuine, preserved
+        assert "i disagree" in result.lower()  # not in original, still fixed
+        assert "i would push back" not in result.lower()
+
+    def test_corporate_list_also_exempts_genuine_phrasing(self):
+        # Same fix applies to claude_constructions, not just the
+        # analytical list — same bug class, same helper.
+        text = "We will leverage this fully."
+        result = pr._regex_sweep(text, original_input_text=text)
+        assert "leverage" in result.lower()
+
+
 # ---------------------------------------------------------------------------
 # Regression: 15 Aug 2026 live render. A fabricated closing sentence,
 # "Curious whether that framing lands for you", shipped and scored
