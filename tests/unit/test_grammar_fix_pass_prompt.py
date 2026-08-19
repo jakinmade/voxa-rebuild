@@ -48,6 +48,44 @@ def test_salutation_name_specifically_called_out():
     assert "salutation" in system.lower()
 
 
+class TestSalutationPunctuationNotAcommaSplice:
+    """
+    Regression: 19 Aug 2026 live render. Rule 10 (run-ons/comma
+    splices) fired on the opening salutation itself — "Hi John,"
+    was rewritten to "Hi John." — because the DO NOT TOUCH list had
+    no exception carving the salutation's comma out of rule 10's
+    scope. This is a different failure shape from the two prior
+    salutation bugs (name hallucination, ",." punctuation artifact):
+    those corrupted the name or left mechanical debris; this one
+    silently swaps valid punctuation for different valid punctuation,
+    so nothing downstream (entity-drop checks, punctuation-artifact
+    regex) had a hook to catch it. Tests the system prompt itself,
+    same pattern as the rest of this file (no live API access from
+    unit tests).
+    """
+
+    def test_salutation_punctuation_exception_present(self):
+        system = _extract_system_prompt()
+        assert "comma splice" in system.lower()
+        assert "salutation" in system.lower()
+        # The exception must explicitly tie the salutation comma to
+        # rule 10, not just mention salutations in the naming context
+        # (rule 6 already does that for a different reason).
+        assert "rule 10" in system.lower()
+
+    def test_full_stop_conversion_explicitly_forbidden(self):
+        system = _extract_system_prompt()
+        assert "full stop" in system.lower()
+        assert "hi john." in system.lower()
+
+    def test_prior_salutation_bug_shapes_still_referenced(self):
+        """The new rule should sit alongside, not replace, the
+        existing salutation protections — confirms this was an
+        addition, not an edit that dropped prior context."""
+        system = _extract_system_prompt()
+        assert "hi josh,." in system.lower()
+
+
 class TestExpandedGrammarCategories:
     """
     Regression: 19 Aug 2026. The original 6-category whitelist meant

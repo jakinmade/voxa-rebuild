@@ -1322,6 +1322,13 @@ def _grammar_fix_pass(text: str, client) -> str:
         "leave it exactly as given. Confirmed live: this pass has previously replaced the addressee's "
         "actual name with a different one while leaving the surrounding grammar clean — that is a "
         "content error, not a grammar fix, and it is never in scope here.\n"
+        "7. The opening salutation's terminal punctuation ('Hi John,', 'Dear Sarah,', "
+        "'Josh,') is a conventional comma, not a comma splice. Never apply rule 10 "
+        "(run-ons/comma splices) to it, and never convert it to a full stop. Confirmed "
+        "live: this pass has previously mangled the salutation comma into other broken "
+        "shapes ('Hi Josh,.') and, separately, replaced it outright with a full stop "
+        "('Hi John.') — the salutation line is not a sentence with independent clauses, "
+        "it takes its own fixed punctuation and rule 10 must not fire on it.\n"
         "\n"
         "Return only the corrected text. No explanation. No preamble."
     )
