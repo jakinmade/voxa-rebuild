@@ -1196,6 +1196,7 @@ def _run_render(
         word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
         input_text=input_text, render_context=render_context,
         voice_profile_summary=st.session_state.get("voice_profile_summary", ""),
+        platform_format=platform_format,
     )
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -1259,7 +1260,7 @@ def _run_render(
 
     if baseline:
         delta = score_render_delta(baseline, clean)
-        semantic = score_semantic_drift(input_text, clean)
+        semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
 
         # Second, independent check against the starter-only baseline
         # (unblended with sample1) - catches drift the blended average
@@ -1340,7 +1341,7 @@ def _run_render(
         if st.session_state.get("locale", "uk") == "uk":
             clean = _apply_uk_english(clean)
         delta = score_render_delta(baseline, clean)
-        semantic = score_semantic_drift(input_text, clean)
+        semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
         starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
         correction_delta = merge_starter_evidence(delta, starter_delta)
 
@@ -1484,7 +1485,7 @@ def _run_render(
                 )
 
                 delta = score_render_delta(baseline, clean)
-                semantic = score_semantic_drift(input_text, clean)
+                semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
             except Exception:
                 log.error("correction_pass_llm_failed", stage="correction", exc_info=True)
                 pass  # correction pass failed — keep the original render
@@ -1534,7 +1535,7 @@ def _run_render(
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)
             delta = score_render_delta(baseline, clean)
-            semantic = score_semantic_drift(input_text, clean)
+            semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
             log.info(
                 "post_correction_verify_pass",
                 still_missed_before=still_missed,

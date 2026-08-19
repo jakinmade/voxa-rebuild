@@ -1752,7 +1752,36 @@ def score_restructure_fidelity(pre_text: str, post_text: str) -> dict:
     }
 
 
-def score_semantic_drift(input_text: str, output_text: str) -> dict:
+_OPENING_SALUTATION_PATTERN = re.compile(
+    r"^\s*(?:Hi|Hello|Hey|Dear)?\s*,?\s*([A-Z][a-zA-Z]{1,})\s*[,.]",
+)
+
+
+def _extract_opening_salutation_name(text: str) -> str | None:
+    """
+    Returns the addressee's name if the text opens with a salutation
+    ("Hi John,", "Josh,", "Dear Sarah.", "Hello, Josh,") — else None.
+    Deterministic, regex-based, matches _entities_and_numbers' own
+    definition of a proper noun (capitalised, 2+ letters after the
+    first) so a name this function extracts is always also a member
+    of the entity set that function produces.
+
+    Built specifically to let score_semantic_drift exempt this one
+    name from dropped_entities when platform_format == "social" — see
+    that function's docstring for the incident this fixes. Narrow and
+    conservative by design: only matches at the very start of the
+    text, only a single capitalised word, and only immediately before
+    a comma or period (not after other punctuation) — a false match
+    here would wrongly exempt a genuine dropped name from every check
+    downstream, so this errs toward returning None over guessing.
+    """
+    if not text:
+        return None
+    m = _OPENING_SALUTATION_PATTERN.match(text.strip())
+    return m.group(1) if m else None
+
+
+def score_semantic_drift(input_text: str, output_text: str, platform_format: str | None = None) -> dict:
     """
     Deterministic proxy for whether the rewrite preserved what was
     actually said, not just how it was said. Compares the render INPUT
@@ -1762,9 +1791,38 @@ def score_semantic_drift(input_text: str, output_text: str) -> dict:
 
     Returns a 0-100 semantic match score plus the entities that were
     dropped, so a correction pass can target them specifically.
+
+    platform_format: when "social" (LinkedIn/X/Threads), the opening
+    salutation name (see _extract_opening_salutation_name) is excluded
+    from BOTH the dropped_entities list AND the entity_score
+    denominator — not just hidden from the report. A social post is
+    public, one-to-many, and should never carry a private recipient's
+    name at all, so its correct, intentional removal must not count
+    as a drop. Confirmed live (19 Aug 2026): an "Elevate" render for
+    LinkedIn kept a private email's addressee name visible in the
+    public post text — traced to three separate places in the prompt
+    actively forcing that name to survive (base_rules rule 10, the
+    social-format instruction's own "reposition, don't delete"
+    wording, and the correction pass's dropped-entity restoration
+    override). All three were fixed at the generation side (prompts.py)
+    to omit the salutation for social posts; this is the matching fix
+    on the measurement side, so the entity-preservation hard-fail in
+    compute_risk doesn't then flag the now-correct omission as a
+    content-integrity failure and re-introduce the exact gating
+    friction JA asked to remove earlier the same day. Every other
+    entity (a fact, a different name used substantively in the body, a
+    number) is completely unaffected — this only ever excludes the
+    single word matched as the opening salutation, and only for
+    platform_format == "social".
     """
     input_entities = _entities_and_numbers(input_text)
     output_entities = _entities_and_numbers(output_text)
+
+    if platform_format == "social":
+        salutation_name = _extract_opening_salutation_name(input_text)
+        if salutation_name and salutation_name in input_entities:
+            input_entities = input_entities - {salutation_name}
+
     if input_entities:
         # Check literal presence in the raw output text, not just
         # membership in output_entities. _entities_and_numbers only

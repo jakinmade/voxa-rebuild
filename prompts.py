@@ -389,6 +389,7 @@ def _build_system_prompt(
     input_text: str = "",
     render_context: str = "",
     voice_profile_summary: str = "",
+    platform_format: str | None = None,
 ) -> str:
     """
     Builds the full system prompt.
@@ -416,6 +417,13 @@ def _build_system_prompt(
     third, complementary signal — not a replacement for either. Optional:
     a render with none (generation failed, or hasn't happened yet for
     this baseline) proceeds exactly as it did before this existed.
+
+    platform_format: added 19 Aug 2026, "social" | "email" | None. Only
+    affects rule 10 below (opening-salutation preservation) — carves
+    out the one case where dropping the addressee's name at generation
+    time, not just at the correction-pass stage, is correct: a public
+    social post should never open addressed to a private individual.
+    See rule 10's own inline comment for the incident this fixes.
     """
 
     base_rules = (
@@ -449,7 +457,19 @@ def _build_system_prompt(
         "exactly, character for character, from the input. Do not substitute a name you think is "
         "more common or more likely correct. Do not introduce a name that does not appear in the "
         "input at all. If you are unsure whether something is a name, treat it as one and leave it "
-        "untouched."
+        "untouched." + (
+            "\n\nEXCEPTION to the opening-salutation part of rule 10 only, because platform "
+            "format for this render is a public social post (LinkedIn/X/Threads): a social post "
+            "is public and one-to-many, not addressed to one named person, so omit the opening "
+            "greeting/salutation entirely (\"Hi John,\", \"Josh,\", \"Dear Sarah\" - whatever form "
+            "it takes at the very start) rather than preserving it. This applies ONLY to that "
+            "single opening addressee name. If the same name is used substantively elsewhere in "
+            "the piece (referring to what they said, did, or think), that use is still fully "
+            "protected by rule 10 and must be preserved exactly, unchanged. Every other name, "
+            "proper noun, number, and date in the piece is still fully protected by rule 10 with "
+            "no exception."
+            if platform_format == "social" else ""
+        )
     )
 
     render_context_block = (
@@ -1588,6 +1608,12 @@ def build_correction_prompt(
     # New in v4 — semantic correction targets, parallel to voice correction
     dropped = (semantic or {}).get("dropped_entities", [])
     if dropped:
+        # 19 Aug 2026: no platform_format branching needed here — when
+        # platform_format == "social", score_semantic_drift itself
+        # already excludes the opening-salutation name from
+        # dropped_entities before this function ever sees it (see its
+        # docstring). Everything that reaches this point is a genuine
+        # drop that should be restored regardless of platform.
         named = ", ".join(dropped[:5])
         priority_note = (
             " This instruction is NOT optional and is not overridden by the "
@@ -1719,13 +1745,20 @@ def build_correction_prompt(
                 "does not already exist in the text — every word in the "
                 "output must trace back to a word already present in the "
                 "input; this is rearrangement and re-paragraphing, not "
-                "rewriting. A greeting or name feeling unconventional for "
-                "a social post is not grounds to cut it — reposition it "
-                "(e.g. after the hook, or as a closing line) rather than "
-                "delete it. If any correction above told you to restore a "
-                "dropped fact or name, that instruction still applies "
-                "here too — restructuring is never a reason to drop it "
-                "again."
+                "rewriting. "
+                "EXCEPTION — the opening salutation only: a social post "
+                "is public and one-to-many, not addressed to one named "
+                "person, so remove the opening greeting/salutation "
+                "entirely (\"Hi John,\", \"Josh,\", \"Dear Sarah\" — "
+                "whatever form it takes at the very start) rather than "
+                "repositioning it. This is the one deliberate exception "
+                "to 'do not cut content' in this instruction, and it "
+                "applies ONLY to that opening addressee name — if the "
+                "same name is used substantively elsewhere in the body "
+                "(referring to what they said, did, or think), that use "
+                "must still be preserved exactly, unchanged. Do not "
+                "remove any other name, fact, or greeting-adjacent "
+                "content beyond that single opening salutation."
             )
         elif platform_format == "email":
             correction_instructions.append(
