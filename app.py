@@ -1205,11 +1205,11 @@ def _run_render(
                 system=system, messages=[{"role": "user", "content": input_text}],
             )
             clean = response.content[0].text
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)
             clean = _grammar_fix_pass(clean, client)
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
     except Exception:
         st.session_state.render_error = (
             "That didn't go through. Your text is safe, try again."
@@ -1335,7 +1335,7 @@ def _run_render(
         # (residual modal hedges, noun-phrase subjects, non-imperative
         # wrappers, etc. — the directions each fixer declines on
         # purpose), not dimensions the deterministic pass already fixed.
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
         if st.session_state.get("locale", "uk") == "uk":
             clean = _apply_uk_english(clean)
         delta = score_render_delta(baseline, clean)
@@ -1417,7 +1417,7 @@ def _run_render(
                 if corrected is None:
                     log.error("correction_pass_failed_both_attempts")
                     corrected = pre_llm_correction
-                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions)
+                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions, original_input_text=input_text)
                 if st.session_state.get("locale", "uk") == "uk":
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
@@ -1529,7 +1529,7 @@ def _run_render(
                 clean, _ = _fix_directive_ratio(
                     clean, d["baseline"], d["output"], input_has_directive_content
                 )
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)
             delta = score_render_delta(baseline, clean)
@@ -1553,7 +1553,7 @@ def _run_render(
         # real original input and were flagged anyway).
         ai_tells = score_ai_tells(clean, original_input_text=input_text)
         if not ai_tells["clean"]:
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
             ai_tells = score_ai_tells(clean, original_input_text=input_text)
 
         # Downgrade MISSED -> SKIPPED for dimensions the input never
@@ -1876,8 +1876,8 @@ def _clean_ai_tells_and_rescore():
     if not current:
         return
     keep_contractions = st.session_state.get("render_keep_contractions", False)
-    cleaned = _regex_sweep(current, keep_contractions=keep_contractions)
     input_text = st.session_state.get("render_input_text", "")
+    cleaned = _regex_sweep(current, keep_contractions=keep_contractions, original_input_text=input_text)
     new_ai_tells = score_ai_tells(cleaned, original_input_text=input_text)
 
     st.session_state.render_output = cleaned

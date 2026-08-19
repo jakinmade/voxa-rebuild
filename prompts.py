@@ -885,10 +885,31 @@ def _conjugate_verb(m):
     return verb + 's'
 
 
-def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
+def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text: str = "") -> str:
     """
     Deterministic guardrail sweep — runs on every render output.
     No API call. No Claude involvement. Code enforces these rules.
+
+    original_input_text: the person's own actual input for this render,
+    optional but strongly recommended by every caller that has it
+    available. Without it, the claude_constructions and analytical_
+    constructions replace-lists below fire unconditionally — including
+    on phrases that are the person's own genuine wording, not an AI
+    tell. Confirmed as a real bug (19 Aug 2026): score_ai_tells already
+    exempts phrases appearing verbatim in original_input_text (added 18
+    Aug 2026 for exactly this reason — "I suspect", "I would push
+    back", "curious whether" all appeared verbatim in a real person's
+    input and were still getting flagged), but this function — the one
+    that actually performs the replacement, not just the flagging —
+    never got the same fix. A live render changed a person's own "I
+    suspect" to "I think" and "closer to X than to Y" to "more like X
+    than Y" even though both were their verbatim original wording,
+    because this sweep had no way to know that. Same principle as
+    score_ai_tells' _matches_excluding_genuine: any construction whose
+    matched text already appears verbatim (case-insensitive) in
+    original_input_text is left untouched rather than replaced.
+    Defaults to "" (exempts nothing), so every existing caller that
+    doesn't pass it keeps its current behaviour exactly.
 
     1. Em dashes — split into two sentences or joined with a comma,
        whichever the surrounding clauses support (see
@@ -1053,8 +1074,24 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
         (r'\bUnparalleled\b', 'Rare'),
         (r'\bParamount\b', 'Vital'),
     ]
+    original_lower = original_input_text.lower()
+
+    def _sub_excluding_genuine(pattern: str, replacement, text: str) -> str:
+        """Same as re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        except a match is left as-is (not replaced) if its exact matched
+        text already appears verbatim in the person's own original input.
+        original_input_text defaults to "" so this is a no-op filter
+        (nothing ever matches an empty string) for any caller that
+        doesn't pass it — identical behaviour to plain re.sub before
+        this existed."""
+        def _replace_if_not_genuine(m: "re.Match"):
+            if original_lower and m.group(0).lower() in original_lower:
+                return m.group(0)
+            return m.expand(replacement) if isinstance(replacement, str) else replacement(m)
+        return re.sub(pattern, _replace_if_not_genuine, text, flags=re.IGNORECASE)
+
     for pattern, replacement in claude_constructions:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        text = _sub_excluding_genuine(pattern, replacement, text)
 
     # Analytical-register constructions — separate from claude_constructions
     # above because that list is tuned for corporate-slop vocabulary and
@@ -1092,7 +1129,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False) -> str:
             (r'\bcloser to ([\w\s,]+?) than to ([\w\s,]+?)([.,;])', r'more like \1 than \2\3'),
         ]
         for pattern, replacement in analytical_constructions:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            text = _sub_excluding_genuine(pattern, replacement, text)
 
     # 5. Repeated words
     text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
