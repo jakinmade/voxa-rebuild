@@ -30,7 +30,7 @@ SCHEMA (create once in Supabase's SQL editor):
 
     create table render_history (
         id uuid primary key default gen_random_uuid(),
-        device_id text not null,
+        device_id uuid not null,
         created_at timestamptz not null default now(),
         context text,
         mode text not null,
@@ -42,6 +42,11 @@ SCHEMA (create once in Supabase's SQL editor):
 
     create index render_history_device_id_created_at_idx
         on render_history (device_id, created_at desc);
+
+DEPLOYED 19 Aug 2026 to the live Supabase project (txpsphethknujgqvqdzl)
+via Supabase MCP, matching the schema above exactly. device_id is
+uuid, not text - matches voice_profiles.device_id's actual column
+type, checked against the live schema before creating this table.
 """
 
 from logging_config import get_logger

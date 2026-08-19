@@ -24,7 +24,7 @@ blocking every render, paid or free, product-wide.
 SCHEMA (create once in Supabase's SQL editor):
 
     create table lifetime_render_cap (
-        device_id text primary key,
+        device_id uuid primary key,
         count integer not null default 0
     );
 
@@ -35,6 +35,15 @@ SCHEMA (create once in Supabase's SQL editor):
     alter table lifetime_render_cap
         add column stripe_customer_id text,
         add column subscription_status text;
+
+DEPLOYED 19 Aug 2026 to the live Supabase project (txpsphethknujgqvqdzl)
+via Supabase MCP, both columns included from the start rather than as
+a later alter - matches the schema above exactly. device_id is uuid,
+not text: matches voice_profiles.device_id's actual column type (the
+existing table this identity model was built to reuse), not a
+same-format assumption - checked against the live schema before
+creating this table, not copied from an earlier draft of this
+docstring.
 
 CONCURRENCY NOTE: same read-then-write pattern and same accepted
 undercounting-on-true-race caveat as render_cap.py — acceptable for a
