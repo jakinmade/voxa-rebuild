@@ -1616,6 +1616,68 @@ def _possessive_attributions(text: str) -> dict:
     return mapping
 
 
+# Known-bad synonym substitutions the LEXICAL FIDELITY prompt
+# instruction (32b93ca, prompts.py) is supposed to prevent but cannot
+# guarantee on its own, since a prompt instruction has no code-level
+# backstop. Each entry is (original, risky_replacement, note). Add new
+# pairs here only after a confirmed live incident, same discipline
+# scoring_rules.py's changelog holds for threshold changes - this is
+# not meant to grow speculatively into a general synonym blocklist.
+#
+# First entry (19 Aug 2026): a live render swapped "surfaces" ->
+# "brings up" in "It surfaces when someone finally asks...". "Brings
+# up" is transitive and needs an object ("brings the issue up") - used
+# intransitively like that it's ungrammatical. "Surfaces" was correct
+# and needed no change. Confirmed the LEXICAL FIDELITY instruction
+# (still present, prompts.py line ~561) did not stop this - it's a
+# prompt-level ask, not an enforced rule, so this closes the gap one
+# level down with a deterministic check.
+LEXICAL_FIDELITY_WATCHLIST: list[tuple[str, str, str]] = [
+    (
+        "surfaces", "brings up",
+        "'brings up' is transitive and needs an object; used "
+        "intransitively here it breaks grammar. 'surfaces' was correct.",
+    ),
+]
+
+
+def detect_lexical_fidelity_breaks(input_text: str, output_text: str) -> list[str]:
+    """
+    Flags known-risky synonym substitutions from the small curated
+    LEXICAL_FIDELITY_WATCHLIST above - swaps the LEXICAL FIDELITY
+    prompt instruction (32b93ca) is meant to prevent but can't enforce
+    on its own, since the model has no code-level backstop for word
+    choice the way it does for entity preservation or hedging.
+
+    Deterministic, rule-based, per the standing architecture
+    constraint - no model call, same input always produces the same
+    flags. Narrow by design: this is not a general synonym detector
+    (that would false-positive constantly on ordinary rephrasing the
+    LEXICAL FIDELITY instruction is meant to allow when it genuinely
+    improves the target). It only fires when BOTH sides of a
+    known-bad pair are exactly what happened: the original word is
+    gone from the output and the specific risky replacement is
+    present.
+
+    Informational only, deliberately NOT wired into
+    has_content_integrity_hard_fail or compute_risk (19 Aug 2026,
+    JA: "flag it for review rather than block" - unlike an attribution
+    swap or dropped entity, a watchlist hit is a known-risky pattern,
+    not a confirmed content-integrity failure every time, so it
+    shouldn't gate delivery the way those do).
+    """
+    flags = []
+    input_lower = input_text.lower()
+    output_lower = output_text.lower()
+    for original, replacement, note in LEXICAL_FIDELITY_WATCHLIST:
+        original_in_input = re.search(r"\b" + re.escape(original) + r"\b", input_lower)
+        original_in_output = re.search(r"\b" + re.escape(original) + r"\b", output_lower)
+        replacement_in_output = re.search(r"\b" + re.escape(replacement) + r"\b", output_lower)
+        if original_in_input and not original_in_output and replacement_in_output:
+            flags.append(f"'{original}' became '{replacement}' - {note}")
+    return flags
+
+
 def detect_attribution_swaps(input_text: str, output_text: str) -> list[str]:
     """
     Flags nouns where 'your <noun>' in the input became 'my <noun>' in
@@ -1904,6 +1966,7 @@ def score_semantic_drift(input_text: str, output_text: str, platform_format: str
     ))
 
     attribution_swaps = detect_attribution_swaps(input_text, output_text)
+    lexical_fidelity_breaks = detect_lexical_fidelity_breaks(input_text, output_text)
 
     return {
         "semantic_match": semantic_match,
@@ -1911,6 +1974,7 @@ def score_semantic_drift(input_text: str, output_text: str, platform_format: str
         "content_overlap": round(content_score * 100),
         "dropped_entities": dropped[:5],
         "attribution_swaps": attribution_swaps,
+        "lexical_fidelity_breaks": lexical_fidelity_breaks,
     }
 
 
@@ -2674,6 +2738,10 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "biggest_changes": biggest_changes[:3],
         "dropped_entities": semantic.get("dropped_entities", []),
         "attribution_swaps": semantic.get("attribution_swaps", []),
+        # 19 Aug 2026: informational only, does not gate delivery -
+        # see detect_lexical_fidelity_breaks' docstring for why this
+        # is treated differently from dropped_entities/attribution_swaps.
+        "lexical_fidelity_breaks": semantic.get("lexical_fidelity_breaks", []),
         # 19 Aug 2026: the ONLY thing that should gate the rewritten
         # text behind review_gate.py's confirmation wall — see
         # has_content_integrity_hard_fail's docstring. "risk" above
