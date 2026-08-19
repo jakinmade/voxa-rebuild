@@ -1,20 +1,20 @@
 """
-End-to-end tests, via Streamlit's AppTest, for two pieces of
-VOICOVA_Product_2.0_Consolidated.docx's Step 3 and Step 4:
+End-to-end tests, via Streamlit's AppTest, for VOICOVA_Product_2.0_
+Consolidated.docx's Steps 3, 4, and 5:
 
 - Step 3 (Section 9.1 / Section 11): the render-context field defaults
   to the last-used context rather than forcing a fresh choice every
   render.
-- Step 4 (Section 9.4): write_render_history is called from
-  _run_render's success path, with the actual render text/context/
-  mode/scores from that render - not just that the module exists and
-  is unit-tested in isolation (test_render_history.py already covers
-  that; this file covers the wiring connecting it to app.py, the same
-  gap test_app_render_pipeline.py's own docstring describes).
+- Step 4 (Section 9.4), write half: write_render_history is called
+  from _run_render's success path, with the actual render text/
+  context/mode/scores from that render.
+- Step 5 (Section 9.4): the History screen (screen 6) lists what
+  Step 4 wrote and renders a before/after reopen view.
 
 Same mocking approach as test_app_render_pipeline.py: only the
-Anthropic API call and (for these tests) write_render_history itself
-are mocked - zero cost, no real Supabase writes from tests.
+Anthropic API call and the Supabase client (via render_history.
+get_supabase_client) are mocked - zero cost, no real Supabase writes
+or reads from tests.
 """
 import os
 from pathlib import Path
@@ -207,3 +207,115 @@ def test_write_render_history_not_called_when_render_fails():
         at.run()
 
         table.insert.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Step 5 - History screen (screen 6): list view + before/after reopen
+# ---------------------------------------------------------------------------
+
+def _mock_supabase_client_with_history(rows):
+    """Same shape as _mock_supabase_client, but the select().eq().
+    order().limit().execute() chain get_render_history actually calls
+    returns the given rows, instead of an empty list."""
+    client = MagicMock()
+    table = MagicMock()
+    client.table.return_value = table
+    select_result = MagicMock()
+    select_result.data = rows
+    table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = select_result
+    return client, table
+
+
+def test_history_screen_shows_empty_state_with_no_renders():
+    client, _ = _mock_supabase_client_with_history([])
+    with patch("render_history.get_supabase_client", return_value=client):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        at.session_state["screen"] = 6
+        at.session_state["_device_id"] = "test-device-1"
+        at.run()
+        assert not at.exception
+        assert any("No renders yet" in info.value for info in at.info)
+
+
+def test_history_screen_lists_past_renders():
+    rows = [
+        {
+            "id": "row-1", "created_at": "2026-08-19T10:15:00Z",
+            "context": "LinkedIn post", "mode": "preserve",
+            "input_text": "Original draft one.", "output_text": "Rewritten draft one.",
+            "voice_match": "Strong match", "content_lock_pass": True,
+        },
+        {
+            "id": "row-2", "created_at": "2026-08-18T09:00:00Z",
+            "context": "", "mode": "elevate",
+            "input_text": "Original draft two.", "output_text": "Rewritten draft two.",
+            "voice_match": "Close match", "content_lock_pass": False,
+        },
+    ]
+    client, _ = _mock_supabase_client_with_history(rows)
+    with patch("render_history.get_supabase_client", return_value=client):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        at.session_state["screen"] = 6
+        at.session_state["_device_id"] = "test-device-1"
+        at.run()
+        assert not at.exception
+
+        expander_labels = [e.label for e in at.expander]
+        assert any("LinkedIn post" in label and "Strong match" in label for label in expander_labels)
+        assert any("No context set" in label and "Close match" in label for label in expander_labels)
+
+
+def test_history_screen_reopen_shows_before_and_after_text():
+    rows = [{
+        "id": "row-1", "created_at": "2026-08-19T10:15:00Z",
+        "context": "LinkedIn post", "mode": "preserve",
+        "input_text": "Original draft one.", "output_text": "Rewritten draft one.",
+        "voice_match": "Strong match", "content_lock_pass": True,
+    }]
+    client, _ = _mock_supabase_client_with_history(rows)
+    with patch("render_history.get_supabase_client", return_value=client):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        at.session_state["screen"] = 6
+        at.session_state["_device_id"] = "test-device-1"
+        at.run()
+        assert not at.exception
+
+        before_box = next(t for t in at.text_area if t.key == "history_before_row-1")
+        after_box = next(t for t in at.text_area if t.key == "history_after_row-1")
+        assert before_box.value == "Original draft one."
+        assert after_box.value == "Rewritten draft one."
+        assert before_box.disabled and after_box.disabled
+
+
+def test_history_nav_buttons_present_from_write_and_my_voice():
+    client, _ = _mock_supabase_client_with_history([])
+    with patch("render_history.get_supabase_client", return_value=client):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)
+        at.run()
+        assert not at.exception
+        assert any(b.key == "nav_to_history_from_write" for b in at.sidebar.button)
+
+        at.session_state["screen"] = 5
+        at.run()
+        assert not at.exception
+        assert any(b.key == "nav_to_history_from_my_voice" for b in at.sidebar.button)
+
+
+def test_history_back_to_write_button_navigates():
+    client, _ = _mock_supabase_client_with_history([])
+    with patch("render_history.get_supabase_client", return_value=client):
+        at = AppTest.from_file(_APP_PATH)
+        at.run()
+        _seed_screen4(at)  # sets baseline_fingerprint, needed for the sidebar nav to show
+        at.session_state["screen"] = 6
+        at.run()
+        assert not at.exception
+
+        back_button = next(b for b in at.sidebar.button if b.key == "nav_back_to_write_from_history")
+        back_button.click().run()
+        assert at.session_state["screen"] == 4

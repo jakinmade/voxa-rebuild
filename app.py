@@ -27,7 +27,7 @@ import streamlit as st
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from render_cap import check_and_reserve_render
-from render_history import write_render_history
+from render_history import write_render_history, get_render_history
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
@@ -2057,6 +2057,9 @@ def screen_render():
             if st.button("My Voice \u2192", key="nav_to_my_voice"):
                 go_to(5)
                 st.rerun()
+            if st.button("History \u2192", key="nav_to_history_from_write"):
+                go_to(6)
+                st.rerun()
 
     st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
@@ -2553,6 +2556,9 @@ def screen_my_voice():
             if st.button("\u2190 Back to Write", key="nav_back_to_write"):
                 go_to(4)
                 st.rerun()
+            if st.button("History \u2192", key="nav_to_history_from_my_voice"):
+                go_to(6)
+                st.rerun()
 
     st.markdown('<div class="headline">Your voice.</div>', unsafe_allow_html=True)
 
@@ -2593,6 +2599,80 @@ def screen_my_voice():
         """, unsafe_allow_html=True)
 
 
+def screen_history():
+    """
+    Section 9.4 (Step 5) - list of past renders, click to reopen.
+    Reads render_history.get_render_history(device_id), which fails
+    open to an empty list on any error - a blank History screen is a
+    fine degraded state, not an error to surface to the person.
+
+    Reopen is a simplified two-pane (before/after) view, not the full
+    Voice Report from Screen 4 - deliberately, not a shortcut: the
+    render_history table only ever stored input_text, output_text,
+    context, mode, voice_match (the tier label) and content_lock_pass
+    (see write_render_history's call site in _run_render). It never
+    stored the full per-dimension delta, risk_reason, or AI-tell
+    detail behind a completed render, so reconstructing the full
+    three-pane diagnostic view here would mean fabricating numbers
+    that were never actually persisted - the same discipline that
+    kept the "Learned" field off Screen 4 (Section 8). Before/after
+    plus voice match and Content Lock status is exactly what's
+    honestly available.
+    """
+    if st.session_state.get("baseline_fingerprint"):
+        with st.sidebar:
+            if st.button("\u2190 Back to Write", key="nav_back_to_write_from_history"):
+                go_to(4)
+                st.rerun()
+
+    st.markdown('<div class="headline">History.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub">Your last 50 renders on this device.</div>',
+        unsafe_allow_html=True,
+    )
+
+    device_id = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = device_id
+    history = get_render_history(device_id)
+
+    if not history:
+        st.info("No renders yet. Once you write something, it'll show up here.")
+        return
+
+    for entry in history:
+        created_at = entry.get("created_at", "")
+        # Supabase returns full ISO timestamps; keep only date + time
+        # to the minute for a scannable list, same trim style already
+        # used for render_completed_at elsewhere in this file.
+        display_date = created_at[:16].replace("T", " ") if created_at else "Unknown date"
+        context_label = entry.get("context") or "No context set"
+        voice_match = entry.get("voice_match") or "Unrated"
+        content_lock_pass = entry.get("content_lock_pass")
+        lock_badge = (
+            '<span class="badge badge-green">Content Lock: passed</span>' if content_lock_pass
+            else '<span class="badge badge-red">Content Lock: flagged</span>' if content_lock_pass is False
+            else '<span class="badge badge-amber">Content Lock: unknown</span>'
+        )
+
+        with st.expander(f"{display_date} \u2014 {context_label} \u2014 {voice_match}"):
+            st.markdown(lock_badge, unsafe_allow_html=True)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown('<div class="sub" style="margin-top:0.6rem;">Before</div>', unsafe_allow_html=True)
+                st.text_area(
+                    "before", value=entry.get("input_text", ""), height=180,
+                    label_visibility="collapsed", disabled=True,
+                    key=f"history_before_{entry.get('id')}",
+                )
+            with col2:
+                st.markdown('<div class="sub" style="margin-top:0.6rem;">After</div>', unsafe_allow_html=True)
+                st.text_area(
+                    "after", value=entry.get("output_text", ""), height=180,
+                    label_visibility="collapsed", disabled=True,
+                    key=f"history_after_{entry.get('id')}",
+                )
+
+
 # ============================================================
 # Router
 # ============================================================
@@ -2609,6 +2689,8 @@ elif screen == 4:
     screen_render()
 elif screen == 5:
     screen_my_voice()
+elif screen == 6:
+    screen_history()
 else:
     go_to(1)
     st.rerun()
