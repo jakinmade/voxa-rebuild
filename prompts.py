@@ -1247,10 +1247,36 @@ def _grammar_fix_pass(text: str, client) -> str:
     Second Claude call — grammar errors only.
     Brief: find and fix grammar errors. Do not rewrite. Do not change voice.
     Returns corrected text. If no errors found, returns original text unchanged.
+
+    Expanded 19 Aug 2026 (JA: "grammarly is flagging some grammar issues,
+    that cannot happen, that is a credibility killer") from 6 fixable
+    categories to 12 named categories plus a catch-all. Root cause: the
+    original 6-item whitelist meant any error outside those categories
+    was structurally invisible to this pass, by design, regardless of
+    the model's own general grammar competence — confirmed against a
+    real render: "It brings up when someone finally asks" ('bring up'
+    is transitive, used here with no object) matched none of the 6
+    original categories. Research on LLM grammar-correction prompting
+    (checked before this change, not assumed) supports the specific
+    shape of this fix, not just "add more instructions": explicit,
+    named error categories measurably outperform open-ended/holistic
+    "fix any grammar error" prompts at controlling over-correction, and
+    LLMs specifically underperform on exactly this class of error —
+    open-class verb/noun replacement judgements, the "other" catch-all
+    bucket in standard GEC error taxonomies — versus closed-class
+    patterns like determiners and subject-verb agreement, which they
+    already handle well. So the fix adds explicit named categories
+    (subject-verb agreement, verb valency, pronoun reference, run-ons,
+    dangling modifiers, tense consistency) rather than loosening the
+    instruction into something vaguer, plus one narrow catch-all line
+    at the end as a safety net for genuinely clear-cut errors outside
+    all twelve. DO NOT TOUCH list is completely unchanged — this only
+    widens what counts as a fixable error, never what's off-limits
+    (voice, register, word choice, names, UK spelling).
     """
     system = (
         "You are a precise grammar checker for UK English. Fix errors only. Never rewrite.\n\n"
-        "FIX THESE:\n"
+        "FIX THESE — this list is not exhaustive, but check every category below on every pass:\n"
         "1. Adverb/adjective confusion: 'move quicker' → 'move more quickly', "
         "'runs faster' is fine (manner adverb), 'move quicker' is not.\n"
         "2. Missing prepositions: 'lagged the ambition' → 'lagged behind the ambition', "
@@ -1263,6 +1289,26 @@ def _grammar_fix_pass(text: str, client) -> str:
         "Only add a closer if the list is plainly incomplete — do not add to every list.\n"
         "5. Missing articles (a, an, the) before countable nouns.\n"
         "6. Dropped words that break the meaning of a sentence.\n"
+        "7. Subject-verb agreement: a singular subject with a plural verb or vice versa "
+        "('the report show' → 'the report shows'). Does not apply to the collective-noun "
+        "exception in DO NOT TOUCH item 1 below.\n"
+        "8. Verb valency errors — a transitive verb used with no object, or given an object "
+        "it cannot grammatically take. Confirmed live: 'It brings up when someone finally "
+        "asks' — 'bring up' is transitive and needs an object ('brings it up' or 'that comes "
+        "up'), using it bare like this is not a stylistic choice, it is ungrammatical. Check "
+        "every verb the rewrite may have swapped in for whether it actually takes the "
+        "construction it is being used with, not just whether it fits the surrounding tone.\n"
+        "9. Pronoun reference: a pronoun ('it', 'this', 'they') with no clear antecedent, or "
+        "one that does not agree in number with what it refers to.\n"
+        "10. Run-on sentences and comma splices: two independent clauses joined by only a "
+        "comma where UK usage requires a full stop, semicolon, or conjunction.\n"
+        "11. Dangling or misplaced modifiers: a modifying phrase that grammatically attaches "
+        "to the wrong noun because of where it sits in the sentence.\n"
+        "12. Tense inconsistency: a verb tense that breaks from the tense already established "
+        "in the surrounding sentence or paragraph with no reason for the shift.\n"
+        "13. Beyond the twelve categories above: fix any other clear-cut grammar error a "
+        "careful copyeditor would flag — a construction native speakers would recognise as "
+        "actually ungrammatical, not merely informal, unusual, or a matter of taste.\n"
         "\n"
         "DO NOT TOUCH:\n"
         "1. Collective nouns with plural verbs ('England are', 'the team are', 'Labour are') — correct in UK English.\n"
