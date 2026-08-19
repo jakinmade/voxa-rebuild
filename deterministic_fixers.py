@@ -993,6 +993,44 @@ def _fix_modal_hedge(text: str, target: float, current: float) -> tuple[str, boo
     return result, converted > 0
 
 
+# Common contraction -> expansion pairs, applied before the word-level
+# diff in _check_uncorrected_insertions so contracting/expanding a word
+# (here's <-> here is, didn't <-> did not) isn't mistaken for new
+# content — a split render frequently does this alongside a comma-to-
+# period change. Not exhaustive; covers the standard set, which is all
+# that check needs (it only has to avoid false positives on ordinary
+# rewrites, not model every contraction in English).
+_CONTRACTION_EXPANSIONS = {
+    "here's": "here is", "it's": "it is", "that's": "that is",
+    "what's": "what is", "there's": "there is", "who's": "who is",
+    "let's": "let us",
+    "didn't": "did not", "doesn't": "does not", "don't": "do not",
+    "isn't": "is not", "aren't": "are not", "wasn't": "was not",
+    "weren't": "were not", "hasn't": "has not", "haven't": "have not",
+    "hadn't": "had not", "won't": "will not", "wouldn't": "would not",
+    "can't": "can not", "couldn't": "could not", "shouldn't": "should not",
+    "mustn't": "must not",
+    "i'm": "i am", "you're": "you are", "we're": "we are",
+    "they're": "they are",
+    "i've": "i have", "you've": "you have", "we've": "we have",
+    "they've": "they have",
+    "i'd": "i would", "you'd": "you would", "we'd": "we would",
+    "i'll": "i will", "you'll": "you will", "we'll": "we will",
+    "they'll": "they will",
+}
+_CONTRACTION_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in _CONTRACTION_EXPANSIONS) + r")\b",
+    re.I,
+)
+
+
+def _expand_contractions(text: str) -> str:
+    """Lowercases and expands standard contractions — normalisation
+    step for the word-level diff in _check_uncorrected_insertions,
+    not used anywhere content is actually rewritten."""
+    return _CONTRACTION_RE.sub(lambda m: _CONTRACTION_EXPANSIONS[m.group(0).lower()], text.lower())
+
+
 # ------------------------------------------------------------------
 # Post-LLM-correction insertion check.
 # ------------------------------------------------------------------
@@ -1040,6 +1078,21 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
     only that the count grew. Left for the caller to surface rather
     than silently passing it through as clean.
 
+    Sentence-count alone can't tell a fabricated sentence apart from an
+    existing one that got split by punctuation (e.g. a comma-joined
+    clause rewritten as two short sentences for rhythm) — both raise
+    after_sentence_count by 1 with no new content. Confirmed against a
+    real render: an Elevate pass split 'Not "X," but "Y, and Z."' into
+    'Not "X," but "Y. And Z."' purely by changing a comma to a period,
+    which flagged as sentence_growth despite zero new words — a false
+    positive on Content Lock. So growth is only reported when the
+    words in `after` actually outnumber the words available in
+    `before` (same count-based, non-positional diff as new_hedges,
+    over all words rather than just the hedge list) — a split
+    redistributes existing words across more sentences without using
+    up any word `before` didn't already have; a fabrication brings
+    words that aren't in that budget.
+
     Returns:
       {
         "new_hedges": list[str]  — hedge words/phrases present in
@@ -1047,8 +1100,9 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
             occurrence (e.g. ["perhaps", "might"] if each appeared once
             more than it did in `before`).
         "sentence_growth": int   — sentences added beyond `before`'s
-            count, floored at 0 (a drop in sentence count isn't a
-            fabrication signal, so it's not reported here).
+            count, floored at 0, and reported only when accompanied by
+            new words (see docstring) — a pure punctuation split isn't
+            a fabrication signal, so it's not reported here.
         "flagged": bool          — True if either signal fired.
       }
     """
@@ -1063,7 +1117,25 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
 
     before_sentence_count = len(_extract_sentences(before))
     after_sentence_count = len(_extract_sentences(after))
-    sentence_growth = max(0, after_sentence_count - before_sentence_count)
+    raw_sentence_growth = max(0, after_sentence_count - before_sentence_count)
+
+    sentence_growth = 0
+    if raw_sentence_growth > 0:
+        before_words = Counter(re.findall(r"[a-z]+", _expand_contractions(before)))
+        after_words = Counter(re.findall(r"[a-z]+", _expand_contractions(after)))
+        new_word_count = sum(
+            max(0, count - before_words.get(word, 0))
+            for word, count in after_words.items()
+        )
+        # A handful of new words (a sentence-initial "And"/"But" picked
+        # up when a split happens) is normal punctuation-driven
+        # rewriting, not fabrication. Anything past that is new content
+        # riding along with the extra sentence, which is exactly what
+        # this check exists to catch. Contractions are expanded on both
+        # sides first (see _expand_contractions) so "here's" -> "here
+        # is" doesn't itself register as two new words.
+        if new_word_count > 3:
+            sentence_growth = raw_sentence_growth
 
     return {
         "new_hedges": new_hedges,

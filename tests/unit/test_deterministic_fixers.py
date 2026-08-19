@@ -590,6 +590,43 @@ def test_sentence_drop_not_flagged_as_growth():
     assert result["sentence_growth"] == 0
 
 
+# ---------------------------------------------------------------------------
+# Regression: 19 Aug 2026 — Scott/CLEARANCE follow-up, Elevate render.
+# A single comma-joined sentence was split into two short sentences for
+# rhythm ('Not "X," but "Y, and Z."' -> 'Not "X," but "Y. And Z."'),
+# reusing the same words. Raw sentence-count diffing flagged this as
+# sentence_growth (Content Lock false positive) even though no content
+# was added — only punctuation changed. See function docstring.
+# ---------------------------------------------------------------------------
+
+def test_sentence_split_with_same_words_not_flagged_as_growth():
+    before = (
+        'Not "the agent ran," but "here\'s the evidence it did the right '
+        'thing, and here\'s what happens when it didn\'t."'
+    )
+    after = (
+        'Not "the agent ran," but "here is the evidence it did the right '
+        'thing. And here is what happens when it did not."'
+    )
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 0
+    assert result["flagged"] is False
+
+
+def test_sentence_growth_with_new_content_still_flagged():
+    """The split-detection tolerance must not swallow real fabrication
+    that happens to also change a comma to a period."""
+    before = "The point stands, and it holds up under scrutiny."
+    after = (
+        "The point stands. It holds up under scrutiny. This introduces an "
+        "entirely new claim about next quarter's roadmap that was never "
+        "in the original."
+    )
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] >= 1
+    assert result["flagged"] is True
+
+
 def test_clean_correction_pass_not_flagged():
     """The common case: LLM correction genuinely just fixes the target
     dimension with no collateral. Must not false-positive."""

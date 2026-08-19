@@ -349,6 +349,49 @@ st.markdown("""
     .badge-green { background: var(--success-soft); color: var(--success); }
     .badge-amber { background: var(--warning-soft); color: var(--warning); }
     .badge-red   { background: var(--danger-soft);  color: var(--danger); }
+    .what-changed-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-bottom: 0.9rem;
+    }
+    .what-changed-chip {
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        padding: 0.25rem 0.55rem;
+        border-radius: 999px;
+        background: var(--surface-2, #f2f2f2);
+        color: var(--ink);
+    }
+    .what-changed-empty {
+        font-size: 0.82rem;
+        color: var(--muted);
+        margin-bottom: 0.9rem;
+    }
+    .content-lock-banner {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        padding: 0.7rem 0.9rem;
+        border-radius: 0.5rem;
+        margin-bottom: 0.9rem;
+    }
+    .content-lock-banner.pass {
+        background: var(--success-soft);
+        color: var(--success);
+    }
+    .content-lock-banner.fail {
+        background: var(--danger-soft);
+        color: var(--danger);
+    }
+    .content-lock-banner-title {
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    .content-lock-banner-reason {
+        font-size: 0.82rem;
+        line-height: 1.4;
+    }
     .content-lock {
         margin-top: 0.9rem;
         padding-top: 0.9rem;
@@ -1698,6 +1741,88 @@ def _run_render(
     return True
 
 
+def _build_what_changed_html(biggest_changes: list[str]) -> str:
+    """
+    Compact 'What changed' chip row — dimension name plus direction
+    only (\u2191/\u2193), not the raw percentage. Reads biggest_changes,
+    already computed by build_voice_report as "Label +NN%"/"Label
+    -NN%" strings; this only reformats them for the leading summary
+    position in the report card. The full percentage figures still
+    appear in the Voice Match table further down for anyone who wants
+    them — this is the "here's what you need to know" layer above it,
+    same principle as the Content Lock banner (VOICOVA UX review, 19
+    Aug 2026).
+
+    Falls back to a plain "no drift" line when biggest_changes is
+    empty, same wording the old inline sentence used, so nothing reads
+    as broken when a render matches baseline cleanly.
+    """
+    if not biggest_changes:
+        return '<div class="what-changed-empty">No significant drift from your baseline.</div>'
+
+    chips = []
+    for change in biggest_changes[:3]:
+        match = re.match(r"^(.*?)\s([+-])\d+%$", change)
+        if not match:
+            chips.append(f'<span class="what-changed-chip">{change}</span>')
+            continue
+        label, sign = match.group(1), match.group(2)
+        arrow = "\u2191" if sign == "+" else "\u2193"
+        chips.append(f'<span class="what-changed-chip">{label} {arrow}</span>')
+
+    return '<div class="what-changed-row">' + "".join(chips) + '</div>'
+
+
+def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) -> str:
+    """
+    Leading summary state for Content Lock — 'CONTENT SAFE' or 'NEEDS
+    YOUR EYES', shown at the top of the report card rather than the
+    full four-row checklist buried at the bottom. Reads the exact same
+    signals as _build_content_lock_html and has_content_integrity_
+    hard_fail (dropped_entities, attribution_swaps, sentence_growth,
+    new_hedges) — this adds no new detection, it's a second, higher-
+    prominence view of data already computed. The full checklist below
+    still renders for anyone who wants the row-by-row detail; this is
+    the "here's what you need to know" layer above it (VOICOVA UX
+    review, 19 Aug 2026 — Content Lock as visible status, not buried
+    diagnostic).
+
+    Reasons list mirrors _build_content_lock_html's four checks so the
+    banner's summary and the checklist below it can never disagree
+    about what failed.
+    """
+    dropped = report.get("dropped_entities", [])
+    swaps = report.get("attribution_swaps", [])
+    sentence_growth = (insertion_check or {}).get("sentence_growth", 0)
+    new_hedges = (insertion_check or {}).get("new_hedges", [])
+
+    reasons = []
+    if dropped:
+        reasons.append(f"Facts dropped: {', '.join(dropped)}")
+    if swaps:
+        reasons.append("Attribution may have changed — check before sending.")
+    if sentence_growth:
+        reasons.append(f"{sentence_growth} sentence(s) added beyond the original")
+    if new_hedges:
+        reasons.append(f"New hedging added: {', '.join(new_hedges)}")
+
+    if reasons:
+        reason_html = "".join(f'<div class="content-lock-banner-reason">{r}</div>' for r in reasons)
+        return (
+            '<div class="content-lock-banner fail">'
+            '<div class="content-lock-banner-title">\u26a0 Needs your eyes</div>'
+            f'{reason_html}'
+            '</div>'
+        )
+
+    return (
+        '<div class="content-lock-banner pass">'
+        '<div class="content-lock-banner-title">\u2713 Content safe</div>'
+        '<div class="content-lock-banner-reason">Facts, attribution, and structure preserved.</div>'
+        '</div>'
+    )
+
+
 def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
     """
     Renders the Content Lock checklist — 'voice can change, meaning
@@ -1903,6 +2028,12 @@ def screen_render():
     progress_dots(4)
     _show_deepen_success_if_pending()
 
+    if st.session_state.get("baseline_fingerprint"):
+        with st.sidebar:
+            if st.button("My Voice \u2192", key="nav_to_my_voice"):
+                go_to(5)
+                st.rerun()
+
     st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
 
@@ -2039,10 +2170,6 @@ def screen_render():
         if report:
             badge_class = {"Low": "badge-green", "Medium": "badge-amber", "High": "badge-red"}
             conf_badge_class = {"High": "badge-green", "Medium": "badge-amber", "Low": "badge-red"}
-            changes_html = (
-                " \u00b7 ".join(report["biggest_changes"])
-                if report["biggest_changes"] else "No significant drift from your baseline."
-            )
             ai_tell_html = (
                 '<span class="badge badge-green">Clean</span>'
                 if report.get("ai_tell_clean", True)
@@ -2051,8 +2178,14 @@ def screen_render():
             vm_badge = report.get('voice_match_badge', 'badge-amber')
             vm_tier = report.get('voice_match_tier', 'Unrated')
             vm_evidence = report.get('voice_match_evidence', '')
+            content_lock_banner = _build_content_lock_banner_html(
+                report, st.session_state.get("render_insertion_check")
+            )
+            what_changed = _build_what_changed_html(report.get("biggest_changes", []))
             st.markdown(f"""
             <div class="voice-report">
+                {content_lock_banner}
+                {what_changed}
                 <div class="vr-grid">
                     <div class="vr-stat">
                         <div class="vr-stat-label">Voice consistency</div>
@@ -2076,7 +2209,6 @@ def screen_render():
                     </div>
                 </div>
                 <div class="vr-changes">{vm_evidence}</div>
-                <div class="vr-changes">Biggest changes: {changes_html}</div>
                 {_build_voice_match_table_html(st.session_state.get("render_delta") or {})}
                 {_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
             </div>
@@ -2357,6 +2489,72 @@ def screen_render():
 
 
 # ============================================================
+# Screen 5 — My Voice (Tier 1 v1: overall confidence only, no
+# per-dimension breakdown — that's blocked on wiring voxa-profile/
+# voxa-calibration's per-dimension confidence through to this app,
+# out of scope for this pass. See VOICOVA_Product_2.0_Tier1_Spec.)
+# ============================================================
+
+_MY_VOICE_CONFIDENCE_BADGE = {"High": "badge-green", "Medium": "badge-amber", "Low": "badge-red"}
+
+
+def screen_my_voice():
+    """
+    Standing voice dashboard, not a one-time onboarding artefact —
+    answers "what does Voicova think I sound like right now."
+    Reuses two things already computed elsewhere rather than adding
+    new detection: st.session_state.observations (the fingerprint
+    reveal built at onboarding, screen_reveal()) for "what Voicova has
+    learned", and st.session_state.confidence (compute_confidence's
+    output, already set after onboarding and after every render) for
+    the overall confidence badge. No new backend, no new scoring.
+    """
+    if st.session_state.get("baseline_fingerprint"):
+        with st.sidebar:
+            if st.button("\u2190 Back to Write", key="nav_back_to_write"):
+                go_to(4)
+                st.rerun()
+
+    st.markdown('<div class="headline">Your voice.</div>', unsafe_allow_html=True)
+
+    confidence = st.session_state.get("confidence")
+    if confidence:
+        badge_class = _MY_VOICE_CONFIDENCE_BADGE.get(confidence, "badge-amber")
+        st.markdown(
+            f'<div class="sub">Confidence: '
+            f'<span class="badge {badge_class}">{confidence}</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="sub">Not established yet — write a few renders to build confidence.</div>',
+            unsafe_allow_html=True,
+        )
+
+    observations = st.session_state.get("observations", [])
+    if not observations:
+        st.info("No voice profile yet. Paste some of your writing to get started.")
+        return
+
+    st.markdown('<div class="sub" style="margin-top:1.2rem;">What Voicova has learned:</div>', unsafe_allow_html=True)
+    for obs in observations:
+        quote_match = re.search(r'"([^"]{10,})"', obs.get("body", ""))
+        evidence_html = (
+            f'<div class="voice-check-evidence">e.g. "{quote_match.group(1)}"</div>'
+            if quote_match else ""
+        )
+        st.markdown(f"""
+        <div class="voice-check">
+            <div class="voice-check-mark">\u2713</div>
+            <div>
+                <div class="voice-check-text">{obs['headline']}</div>
+                {evidence_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ============================================================
 # Router
 # ============================================================
 
@@ -2370,6 +2568,8 @@ elif screen == 3:
     screen_sample2()
 elif screen == 4:
     screen_render()
+elif screen == 5:
+    screen_my_voice()
 else:
     go_to(1)
     st.rerun()

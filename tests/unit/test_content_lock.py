@@ -12,7 +12,7 @@ Deliberately four checks, not the five in the original design brief —
 see the function's own docstring for why "no new claims detected"
 was dropped rather than mapped weakly onto an unrelated signal.
 """
-from app import _build_content_lock_html
+from app import _build_content_lock_html, _build_content_lock_banner_html, _build_what_changed_html
 
 
 def test_all_pass_shows_four_pass_states_zero_fail():
@@ -89,3 +89,71 @@ def test_checklist_title_always_present():
     report = {"dropped_entities": [], "attribution_swaps": []}
     html = _build_content_lock_html(report, {"sentence_growth": 0, "new_hedges": []})
     assert "Content Lock" in html
+
+
+# ---------------------------------------------------------------------------
+# _build_content_lock_banner_html — the leading pass/fail summary shown
+# above the full checklist (19 Aug 2026, VOICOVA UX review: Content Lock
+# should be a visible status, not buried inside the report).
+# ---------------------------------------------------------------------------
+
+def test_banner_shows_content_safe_when_all_pass():
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "content-lock-banner pass" in html
+    assert "Content safe" in html
+    assert "content-lock-banner fail" not in html
+
+
+def test_banner_shows_needs_your_eyes_on_any_failure():
+    report = {"dropped_entities": ["Scott"], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "content-lock-banner fail" in html
+    assert "Needs your eyes" in html
+    assert "Scott" in html
+
+
+def test_banner_lists_every_failure_reason_not_just_first():
+    report = {"dropped_entities": ["Scott"], "attribution_swaps": [("your idea", "my idea")]}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 1, "new_hedges": ["perhaps"]})
+    assert html.count("content-lock-banner-reason") == 4
+    assert "Scott" in html
+    assert "Attribution may have changed" in html
+    assert "1 sentence(s)" in html
+    assert "perhaps" in html
+
+
+def test_banner_missing_insertion_check_defaults_to_safe():
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, None)
+    assert "content-lock-banner pass" in html
+
+
+# ---------------------------------------------------------------------------
+# _build_what_changed_html — the leading chip row summarising
+# biggest_changes ("Label +NN%" strings) as direction-only chips.
+# ---------------------------------------------------------------------------
+
+def test_what_changed_empty_shows_no_drift_line():
+    html = _build_what_changed_html([])
+    assert "No significant drift" in html
+    assert "what-changed-chip" not in html
+
+
+def test_what_changed_formats_negative_as_down_arrow():
+    html = _build_what_changed_html(["Hedging -54%"])
+    assert "Hedging \u2193" in html
+    assert "-54%" not in html
+
+
+def test_what_changed_formats_positive_as_up_arrow():
+    html = _build_what_changed_html(["Ownership (first person) +12%"])
+    assert "Ownership (first person) \u2191" in html
+    assert "+12%" not in html
+
+
+def test_what_changed_caps_at_three_chips():
+    changes = ["Hedging -54%", "Sentence rhythm -47%", "Ownership +12%", "Directness -8%"]
+    html = _build_what_changed_html(changes)
+    assert html.count("what-changed-chip") == 3
+    assert "Directness" not in html
