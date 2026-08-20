@@ -28,7 +28,7 @@ from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from render_cap import check_and_reserve_render
 from lifetime_cap import (
-    check_and_reserve_lifetime_render, device_has_active_subscription,
+    check_and_reserve_lifetime_render,
     release_reserved_lifetime_render,
 )
 from render_history import write_render_history, get_render_history
@@ -41,7 +41,7 @@ from voice_engine import (
     compute_baseline_metrics, _merge_baseline,
     _score_sample_fitness, _fitness_gate,
     _score_ai_signal,
-    score_semantic_drift, find_source_sentence, splice_dropped_sentence, highlight_attribution_swaps, highlight_flagged_phrases, compute_confidence, compute_risk, compute_risk_reason,
+    score_semantic_drift, find_source_sentence, splice_dropped_sentence, highlight_flagged_phrases, compute_confidence, compute_risk, compute_risk_reason,
     has_content_integrity_hard_fail,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells, score_restructure_fidelity,

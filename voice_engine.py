@@ -2007,7 +2007,6 @@ def score_semantic_drift(input_text: str, output_text: str, platform_format: str
     platform_format == "social".
     """
     input_entities = _entities_and_numbers(input_text)
-    output_entities = _entities_and_numbers(output_text)
 
     if platform_format == "social":
         salutation_name = _extract_opening_salutation_name(input_text)

@@ -25,7 +25,6 @@ in-progress refinement state are NOT persisted — cheap to regenerate,
 no reason to carry them across a session boundary.
 """
 
-import os
 import uuid
 
 import streamlit as st
