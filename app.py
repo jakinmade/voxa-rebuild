@@ -561,6 +561,26 @@ st.markdown("""
     div[data-testid="stAlert"] {
         border-radius: var(--radius-sm);
     }
+
+    /* Spinner — brand-matched, 20 Aug 2026. Streamlit's default spin
+       icon is unstyled grey, the one visual element in the render/
+       onboarding flow that never picked up --accent or --font-sans
+       like every other component above. Targets stSpinner's public
+       data-testid (documented Streamlit contract, same targeting
+       convention as the button rules above) plus the underlying
+       <i> icon Streamlit renders the spin animation with. CSS-only,
+       zero logic risk — a wrong selector here just means the rule
+       doesn't apply, not a functional break, so this hasn't been
+       verified against the compiled frontend bundle the way the
+       button rules above explicitly were; confirm visually next time
+       the app is open. */
+    div[data-testid="stSpinner"] {
+        color: var(--ink);
+        font-family: var(--font-sans);
+    }
+    div[data-testid="stSpinner"] > div > i {
+        color: var(--accent) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
