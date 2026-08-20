@@ -2926,6 +2926,20 @@ _AI_TELL_PHRASES = re.compile(
     r"moving forward|circle back|touch base|pain points|"
     r"seamless(ly)?|delve into|tapestry|testament to|boasts|elevate|"
     r"unlock the potential|game.changer|unparalleled|paramount|"
+    # Added 20 Aug 2026 — researched addition (Grammarly, GPTZero,
+    # Pangram AI-tell compilations cross-referenced), not a single-word
+    # guess. Deliberately excludes generic professional vocabulary
+    # (harness, illuminate, bolster, facilitate, streamline, refine,
+    # differentiate, revolutionize, innovative, typically, generally/
+    # broadly speaking) that VOICOVA's actual target customer
+    # (consultants, advisors, coaches) would plausibly use in their own
+    # genuine voice — same reasoning that already kept bare \"I think\"/
+    # \"I believe\" off the hedge list. Only distinctive multi-word
+    # constructions and two single words already precedented at this
+    # rarity level (paramount, unparalleled) were added.
+    r"that being said|at its core|to put it simply|simply put|"
+    r"shed light on|from a broader perspective|a key takeaway is|"
+    r"\bpivotal\b|\brealm\b|"
     # Soft check-in hedge closer — confirmed live (this session): a
     # correction/render call fabricated "Curious whether that framing
     # lands for you" wholesale, invisible to every existing pattern

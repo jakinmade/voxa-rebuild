@@ -1093,6 +1093,19 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
         (r'\bUnlock the potential\b', 'Make the most'),
         (r'\bUnparalleled\b', 'Rare'),
         (r'\bParamount\b', 'Vital'),
+        # Added 20 Aug 2026 — researched addition, see the matching
+        # comment on _AI_TELL_PHRASES in voice_engine.py for the
+        # rationale on why this list stops here and doesn't include
+        # generic professional vocabulary (harness, streamline, etc.).
+        (r'\bThat being said\b', 'Still'),
+        (r'\bAt its core\b', 'Fundamentally'),
+        (r'\bTo put it simply\b', 'In short'),
+        (r'\bSimply put\b', 'In short'),
+        (r'\bShed light on\b', 'Explain'),
+        (r'\bFrom a broader perspective\b', 'More broadly'),
+        (r'\bA key takeaway is\b', 'The main point is'),
+        (r'\bPivotal\b', 'Key'),
+        (r'\bRealm\b', 'Area'),
     ]
     original_lower = original_input_text.lower()
 
@@ -1103,11 +1116,37 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
         original_input_text defaults to "" so this is a no-op filter
         (nothing ever matches an empty string) for any caller that
         doesn't pass it — identical behaviour to plain re.sub before
-        this existed."""
+        this existed.
+
+        CASE-MATCHING, fixed 20 Aug 2026: every replacement string in
+        claude_constructions/analytical_constructions is written
+        capitalised (e.g. 'Use', 'Strong', 'Note that'), because most
+        entries were only ever hand-tested sentence-initial. The match
+        itself is case-INSENSITIVE (re.IGNORECASE below), so a
+        mid-sentence lowercase hit ("a robust solution") was getting
+        replaced with the literal capitalised string regardless of
+        position — "a Strong solution", a capital letter mid-sentence.
+        Confirmed as a real, pre-existing bug affecting every entry in
+        both lists (robust/game-changing/paramount all reproduce it),
+        not something introduced by this session's additions - found
+        because this session tested a mid-sentence case those entries
+        never had test coverage for. Fixed here, once, for every
+        current and future entry in both lists: the replacement's own
+        first-letter case is now overridden to match the matched
+        text's actual first-letter case, rather than trusting the
+        hardcoded string as written.
+        """
         def _replace_if_not_genuine(m: "re.Match"):
             if original_lower and m.group(0).lower() in original_lower:
                 return m.group(0)
-            return m.expand(replacement) if isinstance(replacement, str) else replacement(m)
+            replaced = m.expand(replacement) if isinstance(replacement, str) else replacement(m)
+            matched = m.group(0)
+            if replaced and matched and matched[0].isalpha():
+                if matched[0].isupper():
+                    replaced = replaced[0].upper() + replaced[1:]
+                else:
+                    replaced = replaced[0].lower() + replaced[1:]
+            return replaced
         return re.sub(pattern, _replace_if_not_genuine, text, flags=re.IGNORECASE)
 
     for pattern, replacement in claude_constructions:
@@ -1128,6 +1167,15 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
             (r'\bdrifting\b', 'changing'),
             (r'\blands? on\b', 'settles on'),
             (r'\blanded on\b', 'settled on'),
+            # NOT ADDING a "surface" replacement here — corrected 20 Aug
+            # 2026. Initially misread as a gap; the test suite already
+            # documents this is DELIBERATE (test_ai_tell_register.py,
+            # TestRegexSweepFixesAnalyticalTells): "surface(s)" has no
+            # reliable noun/verb split via regex — same problem class as
+            # the missing-article heuristic removed earlier for the same
+            # reason. It stays flag-only by design so a human judges
+            # context rather than the sweep guessing and mangling a
+            # genuine noun use ("the agent's surface").
             (r'\bunpacks?\b', 'looks at'),
             (r'\bunpacked\b', 'looked at'),
             (r'\bworth noting\b', 'notable'),

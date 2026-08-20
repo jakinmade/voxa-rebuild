@@ -593,9 +593,51 @@ def sweep(text: str, keep_contractions: bool = False) -> str:
         (r'\bUnlock the potential\b', 'Make the most'),
         (r'\bUnparalleled\b', 'Rare'),
         (r'\bParamount\b', 'Vital'),
+        # Mirrored from root prompts.py, 20 Aug 2026 — researched
+        # addition (Grammarly/GPTZero/Pangram AI-tell compilations
+        # cross-referenced), deliberately excluding generic
+        # professional vocabulary (harness, illuminate, bolster,
+        # facilitate, streamline, refine, differentiate, revolutionize,
+        # innovative, typically, generally/broadly speaking) that
+        # VOICOVA's actual target customer would plausibly use in
+        # their own genuine voice. See prompts.py for the full
+        # rationale — this copy must mirror it exactly per this
+        # module's own DELIBERATE, DOCUMENTED DUPLICATION contract.
+        (r'\bThat being said\b', 'Still'),
+        (r'\bAt its core\b', 'Fundamentally'),
+        (r'\bTo put it simply\b', 'In short'),
+        (r'\bSimply put\b', 'In short'),
+        (r'\bShed light on\b', 'Explain'),
+        (r'\bFrom a broader perspective\b', 'More broadly'),
+        (r'\bA key takeaway is\b', 'The main point is'),
+        (r'\bPivotal\b', 'Key'),
+        (r'\bRealm\b', 'Area'),
     ]
+
+    def _replace_case_matched(pattern: str, replacement: str, text: str) -> str:
+        """Mirrors root prompts.py's _sub_excluding_genuine case-
+        matching fix (20 Aug 2026), minus the original_input_text
+        exemption — this module has never had that parameter, so this
+        only ports the case-matching half of the fix, not the
+        exemption behaviour, to avoid introducing a feature this
+        module doesn't otherwise support. Without this, a mid-sentence
+        lowercase hit was replaced with the hardcoded-capitalised
+        replacement string regardless of position (\"a robust
+        solution\" -> \"a Strong solution\"), confirmed as a real,
+        pre-existing bug affecting every entry in both lists here."""
+        def _repl(m: "re.Match") -> str:
+            replaced = m.expand(replacement)
+            matched = m.group(0)
+            if replaced and matched and matched[0].isalpha():
+                if matched[0].isupper():
+                    replaced = replaced[0].upper() + replaced[1:]
+                else:
+                    replaced = replaced[0].lower() + replaced[1:]
+            return replaced
+        return re.sub(pattern, _repl, text, flags=re.IGNORECASE)
+
     for pattern, replacement in claude_constructions:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        text = _replace_case_matched(pattern, replacement, text)
 
     if _classify_register(text) in ("analytical", "mixed"):
         analytical_constructions = [
@@ -625,7 +667,7 @@ def sweep(text: str, keep_contractions: bool = False) -> str:
             (r'\bcloser to ([\w\s,]+?) than to ([\w\s,]+?)([.,;])', r'more like \1 than \2\3'),
         ]
         for pattern, replacement in analytical_constructions:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            text = _replace_case_matched(pattern, replacement, text)
 
     # 5. Repeated words
     text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
