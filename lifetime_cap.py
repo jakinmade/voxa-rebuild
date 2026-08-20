@@ -182,3 +182,54 @@ def get_lifetime_render_count(device_id: str) -> tuple[int, int]:
     except Exception:
         log.error("lifetime_cap_read_unavailable", reason="supabase_error", exc_info=True)
         return 0, limit
+
+
+def release_reserved_lifetime_render(device_id: str) -> None:
+    """Undoes one reservation made by check_and_reserve_lifetime_render
+    for this device, for the case where the render that reservation
+    was for subsequently fails (Anthropic API error, timeout,
+    malformed response) after the cap already counted it against the
+    person's 15. Without this, a failed render still costs a free
+    slot (Section 15.2 item 5, engineering review response, 19 Aug
+    2026: "Separate the reservation from confirmed consumption, or add
+    a release-on-failure path"). This is the release-on-failure path.
+
+    Deliberately NOT a change to check_and_reserve_lifetime_render's
+    own return signature - that function is unpacked as a fixed
+    3-tuple in 10+ existing call sites and tests; widening it to
+    signal "was this reservation real" would be a much larger,
+    riskier change for the same result. Instead this function is
+    self-contained: it reads subscription_status itself before
+    deciding whether to decrement, rather than trusting the caller to
+    know whether check_and_reserve_lifetime_render actually
+    incremented anything for this device. An active-subscription
+    device is never incremented in the first place (that function's
+    own early-return path), so this correctly no-ops for a subscriber
+    rather than incorrectly lowering a count that was never raised.
+
+    Fails open and silently on any error, same contract as every
+    other write in this module - a failed release just means one
+    render costs the user a slot it shouldn't have, an honest minor
+    degradation, not a reason to raise into the render's own error
+    handling and mask the real failure that triggered the release."""
+    client = get_supabase_client()
+    if client is None:
+        return
+    try:
+        existing = (
+            client.table(_TABLE)
+            .select("count, subscription_status")
+            .eq("device_id", device_id)
+            .limit(1)
+            .execute()
+        )
+        rows = existing.data or []
+        if not rows:
+            return
+        if rows[0].get("subscription_status") == "active":
+            return
+        current = rows[0]["count"]
+        new_count = max(0, current - 1)
+        client.table(_TABLE).update({"count": new_count}).eq("device_id", device_id).execute()
+    except Exception:
+        log.error("lifetime_cap_release_failed", reason="supabase_error", exc_info=True)

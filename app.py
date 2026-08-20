@@ -27,7 +27,10 @@ import streamlit as st
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from render_cap import check_and_reserve_render
-from lifetime_cap import check_and_reserve_lifetime_render, device_has_active_subscription
+from lifetime_cap import (
+    check_and_reserve_lifetime_render, device_has_active_subscription,
+    release_reserved_lifetime_render,
+)
 from render_history import write_render_history, get_render_history
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
@@ -833,7 +836,23 @@ def screen_paste():
                 unsafe_allow_html=True
             )
 
-    st.markdown('<div class="microcopy">No account needed. Nothing stored.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="microcopy">No account or signup. Your profile is saved securely so you don\'t have to rebuild it.</div>',
+        unsafe_allow_html=True
+    )
+    with st.expander("What we store, and why"):
+        st.markdown(
+            "- **Your writing sample and voice fingerprint** — so VOICOVA "
+            "recognises your voice next time, without you re-onboarding.\n"
+            "- **A summary of your voice profile** — used to write in your "
+            "voice on future renders.\n"
+            "- **Your render history** (last 50) — so you can revisit past "
+            "renders.\n\n"
+            "This is tied to a device cookie, not an account or email — "
+            "we don't know who you are unless you choose to subscribe. "
+            "Clear your cookies and it's gone. No selling, no sharing, "
+            "no third-party analytics on this data."
+        )
 
 
 # ============================================================
@@ -1331,6 +1350,18 @@ def _run_render(
             "That didn't go through. Your text is safe, try again."
         )
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
+        # Release-on-failure (Section 15.2 item 5, 20 Aug 2026): the
+        # lifetime cap reserved this render optimistically, before
+        # this API call ran (see check_and_reserve_lifetime_render's
+        # own docstring for why - same convention as render_cap.py).
+        # If the call itself failed, the person never got a render out
+        # of it and shouldn't lose one of their 15 for VOICOVA's own
+        # API failure. release_reserved_lifetime_render is self-
+        # contained and safe to call unconditionally here - it no-ops
+        # for an active subscriber (never incremented in the first
+        # place) and fails open silently on any Supabase error, same
+        # as everything else in that module.
+        release_reserved_lifetime_render(device_id)
         return False
 
     # Case-only entity drift — deterministic, runs before ANY scoring so
@@ -1760,6 +1791,24 @@ def _run_render(
             ai_tells_clean=ai_tells["clean"],
             missed_dimensions=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
         )
+        # Correction-frequency instrumentation (Section 15.2 item 8,
+        # 20 Aug 2026): all four inputs are already in scope at this
+        # point in _run_render, computed earlier in this same
+        # function - hedge_fixed/modal_fixed/rhythm_fixed/
+        # ownership_fixed/directive_fixed from the deterministic
+        # fixer pass (~line 1412), correction_prompt from
+        # build_correction_prompt (~line 1488), content_integrity_
+        # hard_fail just above. Checked in this order because a hard
+        # fail is the most severe outcome regardless of what else
+        # happened during the render.
+        if content_integrity_hard_fail:
+            correction_tier = "hard_fail"
+        elif correction_prompt:
+            correction_tier = "llm_correction"
+        elif hedge_fixed or modal_fixed or rhythm_fixed or ownership_fixed or directive_fixed:
+            correction_tier = "deterministic_only"
+        else:
+            correction_tier = "none"
         log_render_event(
             risk=risk.get("level") if isinstance(risk, dict) else risk,
             risk_reason=risk_reason,
@@ -1768,6 +1817,7 @@ def _run_render(
             ai_tells_clean=ai_tells["clean"],
             is_refinement=is_refinement,
             scoring_rules_version=scoring_rules_version(),
+            correction_tier=correction_tier,
         )
 
         # Second, independently-grounded voice-match signal alongside

@@ -35,6 +35,17 @@ nothing if the table doesn't exist yet):
         scoring_rules_version text not null
     );
 
+    -- Added 20 Aug 2026 (Section 15.2 item 8, engineering review
+    -- response): correction-frequency instrumentation. One of four
+    -- values: 'hard_fail' (content_integrity_hard_fail tripped),
+    -- 'llm_correction' (build_correction_prompt returned a prompt,
+    -- i.e. the LLM correction call ran), 'deterministic_only' (a
+    -- deterministic fixer changed the text but no LLM correction was
+    -- needed), 'none' (render was clean on the first pass). Answers
+    -- "where is the generation engine actually weak" ahead of any
+    -- scoring recalibration, per the review's own framing.
+    alter table render_events add column correction_tier text;
+
 USING THE DATA ONCE IT ACCUMULATES
 The question this exists to answer, as SQL, once there's real volume:
 
@@ -68,13 +79,19 @@ def log_render_event(
     ai_tells_clean: bool | None,
     is_refinement: bool,
     scoring_rules_version: str,
+    correction_tier: str | None = None,
 ) -> None:
     """Fire-and-forget. Call once per completed render, right after
     compute_risk/compute_risk_reason - see render_complete in
     app.py's _run_render. Never raises, never returns a value the
     caller needs to check; a failed write here must never be visible
     to the person waiting on their render, same fail-open contract as
-    persistence.py's save_profile_if_available()."""
+    persistence.py's save_profile_if_available().
+
+    correction_tier: one of 'hard_fail', 'llm_correction',
+    'deterministic_only', 'none', or None if the caller doesn't
+    compute it (older call sites, tests). Optional with a None
+    default so this is purely additive - no existing caller breaks."""
     client = get_supabase_client()
     if client is None:
         return
@@ -88,6 +105,8 @@ def log_render_event(
         "is_refinement": is_refinement,
         "scoring_rules_version": scoring_rules_version,
     }
+    if correction_tier is not None:
+        payload["correction_tier"] = correction_tier
 
     try:
         client.table(_TABLE).insert(payload).execute()
