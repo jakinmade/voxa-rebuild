@@ -1257,17 +1257,29 @@ def _run_render(
     # site resolving its own copy.
     device_id = st.session_state.get("_device_id") or get_or_create_device_id()
     st.session_state["_device_id"] = device_id
-    lifetime_allowed, lifetime_used, lifetime_limit = check_and_reserve_lifetime_render(device_id)
-    if not lifetime_allowed:
-        st.session_state.render_error = (
-            "You've used all 15 free renders. Upgrade to keep writing as you."
-        )
-        st.session_state.render_paywall_hit = True
-        log.error(
-            "render_blocked", reason="lifetime_cap_reached",
-            used=lifetime_used, limit=lifetime_limit, is_refinement=is_refinement,
-        )
-        return False
+    # Render accounting (Section 15.2 item 2, engineering review
+    # response, resolved 21 Aug 2026): "one user render = original
+    # generation + its included refinement, one lifetime-counter
+    # decrement, not two". Only the ORIGINAL generation reserves a
+    # lifetime render; a refinement of that same render is included in
+    # the one already spent, not a second draw against the person's 15.
+    # Confirmed as a real bug, not hypothetical, before this fix: the
+    # reserve call fired unconditionally regardless of is_refinement,
+    # so every refinement silently cost a second free render.
+    if is_refinement:
+        lifetime_allowed, lifetime_used, lifetime_limit = True, 0, 0
+    else:
+        lifetime_allowed, lifetime_used, lifetime_limit = check_and_reserve_lifetime_render(device_id)
+        if not lifetime_allowed:
+            st.session_state.render_error = (
+                "You've used all 15 free renders. Upgrade to keep writing as you."
+            )
+            st.session_state.render_paywall_hit = True
+            log.error(
+                "render_blocked", reason="lifetime_cap_reached",
+                used=lifetime_used, limit=lifetime_limit, is_refinement=is_refinement,
+            )
+            return False
     st.session_state.render_paywall_hit = False
 
     import anthropic
@@ -1357,11 +1369,17 @@ def _run_render(
         # If the call itself failed, the person never got a render out
         # of it and shouldn't lose one of their 15 for VOICOVA's own
         # API failure. release_reserved_lifetime_render is self-
-        # contained and safe to call unconditionally here - it no-ops
-        # for an active subscriber (never incremented in the first
-        # place) and fails open silently on any Supabase error, same
-        # as everything else in that module.
-        release_reserved_lifetime_render(device_id)
+        # contained and safe to call unconditionally for an original
+        # render - it no-ops for an active subscriber (never
+        # incremented in the first place) and fails open silently on
+        # any Supabase error, same as everything else in that module.
+        # Guarded on is_refinement here (21 Aug 2026, render-accounting
+        # fix above): a refinement never reserved a lifetime render in
+        # the first place, so releasing one on its failure would
+        # wrongly hand back a slot from an earlier, successful original
+        # render instead.
+        if not is_refinement:
+            release_reserved_lifetime_render(device_id)
         return False
 
     # Case-only entity drift — deterministic, runs before ANY scoring so
