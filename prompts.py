@@ -635,7 +635,27 @@ def _apply_uk_english(text: str) -> str:
     # Ordered — longer phrases first to avoid partial matches
     replacements = [
         # AI-default vocabulary
-        (r"\bsurfaces\b", "brings up"),
+        #
+        # "surfaces" -> "brings up" removed 21 Aug 2026. Root cause of
+        # the recurring live "It brings up when someone finally asks"
+        # grammar break (documented in voice_engine.py's
+        # LEXICAL_FIDELITY_WATCHLIST, added 19 Aug after the same
+        # incident): this was the actual source of the bad swap, not
+        # just a gap in the grammar-fix pass. "Surfaces" used
+        # intransitively ("it surfaces when...") has no object;
+        # "brings up" is transitive and needs one ("brings it up"),
+        # so a blind regex swap breaks grammar every time it fires on
+        # an intransitive use. The watchlist entry and the 12-category
+        # grammar-fix-pass expansion were both downstream patches for
+        # a bug that lived here. Deleting the substitution removes the
+        # bug at its source instead of relying on a second LLM call to
+        # catch it after the fact — zero added cost, unlike widening
+        # or upgrading the grammar-fix pass. "Surfaces" is ordinary,
+        # correct English; it was never a strong enough AI-tell to be
+        # worth an unconditional, context-blind swap that can silently
+        # break grammar. If a genuine AI-tell case for "surfaces" turns
+        # up later, fix it with a context-aware check (only swap when
+        # followed by an object), not a bare regex.
         (r"\bleverages?\b", "uses"),
         (r"\bleverage\b", "use"),
         (r"\breach out\b", "contact"),
