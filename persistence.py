@@ -40,14 +40,28 @@ _COOKIE_NAME = "voicova_device_id"
 _TABLE = "voice_profiles"
 
 def _get_cookie_controller() -> CookieController:
-    """Cached in st.session_state, not a module-level global — Streamlit
-    serves multiple users from the same Python process, so a
-    module-level cache would leak one user's CookieController instance
-    into another user's request. session_state is correctly scoped per
-    browser session, which is what this actually needs."""
-    if "_cookie_controller" not in st.session_state:
-        st.session_state["_cookie_controller"] = CookieController()
-    return st.session_state["_cookie_controller"]
+    """A fresh CookieController() every call, deliberately not cached.
+
+    Bug this replaces (found 22 Aug 2026, via a friction audit showing
+    returning users always looking like brand-new visitors): the
+    underlying component call inside CookieController.__init__ returns
+    an empty default on the browser's first-ever round-trip in a
+    session, and Streamlit auto-triggers a rerun once the real cookie
+    value arrives — but only a freshly-constructed CookieController
+    picks that up, via its own `else: self.__cookies =
+    st.session_state[key]` branch. Caching the whole instance across
+    reruns (as this function used to) froze it at the empty-default
+    snapshot forever, so get_or_create_device_id() below always saw
+    "no cookie" and silently overwrote the real one on every load,
+    before the real value was ever read.
+
+    Constructing fresh each call is safe, not just a workaround: the
+    class's own internal session_state key ('cookies' by default) is
+    already correctly scoped per browser session by Streamlit itself,
+    which is what the original per-session caching here was trying to
+    guarantee in the first place — it just did so at the wrong layer.
+    """
+    return CookieController()
 
 
 def get_or_create_device_id() -> str:
@@ -55,7 +69,24 @@ def get_or_create_device_id() -> str:
     sets it. Always returns a usable ID — this never blocks onboarding
     even if cookie read/write fails for some reason (private browsing,
     cookie-blocking extension, etc.), it just means that visit won't
-    persist."""
+    persist.
+
+    One-rerun deferral before treating an empty read as genuine: the
+    underlying component returns its default ({}) on the very first
+    script pass of any session, before the browser's real cookie value
+    has round-tripped back — true regardless of the controller-caching
+    fix above, since that's a *within-session* fix and this race exists
+    on pass one of every fresh session (i.e. every hard page load, since
+    st.session_state doesn't survive those). Committing to "no cookie"
+    on that first pass, as this used to, meant writing and overwriting
+    a fresh random ID before the real one was ever read — every time.
+    Deferring once, via the same rerun-idiom used elsewhere in this
+    codebase for identical component-timing races, gives the real
+    value one full round trip to arrive before we decide."""
+    if "cookies" not in st.session_state and not st.session_state.get("_device_id_cookie_wait"):
+        st.session_state["_device_id_cookie_wait"] = True
+        st.rerun()
+
     controller = _get_cookie_controller()
     try:
         existing = controller.get(_COOKIE_NAME)

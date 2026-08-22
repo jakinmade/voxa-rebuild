@@ -1026,7 +1026,9 @@ def screen_sample2():
     st.markdown(
         '<div class="sub">Finish both starters, typed live. Deliberately different situations - '
         'that contrast is what lets us tell your real voice apart from just this one scenario. '
-        'Don\'t think it through, don\'t edit - first version only.</div>',
+        'Don\'t think it through, don\'t edit - first version only. '
+        '<strong>Paste is switched off on these two fields on purpose</strong> — '
+        'typing live is what makes the sample real.</div>',
         unsafe_allow_html=True
     )
 
@@ -2352,6 +2354,11 @@ def screen_render():
         height=220, label_visibility="collapsed", key="render_input_field",
     )
 
+    st.markdown(
+        '<div class="microcopy" style="margin-bottom:0.5rem;">'
+        'Next: a quick authenticity check on the rewrite, then your text.</div>',
+        unsafe_allow_html=True,
+    )
     render_in_progress = st.session_state.get("render_in_progress", False)
     if st.button(
         "Write as me \u2192", type="primary", use_container_width=True,
