@@ -26,6 +26,7 @@ no reason to carry them across a session boundary.
 """
 
 import uuid
+from datetime import datetime, timezone
 
 import streamlit as st
 from streamlit_cookies_controller import CookieController
@@ -112,6 +113,7 @@ def restore_profile_if_available() -> bool:
         # before (anchor sentences and numeric targets alone).
         if row.get("voice_profile_summary"):
             st.session_state["voice_profile_summary"] = row["voice_profile_summary"]
+        st.session_state["_voice_profile_updated_at"] = row.get("updated_at")
     except Exception:
         log.error("profile_restore_apply_failed", exc_info=True)
         return False
@@ -150,6 +152,14 @@ def save_profile_if_available() -> None:
         "baseline_fingerprint": baseline,
         "starter_baseline": st.session_state.get("starter_baseline"),
         "voice_profile_summary": st.session_state.get("voice_profile_summary"),
+        # Explicit, not left to the column's DEFAULT now() — that
+        # default only fires on INSERT. This table is written via
+        # upsert, and an upsert that hits the existing-row path is an
+        # UPDATE, which a column default never touches. Without this,
+        # updated_at would freeze at first-ever save and silently lie
+        # to the "Voice profile updated ..." status line after every
+        # later recalibration.
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
     try:

@@ -72,11 +72,21 @@ from stripe_subscription import create_subscription_checkout, verify_and_record_
 log = get_logger(__name__)
 
 # ---- Page config — must be first ----
+# Sidebar starts expanded for a known-returning user (the flag is set,
+# once, the first time restore_profile_if_available() succeeds in this
+# browser session — see the rerun immediately after that call below)
+# and collapsed for a fresh/new visitor, matching the same
+# onboarding-vs-account-holder split Notion and Gmail use for their own
+# nav. On the very first script execution of a genuinely new tab we
+# don't yet know which case this is — the device cookie hasn't
+# round-tripped through its component yet — so this defaults to
+# collapsed until that's resolved, same fail-open shape as the rest of
+# persistence.py.
 st.set_page_config(
     page_title="Voicova - Communication Identity",
     page_icon="\U0001F535",
     layout="centered",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded" if st.session_state.get("_returning_user_sidebar") else "collapsed",
 )
 
 # ---- Styles ----
@@ -596,6 +606,9 @@ init_state()
 # onboarding, exactly as it worked before this existed).
 if restore_profile_if_available():
     st.session_state.screen = 4
+    if not st.session_state.get("_returning_user_sidebar"):
+        st.session_state["_returning_user_sidebar"] = True
+        st.rerun()
 
 # Checkout success/cancel handling - runs on every script pass, same
 # top-level query-param pattern as AQE/CLEARANCE's own Stripe redirect
@@ -2231,6 +2244,15 @@ def screen_render():
 
     if st.session_state.get("baseline_fingerprint"):
         with st.sidebar:
+            _updated_raw = st.session_state.get("_voice_profile_updated_at")
+            if _updated_raw:
+                try:
+                    _updated_dt = datetime.fromisoformat(_updated_raw.replace("Z", "+00:00"))
+                    st.caption(f"Your voice · updated {_updated_dt.strftime('%-d %b %Y')}")
+                except Exception:
+                    st.caption("Your voice · loaded")
+            else:
+                st.caption("Your voice · loaded")
             if st.button("My Voice \u2192", key="nav_to_my_voice"):
                 go_to(5)
                 st.rerun()
@@ -2238,8 +2260,12 @@ def screen_render():
                 go_to(6)
                 st.rerun()
 
-    st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
+    if st.session_state.get("_returning_user_sidebar"):
+        st.markdown('<div class="headline">Write as me.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">Paste anything you want in your voice. Your fingerprint is loaded and ready.</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
 
     # Optional, skippable, per-render — not onboarding. Register/audience
     # is a genuinely separate axis from personal voice (the field's own
