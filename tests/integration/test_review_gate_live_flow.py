@@ -153,7 +153,7 @@ def test_output_has_a_clear_heading_not_an_unlabeled_blob():
     card above it, and the output text_area sat unlabeled below a
     'Try one more sample' panel. Confirms the new heading is present."""
     at = _run_screen4_forced_high_risk_with_dropped_entity([])
-    gate_checkbox = next(c for c in at.checkbox if "reviewed the report above" in c.label)
+    gate_checkbox = next(c for c in at.checkbox if "sending this as mine" in c.label)
     gate_checkbox.set_value(True)
     at.run()
     confirm_button = next(b for b in at.button if "Show my rewritten text" in b.label)
@@ -178,7 +178,7 @@ def test_try_one_more_sample_panel_now_appears_after_the_output():
         "sample_count": 2, "stable_count": 1, "volatile_count": 3,
     }
     at.run()
-    gate_checkbox = next(c for c in at.checkbox if "reviewed the report above" in c.label)
+    gate_checkbox = next(c for c in at.checkbox if "sending this as mine" in c.label)
     gate_checkbox.set_value(True)
     at.run()
     confirm_button = next(b for b in at.button if "Show my rewritten text" in b.label)
@@ -214,7 +214,7 @@ def test_gate_shows_when_risk_is_high_and_output_is_hidden():
     at = _run_screen4_forced_high_risk()
 
     checkbox_labels = [c.label for c in at.checkbox]
-    assert any("reviewed the report above" in lbl for lbl in checkbox_labels), (
+    assert any("sending this as mine" in lbl for lbl in checkbox_labels), (
         f"Expected the review-gate checkbox, got: {checkbox_labels}"
     )
 
@@ -233,7 +233,7 @@ def test_confirming_the_gate_reveals_the_output():
     at = _run_screen4_forced_high_risk()
 
     gate_checkbox = next(
-        c for c in at.checkbox if "reviewed the report above" in c.label
+        c for c in at.checkbox if "sending this as mine" in c.label
     )
     gate_checkbox.set_value(True)
     at.run()
@@ -299,7 +299,7 @@ def test_confirming_the_gate_reveals_the_output_WITH_low_confidence_caveat_activ
     )
 
     gate_checkbox = next(
-        c for c in at.checkbox if "reviewed the report above" in c.label
+        c for c in at.checkbox if "sending this as mine" in c.label
     )
     gate_checkbox.set_value(True)
     at.run()
@@ -348,7 +348,7 @@ def test_confirming_the_gate_with_a_real_succeeding_supabase_client():
 
     with patch("review_gate.get_supabase_client", return_value=mock_supabase_client):
         gate_checkbox = next(
-            c for c in at.checkbox if "reviewed the report above" in c.label
+            c for c in at.checkbox if "sending this as mine" in c.label
         )
         gate_checkbox.set_value(True)
         at.run()

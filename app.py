@@ -2487,25 +2487,31 @@ def screen_render():
                 report, st.session_state.get("render_insertion_check")
             )
             what_changed = _build_what_changed_html(report.get("biggest_changes", []))
+            _metric_gloss = {
+                "consistency": "How closely this render matches how you actually write.",
+                "confidence": "How much of your writing we've seen so far - more samples, higher confidence.",
+                "risk": "How much this render may have drifted from what you actually meant.",
+                "ai_tell": "Whether wording that reads as AI-generated survived into the rewrite.",
+            }
             st.markdown(f"""
             <div class="voice-report">
                 {content_lock_banner}
                 {what_changed}
                 <div class="vr-grid">
                     <div class="vr-stat">
-                        <div class="vr-stat-label">Voice consistency</div>
+                        <div class="vr-stat-label" title="{_metric_gloss['consistency']}">Voice consistency</div>
                         <span class="badge {vm_badge}">{vm_tier}</span>
                     </div>
                     <div class="vr-stat">
-                        <div class="vr-stat-label">Confidence</div>
+                        <div class="vr-stat-label" title="{_metric_gloss['confidence']}">Confidence</div>
                         <span class="badge {conf_badge_class.get(report['confidence'], 'badge-amber')}">{report['confidence']}</span>
                     </div>
                     <div class="vr-stat">
-                        <div class="vr-stat-label">Risk</div>
+                        <div class="vr-stat-label" title="{_metric_gloss['risk']}">Risk</div>
                         <span class="badge {badge_class.get(report['risk'], 'badge-amber')}">{report['risk']}</span>
                     </div>
                     <div class="vr-stat">
-                        <div class="vr-stat-label">AI-tell check</div>
+                        <div class="vr-stat-label" title="{_metric_gloss['ai_tell']}">AI-tell check</div>
                         {ai_tell_html}
                     </div>
                 </div>
@@ -2683,14 +2689,36 @@ def screen_render():
                         st.session_state.firm_signal_resolved = True
                         st.rerun()
         else:
+            _risk_reason_copy = {
+                "ai_tell": "This render still contains a phrase that reads like AI wrote it, not you.",
+                "attribution_swap": "This render may have shifted who said what.",
+                "dropped_entity": "This render dropped a name, date, or detail that was in your original text.",
+                "sentence_growth": "This render added content that wasn't in your original text.",
+                "aggregate_band": "This render drifted further from your voice than usual, across several measures.",
+            }
+            # Specific, not generic (22 Aug 2026, per friction audit +
+            # research on confirmation-copy anti-patterns: NN/g and
+            # Intuit's own content design guidelines both flag vague
+            # "I understand"/"are you sure" acknowledgments as
+            # ineffective - people click through boilerplate without
+            # reading it, and it erodes attention for warnings that
+            # actually matter. risk_reason was already computed and
+            # logged (compute_risk_reason, review_gate.py) but never
+            # shown to the person it's about - it just sat in
+            # analytics. Showing the actual specific reason, and
+            # making the checkbox confirm that specific thing, is the
+            # fix backed by that research, not just a tone change.
+            reason_text = _risk_reason_copy.get(
+                st.session_state.get("risk_reason", ""),
+                "This render needs a closer look before you send it.",
+            )
             st.markdown(
                 f'<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
-                f'\u26a0 This render is flagged {risk_level} risk. Review the report above '
-                f'before seeing the rewritten text.</div>',
+                f'\u26a0 {reason_text} Read the report above before sending.</div>',
                 unsafe_allow_html=True
             )
             confirmed_checkbox = st.checkbox(
-                "I've reviewed the report above and understand the flagged risk.",
+                "I've read it, and I'm sending this as mine.",
                 key=f"confirm_checkbox_{output_key}",
             )
             if st.button(
