@@ -631,6 +631,9 @@ elif st.query_params.get("payment") == "cancelled":
     st.query_params.clear()
 
 
+_PROGRESS_STEP_NAMES = ("Paste", "Your voice", "Calibrate", "Write")
+
+
 def progress_dots(current: int, total: int = 4):
     dots = ""
     for i in range(1, total + 1):
@@ -638,7 +641,14 @@ def progress_dots(current: int, total: int = 4):
             dots += '<span class="active">\u25CF</span> '
         else:
             dots += "\u25CB "
-    st.markdown(f'<div class="progress">{dots}</div>', unsafe_allow_html=True)
+    step_name = _PROGRESS_STEP_NAMES[current - 1] if 1 <= current <= len(_PROGRESS_STEP_NAMES) else ""
+    st.markdown(
+        f'<div class="progress">{dots}'
+        f'<span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--faint);'
+        f'letter-spacing:0.04em;margin-left:0.4rem;">'
+        f'Step {current} of {total}{" \u00b7 " + step_name if step_name else ""}</span></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
@@ -1035,8 +1045,14 @@ def screen_sample2():
     completions = st.session_state.sample2_completions
     required_word_counts = {}
 
-    for idx in REQUIRED_STARTER_INDICES:
-        st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starters[idx]}</div>', unsafe_allow_html=True)
+    for position, idx in enumerate(REQUIRED_STARTER_INDICES, start=1):
+        st.markdown(
+            f'<div class="microcopy" style="text-align:left;margin-top:1.1rem;margin-bottom:0.1rem;'
+            f'font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;">'
+            f'Prompt {position} of {len(REQUIRED_STARTER_INDICES)}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f'<div class="tag-hint" style="margin-top:0.3rem;">{starters[idx]}</div>', unsafe_allow_html=True)
         completions[idx] = paste_guard(value=completions[idx], key=f"starter_{idx}")
         wc = len(completions[idx].split())
         required_word_counts[idx] = wc
@@ -2244,7 +2260,8 @@ def _clean_ai_tells_and_rescore():
 
 
 def screen_render():
-    progress_dots(4)
+    if not st.session_state.get("_returning_user_sidebar"):
+        progress_dots(4)
     _show_deepen_success_if_pending()
 
     device_id_for_ui = st.session_state.get("_device_id") or get_or_create_device_id()
