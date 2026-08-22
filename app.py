@@ -193,13 +193,28 @@ st.markdown("""
         max-width: 54ch;
     }
 
-    /* Your Voice checklist — new in v3, replaces prose observation cards */
+    /* Your Voice checklist — new in v3, replaces prose observation cards.
+       Staggered entrance (22 Aug 2026): this screen is the payoff of
+       the whole onboarding flow — the first time someone sees their
+       own fingerprint reflected back. It was rendering all four cards
+       simultaneously, instantly, same as any other list on the site.
+       CSS-only staggered fade/rise, animation-delay set per-card by
+       screen_reveal() in Python — no JS, no new dependency, respects
+       the existing prefers-reduced-motion rule above (which disables
+       all animation/transition wholesale, so this degrades to an
+       instant static list for anyone who's asked for that). */
+    @keyframes voice-check-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
     .voice-check {
         display: flex;
         align-items: flex-start;
         gap: 0.75rem;
         padding: 0.7rem 0;
         border-bottom: 1px solid var(--border);
+        opacity: 0;
+        animation: voice-check-in 0.5s ease-out forwards;
     }
     .voice-check-mark {
         display: inline-flex;
@@ -925,14 +940,14 @@ def screen_reveal():
         return
 
     import re as _re
-    for obs in observations:
+    for i, obs in enumerate(observations):
         quote_match = _re.search(r'"([^"]{10,})"', obs.get("body", ""))
         evidence_html = (
             f'<div class="voice-check-evidence">e.g. "{quote_match.group(1)}"</div>'
             if quote_match else ""
         )
         st.markdown(f"""
-        <div class="voice-check">
+        <div class="voice-check" style="animation-delay: {i * 0.12}s;">
             <div class="voice-check-mark">\u2713</div>
             <div>
                 <div class="voice-check-text">{obs['headline']}</div>
@@ -2281,7 +2296,7 @@ def screen_render():
             if st.button("My Voice \u2192", key="nav_to_my_voice"):
                 go_to(5)
                 st.rerun()
-            if st.button("History \u2192", key="nav_to_history_from_write"):
+            if st.button("Past renders \u2192", key="nav_to_history_from_write"):
                 go_to(6)
                 st.rerun()
 
@@ -2837,7 +2852,7 @@ def screen_render():
                     scoring_rules_version=scoring_rules_version(),
                 )
                 st.download_button(
-                    "Authenticity report",
+                    "Download the record",
                     data=export_authenticity_report_json(authenticity_report),
                     file_name="voicova-authenticity-report.json",
                     mime="application/json",
@@ -2876,7 +2891,7 @@ def screen_my_voice():
             if st.button("\u2190 Back to Write", key="nav_back_to_write"):
                 go_to(4)
                 st.rerun()
-            if st.button("History \u2192", key="nav_to_history_from_my_voice"):
+            if st.button("Past renders \u2192", key="nav_to_history_from_my_voice"):
                 go_to(6)
                 st.rerun()
 
