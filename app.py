@@ -2540,7 +2540,8 @@ def screen_render():
             st.markdown('<div class="tagline">Your rewritten text</div>', unsafe_allow_html=True)
             swaps_for_highlight = (report or {}).get("attribution_swaps", [])
             lexical_breaks_for_highlight = (report or {}).get("lexical_fidelity_breaks", [])
-            if swaps_for_highlight or lexical_breaks_for_highlight:
+            has_flags = bool(swaps_for_highlight or lexical_breaks_for_highlight)
+            if has_flags:
                 highlighted = highlight_flagged_phrases(
                     output, swaps_for_highlight, lexical_breaks_for_highlight
                 )
@@ -2559,10 +2560,25 @@ def screen_render():
                     f'<div class="microcopy">{note}</div>',
                     unsafe_allow_html=True,
                 )
-            st.text_area(
-                label="output", value=output, height=350,
-                label_visibility="collapsed", key=output_key,
-            )
+            # Double-render fix (22 Aug 2026): this text_area used to
+            # fire unconditionally, so any render with a flagged phrase
+            # showed the same rewritten text twice — once highlighted
+            # above, once plain here. The plain copy is only needed
+            # when there's nothing highlighted to show it in place of;
+            # when highlighted, the person still needs a copyable
+            # plain-text version, so it now renders collapsed inside
+            # an expander instead of a second full-height block.
+            if has_flags:
+                with st.expander("Copy plain text"):
+                    st.text_area(
+                        label="output", value=output, height=350,
+                        label_visibility="collapsed", key=output_key,
+                    )
+            else:
+                st.text_area(
+                    label="output", value=output, height=350,
+                    label_visibility="collapsed", key=output_key,
+                )
             st.markdown(
                 '<div class="microcopy">The engine wrote as you. Not for you.</div>',
                 unsafe_allow_html=True

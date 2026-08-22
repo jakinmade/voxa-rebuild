@@ -178,6 +178,18 @@ async function verifyStripeSignature(rawBody, signatureHeader, secret) {
     return false;
   }
 
+  // Cloudflare's Quick Edit secret field has bitten this account before
+  // (CLEARANCE's SendGrid key, per this file's header comment) —
+  // pasting from the Stripe dashboard can carry a trailing newline,
+  // leading/trailing space, or surrounding quotes if the value was
+  // copied out of a JSON/env view rather than the raw display. Any of
+  // those makes the HMAC key wrong while `secret` still reads as
+  // truthy, producing exactly this symptom: "Signature verification
+  // failed" on every event even though the secret is "set". Trimming
+  // and stripping wrapping quotes here costs nothing when the secret
+  // was already clean.
+  secret = secret.trim().replace(/^["']|["']$/g, "");
+
   const parts = Object.fromEntries(
     signatureHeader.split(",").map((part) => {
       const [key, value] = part.split("=");
