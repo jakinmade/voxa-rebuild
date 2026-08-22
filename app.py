@@ -770,8 +770,14 @@ def screen_paste():
     progress_dots(1)
 
     st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
-    st.markdown('<div class="headline">Voicova preserves who you are when you write.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Paste anything you\'ve written. We\'ll show you what it reveals.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-family:var(--font-mono);font-size:0.85rem;color:var(--muted);'
+        'margin-top:-0.6rem;margin-bottom:1.4rem;letter-spacing:0.02em;">'
+        'Your voice. Still yours.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="headline">AI can write well now. It just doesn\'t write like you.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub">Paste your draft. Voicova puts your voice back in.</div>', unsafe_allow_html=True)
 
     text = st.text_area(
         label="Your writing",
@@ -2606,7 +2612,7 @@ def screen_render():
                     label_visibility="collapsed", key=output_key,
                 )
             st.markdown(
-                '<div class="microcopy">The engine wrote as you. Not for you.</div>',
+                '<div class="microcopy">Written as you. Not for you.</div>',
                 unsafe_allow_html=True
             )
 

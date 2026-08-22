@@ -205,7 +205,7 @@ def test_paste_to_fingerprint_to_export_no_api_call():
 
     # Positioning copy visible on the page, not just in code
     page_text = " ".join(m.value for m in at.markdown)
-    assert "The engine wrote as you. Not for you." in page_text
+    assert "Written as you. Not for you." in page_text
 
 
 def test_export_profile_produces_correct_json():

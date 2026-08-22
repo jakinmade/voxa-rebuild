@@ -58,7 +58,9 @@ def test_confidence_caveat_clean():
 
 
 def test_static_tagline_clean():
-    # storage.py / app.py's "The engine wrote as you. Not for you." —
-    # already confirmed clean this session, pinned here so it stays
-    # covered by the same guard as everything else.
-    _assert_copy_is_clean("The engine wrote as you. Not for you.")
+    # app.py's "Written as you. Not for you." (updated 22 Aug 2026,
+    # dropped "engine" — Voicova isn't referred to as an engine
+    # anywhere user-facing) — already confirmed clean this session,
+    # pinned here so it stays covered by the same guard as everything
+    # else.
+    _assert_copy_is_clean("Written as you. Not for you.")
