@@ -2968,7 +2968,7 @@ def screen_history():
                 go_to(4)
                 st.rerun()
 
-    st.markdown('<div class="headline">History.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">Past renders.</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="sub">Your last 50 renders on this device.</div>',
         unsafe_allow_html=True,
