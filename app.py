@@ -2531,7 +2531,15 @@ def screen_render():
                     </div>
                 </div>
                 <div class="vr-changes">{vm_evidence}</div>
-                {_build_voice_match_table_html(st.session_state.get("render_delta") or {})}
+                <details style="margin-top:0.7rem;">
+                    <summary style="cursor:pointer;font-family:var(--font-mono);font-size:0.7rem;
+                        color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">
+                        Show the per-dimension breakdown
+                    </summary>
+                    <div style="margin-top:0.5rem;">
+                        {_build_voice_match_table_html(st.session_state.get("render_delta") or {})}
+                    </div>
+                </details>
                 {_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
             </div>
             """, unsafe_allow_html=True)
