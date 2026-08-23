@@ -141,11 +141,10 @@ def export_authenticity_report_json(report: dict) -> str:
 
 
 def export_authenticity_report_text(report: dict) -> str:
-    """Formatted plain-text version, alongside the JSON export (22 Aug
-    2026 UX audit): the JSON exports are developer-facing — accurate,
-    but not something a manager, client, or editor wants to open cold.
-    Plain text over PDF deliberately, per the same audit's design
-    decision — the actual use case ("show someone this render is
+    """Formatted plain-text version, alongside the JSON export: the
+    JSON exports are developer-facing — accurate, but not something a
+    manager, client, or editor wants to open cold. Plain text over PDF
+    deliberately — the actual use case ("show someone this render is
     genuine") is served by clean text pasteable into an email or Slack
     message; PDF generation would add a new dependency and layout work
     for marginal benefit over that. Field labels and order mirror the

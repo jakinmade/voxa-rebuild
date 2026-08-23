@@ -42,8 +42,8 @@ _TABLE = "voice_profiles"
 def _get_cookie_controller() -> CookieController:
     """A fresh CookieController() every call, deliberately not cached.
 
-    Bug this replaces (found 22 Aug 2026, via a friction audit showing
-    returning users always looking like brand-new visitors): the
+    Bug this replaces (returning users always looking like brand-new
+    visitors): the
     underlying component call inside CookieController.__init__ returns
     an empty default on the browser's first-ever round-trip in a
     session, and Streamlit auto-triggers a rerun once the real cookie

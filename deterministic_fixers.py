@@ -422,7 +422,7 @@ def _fix_first_person_ratio(text: str, target: float, current: float,
 #     take a complete independent clause as their object, so stripping
 #     the WHOLE opener leaves a grammatically sound sentence on its own
 #     ("I think the plan works" -> "The plan works"). "I find" added
-#     18 Aug 2026 against a real render ("I find nobody catches it
+#     against a real render ("I find nobody catches it
 #     through monitoring" -> "Nobody catches it through monitoring") —
 #     same shape as the rest of this group, confirmed by hand before
 #     adding, not assumed by analogy alone.
@@ -436,7 +436,7 @@ def _fix_first_person_ratio(text: str, target: float, current: float,
 #     whether your clients have solved that..."), which the render had
 #     turned into "I am curious whether..." in the first place.
 #
-# Deliberately NOT added: "I see". Found live in the same 18 Aug 2026
+# Deliberately NOT added: "I see". Found live in the same
 # render alongside "I find" ("That is four reasons..." -> "I see four
 # reasons..."), but "see" here takes a bare noun phrase as its object,
 # not a clause — stripping "I see " leaves "four reasons not to fold
@@ -456,7 +456,7 @@ _FIRST_PERSON_OPENER_PARTIAL_STRIP = re.compile(
 )
 
 # Mid-sentence companion to the sentence-initial FULL_STRIP above —
-# found live in the same 18 Aug 2026 render, a genuinely different
+# found live in the same render, a genuinely different
 # shape: "I think" inserted as a parenthetical AFTER a fronted phrase
 # rather than at the sentence's start ("What nobody has done..." ->
 # "What I think nobody has done...", "In most organisations
@@ -480,8 +480,8 @@ def _matching_original_sentence(candidate: str, original_sentences: list[str]) -
     whole point: a document-wide substring check ("does 'i think'
     appear anywhere in the original") wrongly blocks a genuine fix
     whenever the person used "I think" once, ANYWHERE, in an entirely
-    unrelated sentence — found live against a real render (18 Aug
-    2026) where the person's own opening line genuinely says "I think
+    unrelated sentence — found live against a real render where the
+    person's own opening line genuinely says "I think
     you have found the gap", which silently blocked the mid-sentence
     fixer below from touching two later, unrelated sentences the model
     had actually injected "I think" into.
@@ -594,8 +594,7 @@ def _fix_first_person_over_ratio(text: str, target: float, current: float,
         # Fail-CLOSED on alignment uncertainty, not fail-open: only
         # strip when alignment succeeds AND confirms the original did
         # NOT have "i think" there. Found and fixed during a second-
-        # opinion review (18 Aug 2026, after this session's live
-        # testing round): the previous logic declined only when
+        # opinion review: the previous logic declined only when
         # alignment succeeded and found "i think" in the aligned
         # sentence, but fell through to STRIP whenever alignment
         # failed to find any confident match at all — the opposite
@@ -639,8 +638,8 @@ def ownership_miss_is_content_driven(render_text: str, original_input_text: str)
     SENTENCE-level: the proportion of sentences containing a first-
     person marker, not a word-density count. That matters here — it
     means a sentence can only be "fixed" by removing its marker
-    entirely, not diluted by rewording. Confirmed live (18 Aug 2026):
-    an initially-proposed fix (restore the person's exact original
+    entirely, not diluted by rewording. Confirmed live: an
+    initially-proposed fix (restore the person's exact original
     wording for a sentence the fixer can't safely strip) turned out to
     do NOTHING for the metric whenever the original sentence ALSO
     contains a first-person marker — which, empirically, was every
@@ -684,7 +683,7 @@ def restore_fabricated_ownership_sentences(text: str, original_input_text: str) 
     General, alignment-based fix for fabricated first-person ownership
     — deliberately NOT pattern-based, and supersedes the individual
     verb-pattern fixers above for this specific failure class. Built
-    after three successive live failures (18 Aug 2026, same session):
+    after three successive live failures:
     "I find nobody catches...", "I see four reasons...", then "I would
     never find it through monitoring..." — each a different phrasing
     of the exact same underlying defect (a sentence that had NO
@@ -1104,7 +1103,7 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
             new words (see docstring) — a pure punctuation split isn't
             a fabrication signal, so it's not reported here.
 
-            19 Aug 2026: tried attributing this to specific sentences
+            Tried attributing this to specific sentences
             that individually carry new content, instead of the raw
             delta, after a real render (F1 test) reported "3 sentence
             (s) added" when only one sentence actually contained a

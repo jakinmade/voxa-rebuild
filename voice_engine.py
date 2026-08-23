@@ -745,9 +745,9 @@ def compute_sentence_economy(text: str) -> dict | None:
 
     Standalone and read-only: this does NOT feed into
     compute_baseline_metrics, score_render_delta, or the correction-
-    pass targeting pipeline. It's a separate, additive signal — the
-    18 Aug 2026 research into automated readability scoring (Gruteke
-    Klein et al., arXiv:2502.11150) found these formulas are weak
+    pass targeting pipeline. It's a separate, additive signal — research
+    into automated readability scoring (Gruteke Klein et al.,
+    arXiv:2502.11150) found these formulas are weak
     predictors of real-time reading ease, so this should be surfaced
     as a rough sentence-economy proxy (in the spirit of Strunk &
     White's "omit needless words"), never as a validated "how easy
@@ -1624,7 +1624,7 @@ def _possessive_attributions(text: str) -> dict:
 # scoring_rules.py's changelog holds for threshold changes - this is
 # not meant to grow speculatively into a general synonym blocklist.
 #
-# First entry (19 Aug 2026): a live render swapped "surfaces" ->
+# First entry: a live render swapped "surfaces" ->
 # "brings up" in "It surfaces when someone finally asks...". "Brings
 # up" is transitive and needs an object ("brings the issue up") - used
 # intransitively like that it's ungrammatical. "Surfaces" was correct
@@ -1660,8 +1660,8 @@ def detect_lexical_fidelity_breaks(input_text: str, output_text: str) -> list[st
     present.
 
     Informational only, deliberately NOT wired into
-    has_content_integrity_hard_fail or compute_risk (19 Aug 2026,
-    JA: "flag it for review rather than block" - unlike an attribution
+    has_content_integrity_hard_fail or compute_risk ("flag it for
+    review rather than block" - unlike an attribution
     swap or dropped entity, a watchlist hit is a known-risky pattern,
     not a confirmed content-integrity failure every time, so it
     shouldn't gate delivery the way those do).
@@ -1894,7 +1894,7 @@ def score_restructure_fidelity(pre_text: str, post_text: str) -> dict:
     instruction (see build_correction_prompt's PLATFORM FORMAT block
     in prompts.py) is currently enforced by wording alone, with
     nothing checking whether the model actually obeyed it. Confirmed
-    live (18 Aug 2026): a real render restructured "A governance
+    live: a real render restructured "A governance
     failure is loud. An agent does something..." into a "When X...
     When Y..." conditional construction, introducing "when" and
     "occurs" — words that don't appear anywhere in the pre-correction
@@ -1989,7 +1989,7 @@ def score_semantic_drift(input_text: str, output_text: str, platform_format: str
     denominator — not just hidden from the report. A social post is
     public, one-to-many, and should never carry a private recipient's
     name at all, so its correct, intentional removal must not count
-    as a drop. Confirmed live (19 Aug 2026): an "Elevate" render for
+    as a drop. Confirmed live: an "Elevate" render for
     LinkedIn kept a private email's addressee name visible in the
     public post text — traced to three separate places in the prompt
     actively forcing that name to survive (base_rules rule 10, the
@@ -2256,7 +2256,7 @@ def has_content_integrity_hard_fail(
     the email" class of error — factually or attributionally wrong,
     not just stylistically off.
 
-    Extracted out of compute_risk (19 Aug 2026) so this exact same
+    Extracted out of compute_risk so this exact same
     check can gate the review-confirmation wall in review_gate.py
     without also gating on style drift. Root cause this fixes: Risk
     used to conflate two different things under one badge — genuine
@@ -2265,8 +2265,8 @@ def has_content_integrity_hard_fail(
     dimensions) — and review_gate.py gated the rewritten text behind a
     checkbox for BOTH cases equally. Since real renders miss at least
     one of four style targets constantly, the gate was firing on
-    nearly every render, not just the genuinely risky ones. JA (19 Aug
-    2026): "user friction is front and centre of VOICOVA, nothing
+    nearly every render, not just the genuinely risky ones. Guiding
+    principle: "user friction is front and centre of VOICOVA, nothing
     should contribute to friction" — style drift alone must never
     block the rewritten text from showing immediately; only a real
     integrity failure should.
@@ -2297,7 +2297,7 @@ def compute_risk(
     and content — distinct from Confidence. Confidence is about the
     measurement; Risk is about this particular result.
 
-    Informational badge only as of 19 Aug 2026 — see
+    Informational badge only — see
     has_content_integrity_hard_fail's docstring for why gating was
     split out of this function's return value. This function's own
     Low/Medium/High logic is otherwise unchanged: it still folds in
@@ -2371,7 +2371,7 @@ def compute_risk_reason(
     semantic_match < 70/85 bands in particular) were extracted
     unchanged, not recalibrated, because no live data yet isolates
     whether those specific numbers are well-tuned - every real render
-    checked in the 16 Aug 2026 session hit a hard-fail (an AI tell,
+    checked so far hit a hard-fail (an AI tell,
     a dropped entity, sentence growth) before the aggregate bands
     ever got a chance to be the deciding factor. Recalibrating a
     number nobody has seen fire on its own would be tuning blind.
@@ -2484,12 +2484,12 @@ def voice_match_label(delta: dict) -> dict:
     hits = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "HIT"]
     close = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "CLOSE"]
     missed = [_DIMENSION_LABELS.get(k, k) for k, d in delta.items() if d["verdict"] == "MISSED"]
-    # SKIPPED (18 Aug 2026): originally one reason only — the input
+    # SKIPPED: originally one reason only — the input
     # genuinely had nothing of that kind to convert (no first-person
     # content, no directive content), and the correction pass correctly
     # declined to fabricate it rather than failing to hit an achievable
-    # target. A second, genuinely different reason was added the same
-    # session: the input has PLENTY of that content, more than the
+    # target. A second, genuinely different reason was added later:
+    # the input has PLENTY of that content, more than the
     # baseline even, and the residual drift is because it can't be
     # reduced further without deleting the person's actual stated
     # content (see ownership_miss_is_content_driven in
@@ -2519,7 +2519,7 @@ def voice_match_label(delta: dict) -> dict:
     # not sounding human undermines the message. "Off on" reads
     # naturally in the same slot and is clean against score_ai_tells.
     #
-    # CLOSE dimensions (17 Aug 2026 fix): previously silently omitted
+    # CLOSE dimensions fix: previously silently omitted
     # from this sentence entirely - a dimension could sit in neither
     # "hits" nor "missed" (verdict == CLOSE) and vanish from the prose,
     # while still appearing as a numeric entry in build_voice_report's
@@ -2815,7 +2815,7 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "risk": risk,
         "ai_tell_clean": (ai_tells or {}).get("clean", True),
         "ai_tell_flags": (ai_tells or {}).get("flagged", []),
-        # Raw, individual phrase list — added 18 Aug 2026 for the
+        # Raw, individual phrase list, for the
         # AI-Slop Firewall UI, which needs each flagged phrase listed
         # separately (e.g. for a "clean it up" action), not the
         # pre-joined "AI-typical phrasing found: X, Y, Z" prose string
@@ -2826,11 +2826,11 @@ def build_voice_report(delta: dict, semantic: dict, confidence: str, risk: str, 
         "biggest_changes": biggest_changes[:3],
         "dropped_entities": semantic.get("dropped_entities", []),
         "attribution_swaps": semantic.get("attribution_swaps", []),
-        # 19 Aug 2026: informational only, does not gate delivery -
+        # Informational only, does not gate delivery -
         # see detect_lexical_fidelity_breaks' docstring for why this
         # is treated differently from dropped_entities/attribution_swaps.
         "lexical_fidelity_breaks": semantic.get("lexical_fidelity_breaks", []),
-        # 19 Aug 2026: the ONLY thing that should gate the rewritten
+        # The ONLY thing that should gate the rewritten
         # text behind review_gate.py's confirmation wall — see
         # has_content_integrity_hard_fail's docstring. "risk" above
         # still reflects style-drift severity too (informational
@@ -2925,7 +2925,7 @@ _AI_TELL_PHRASES = re.compile(
     r"moving forward|circle back|touch base|pain points|"
     r"seamless(ly)?|delve into|tapestry|testament to|boasts|elevate|"
     r"unlock the potential|game.changer|unparalleled|paramount|"
-    # Added 20 Aug 2026 — researched addition (Grammarly, GPTZero,
+    # Researched addition (Grammarly, GPTZero,
     # Pangram AI-tell compilations cross-referenced), not a single-word
     # guess. Deliberately excludes generic professional vocabulary
     # (harness, illuminate, bolster, facilitate, streamline, refine,
@@ -3108,10 +3108,10 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     original_input_text: the person's own actual input for this
     render, optional but strongly recommended by every caller that
     has it available. Confirmed as a real, repeated false-positive
-    class (18 Aug 2026): several phrases in these lists — "curious
+    class: several phrases in these lists — "curious
     whether", "i suspect", "i would push back" — are also just
-    ordinary things a person might genuinely write. Two earlier
-    sessions "fixed" instances of this by narrowing individual regexes
+    ordinary things a person might genuinely write. Earlier
+    attempts "fixed" instances of this by narrowing individual regexes
     (excluding "curious if" but not "curious whether", excluding
     possessive/determiner forms of "surface") — that approach caps out
     the moment the SAME phrase is both a genuine tell in one render and
