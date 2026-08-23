@@ -2,12 +2,14 @@
 Tests for render_cap.py — the global daily render ceiling that sits
 in front of every paid API call.
 
-The one thing this module does differently from every other piece of
-the persistence layer is fail CLOSED instead of open: no Supabase
-client, or any error talking to it, must block the render rather
-than let it through. That inversion is the main thing worth testing
-carefully here — everything else (limit reached, limit not reached,
-env var override) is standard boundary-condition coverage.
+This module fails OPEN, not closed: no Supabase client, or any error
+talking to it, must never block a render. An earlier version failed
+closed instead and was reverted — see render_cap.py's own module
+docstring for why (it blocked every render in any environment without
+Supabase configured, including local/dev/test runs). That fail-open
+behaviour is the main thing worth testing carefully here — everything
+else (limit reached, limit not reached, env var override) is standard
+boundary-condition coverage.
 """
 import os
 from unittest.mock import MagicMock, patch

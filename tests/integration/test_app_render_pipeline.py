@@ -95,7 +95,18 @@ def _run_screen4_with_mocked_render(input_text: str = "Please write a short note
 
             at.text_area[0].input(input_text)
             at.button[0].click()
-            at.run()
+            # Explicit generous timeout, matching the convention already
+            # used elsewhere for render-triggering calls (e.g.
+            # test_correction_fallback_safety_net.py) - this button click
+            # runs the full multi-step render pipeline (initial render,
+            # correction pass, verify pass), each a separate mocked API
+            # call. Streamlit AppTest's short default timeout was
+            # observed to occasionally trip under full-suite CPU load
+            # even with every call mocked (confirmed via repeated runs,
+            # 23 Aug 2026 final testing pass) - not a functional issue,
+            # just insufficient headroom for a multi-call pipeline
+            # running alongside hundreds of other tests.
+            at.run(timeout=15)
             assert not at.exception, f"App raised during render: {at.exception}"
 
             return at

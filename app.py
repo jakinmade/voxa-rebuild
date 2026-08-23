@@ -18,6 +18,7 @@ session state. No module here reaches into packages/ — this rebuild is
 fully self-contained.
 """
 
+import html
 import os
 import re
 import uuid
@@ -1123,7 +1124,7 @@ def screen_paste():
         tier = fitness.get("tier", "thin")
         if nudge:
             st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;color:var(--warning);">{nudge}</div>',
+                f'<div class="microcopy" style="margin-top:0.5rem;color:var(--warning);">{_safe_html(nudge)}</div>',
                 unsafe_allow_html=True
             )
         elif tier == "gold":
@@ -1206,13 +1207,13 @@ def screen_reveal():
     for i, obs in enumerate(observations):
         quote_match = _re.search(r'"([^"]{10,})"', obs.get("body", ""))
         evidence_html = (
-            f'<div class="voice-check-evidence">e.g. "{quote_match.group(1)}"</div>'
+            f'<div class="voice-check-evidence">e.g. "{_safe_html(quote_match.group(1))}"</div>'
             if quote_match else ""
         )
         st.markdown(
             f'<div class="voice-check" style="animation-delay: {i * 0.12}s;">'
             f'<div class="voice-check-mark">\u2713</div>'
-            f'<div><div class="voice-check-text">{obs["headline"]}</div>'
+            f'<div><div class="voice-check-text">{_safe_html(obs["headline"])}</div>'
             f'{evidence_html}</div></div>',
             unsafe_allow_html=True,
         )
@@ -1237,6 +1238,19 @@ def screen_reveal():
 # ============================================================
 # Screen 3 — Four sentence starters, typed live, paste blocked
 # ============================================================
+
+def _safe_html(text: str) -> str:
+    """Escape user- or model-derived text before it is interpolated into
+    an f-string that gets rendered via st.markdown(..., unsafe_allow_html=True).
+    Streamlit does not sanitise markdown/HTML itself - anything dynamic
+    that reaches one of those calls unescaped is a stored/reflected HTML
+    injection path. Call this on every dynamic value at the point of
+    interpolation, not once upstream, so a future call site can't
+    accidentally skip it."""
+    if text is None:
+        return ""
+    return html.escape(str(text))
+
 
 # Generic fallback scenarios - used when there's nothing usable in the
 # Screen 1 paste to anchor to (too short, no sentence-shaped fragments).
@@ -1330,7 +1344,7 @@ def screen_sample2():
             f'Prompt {position} of {len(REQUIRED_STARTER_INDICES)}</div>',
             unsafe_allow_html=True,
         )
-        st.markdown(f'<div class="tag-hint" style="margin-top:0.3rem;">{starters[idx]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="tag-hint" style="margin-top:0.3rem;">{_safe_html(starters[idx])}</div>', unsafe_allow_html=True)
         completions[idx] = paste_guard(value=completions[idx], key=f"starter_{idx}")
         wc = len(completions[idx].split())
         required_word_counts[idx] = wc
@@ -1349,7 +1363,7 @@ def screen_sample2():
             unsafe_allow_html=True
         )
         for i in optional_indices:
-            st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{starters[i]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="tag-hint" style="margin-top:0.8rem;">{_safe_html(starters[i])}</div>', unsafe_allow_html=True)
             completions[i] = paste_guard(value=completions[i], key=f"starter_{i}")
 
     st.session_state.sample2_completions = completions
@@ -2765,7 +2779,7 @@ def screen_render():
                 checkout_url = create_subscription_checkout(device_id_for_ui, plan=_requested_plan)
                 if checkout_url:
                     st.markdown(
-                        f'<meta http-equiv="refresh" content="0;url={checkout_url}">',
+                        f'<meta http-equiv="refresh" content="0;url={_safe_html(checkout_url)}">',
                         unsafe_allow_html=True,
                     )
                     st.markdown(
@@ -2908,7 +2922,7 @@ Show the per-dimension breakdown
             ai_tell_phrases = report.get("ai_tell_phrases", [])
             if ai_tell_phrases:
                 phrase_chips = "".join(
-                    f'<span class="ai-tell-phrase">{p}</span>' for p in ai_tell_phrases
+                    f'<span class="ai-tell-phrase">{_safe_html(p)}</span>' for p in ai_tell_phrases
                 )
                 st.markdown(
                     f'<div class="ai-tell-block">'
@@ -2933,12 +2947,12 @@ Show the per-dimension breakdown
 
             dropped = report.get("dropped_entities", [])
             if dropped:
-                listed = ", ".join(dropped)
+                listed = _safe_html(", ".join(dropped))
                 source_sentence = find_source_sentence(
                     st.session_state.get("render_input_text", ""), dropped[0]
                 )
                 context_line = (
-                    f' Original: "{source_sentence}"' if source_sentence else ""
+                    f' Original: "{_safe_html(source_sentence)}"' if source_sentence else ""
                 )
                 st.markdown(
                     f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
@@ -3140,7 +3154,7 @@ Show the per-dimension breakdown
             )
             st.markdown(
                 f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
-                f'\u26a0 {reason_text} Read the report above before sending.</div>',
+                f'\u26a0 {_safe_html(reason_text)} Read the report above before sending.</div>',
                 unsafe_allow_html=True
             )
             confirmed_checkbox = st.checkbox(
@@ -3171,7 +3185,7 @@ Show the per-dimension breakdown
             caveat = confidence_caveat(st.session_state.get("dimension_stability"))
             if caveat:
                 st.markdown(
-                    f'<div class="microcopy" style="margin-top:0.5rem;">{caveat}</div>',
+                    f'<div class="microcopy" style="margin-top:0.5rem;">{_safe_html(caveat)}</div>',
                     unsafe_allow_html=True
                 )
                 _deepen_fingerprint_panel(show_caveat_framing=True)
@@ -3181,10 +3195,10 @@ Show the per-dimension breakdown
             receipt = generate_receipt(st.session_state.session_start, st.session_state.word_count)
             st.markdown(
                 f'<div class="receipt"><div class="receipt-title">Your render record</div>'
-                f'<div>{receipt["summary"]}</div><br>'
-                f'<div><strong>Session started:</strong> {receipt["session_started"]}</div>'
-                f'<div><strong>Words analysed:</strong> {receipt["words_analysed"]}</div>'
-                f'<div><strong>Rendered:</strong> {receipt["rendered_at"]}</div></div>',
+                f'<div>{_safe_html(receipt["summary"])}</div><br>'
+                f'<div><strong>Session started:</strong> {_safe_html(receipt["session_started"])}</div>'
+                f'<div><strong>Words analysed:</strong> {_safe_html(receipt["words_analysed"])}</div>'
+                f'<div><strong>Rendered:</strong> {_safe_html(receipt["rendered_at"])}</div></div>',
                 unsafe_allow_html=True,
             )
 
@@ -3343,13 +3357,13 @@ def screen_my_voice():
     for obs in observations:
         quote_match = re.search(r'"([^"]{10,})"', obs.get("body", ""))
         evidence_html = (
-            f'<div class="voice-check-evidence">e.g. "{quote_match.group(1)}"</div>'
+            f'<div class="voice-check-evidence">e.g. "{_safe_html(quote_match.group(1))}"</div>'
             if quote_match else ""
         )
         st.markdown(
             f'<div class="voice-check">'
             f'<div class="voice-check-mark">\u2713</div>'
-            f'<div><div class="voice-check-text">{obs["headline"]}</div>'
+            f'<div><div class="voice-check-text">{_safe_html(obs["headline"])}</div>'
             f'{evidence_html}</div></div>',
             unsafe_allow_html=True,
         )

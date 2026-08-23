@@ -204,3 +204,78 @@ def test_copy_button_html_is_well_formed_and_has_no_quote_collision():
         "onclick attribute instead of staying inside the escaped hidden "
         "textarea - this is exactly the quote-collision bug reintroduced."
     )
+
+
+# ---------------------------------------------------------------------------
+# HTML injection regression tests (added alongside the html.escape() fixes
+# to every dynamic-content unsafe_allow_html call site — Phase 1 of the
+# hardening build order). Each test pastes a payload containing an
+# HTML/script-shaped string into a field that is known to reach
+# st.markdown(..., unsafe_allow_html=True) unescaped-content risk, and
+# asserts the payload never survives as a live, parseable tag in the
+# rendered markdown — only as inert, escaped text.
+# ---------------------------------------------------------------------------
+
+_HTML_PAYLOAD = '<img src=x onerror="alert(1)">'
+_SCRIPT_PAYLOAD = "<script>alert(1)</script>"
+
+
+def _assert_payload_neutralised(markdown_values: list[str], payload: str, context: str):
+    """A payload is neutralised if it never appears as a live tag - i.e.
+    it's either absent, or present only in its html.escape()'d form
+    (&lt;...&gt;). Presence of the raw '<img' / '<script' substring
+    means it would parse as a real element in a browser."""
+    raw_hits = [md for md in markdown_values if payload in md]
+    assert not raw_hits, (
+        f"Unescaped HTML payload survived into rendered markdown ({context}). "
+        f"This means user- or model-derived text is reaching "
+        f"st.markdown(..., unsafe_allow_html=True) without html.escape() - "
+        f"a stored HTML/script injection path. Offending markdown:\n"
+        + "\n---\n".join(raw_hits)
+    )
+
+
+def test_starter_anchor_sentences_are_escaped():
+    """_build_starters() anchors Screen 3 starter prompts to sentences
+    pulled directly from the user's Screen 1 paste (see _ANCHOR_TEMPLATES
+    in app.py), then screen_sample2() interpolates the resulting starter
+    string into an f-string passed to st.markdown(unsafe_allow_html=True).
+    If a user pastes an HTML/script-shaped sentence as their Screen 1
+    sample, it becomes an anchor sentence and must render as inert text,
+    not a live tag."""
+    payload_sentence = (
+        f'Before we start, one more thing to check. {_HTML_PAYLOAD} is what I '
+        f"meant by that earlier comment. Anyway let's move forward with the plan."
+    )
+
+    at = AppTest.from_file(str(_APP_PATH))
+    at.session_state["screen"] = 3
+    at.session_state["raw_text"] = payload_sentence
+    at.session_state["sample2_completions"] = ["", "", "", ""]
+    at.run()
+    assert not at.exception
+
+    markdown_values = [md.value for md in at.markdown]
+    _assert_payload_neutralised(markdown_values, _HTML_PAYLOAD, "Screen 3 starter anchor")
+
+
+def test_observation_evidence_quotes_are_escaped():
+    """screen_reveal() extracts a quoted fragment out of each
+    observation's body text via regex (quote_match) and interpolates it
+    into a 'voice-check-evidence' div. Since observation bodies are
+    themselves built from the user's own writing, a quoted HTML/script
+    fragment inside the user's paste must not survive as live markup."""
+    sample = (
+        f"I do not know if this will work. {_SCRIPT_PAYLOAD} is what I "
+        f"actually meant by that comment. I want to be direct about it."
+    )
+
+    at = AppTest.from_file(str(_APP_PATH))
+    at.session_state["screen"] = 2
+    at.session_state["raw_text"] = sample
+    at.session_state["observations"] = analyse_writing(sample)
+    at.run()
+    assert not at.exception
+
+    markdown_values = [md.value for md in at.markdown]
+    _assert_payload_neutralised(markdown_values, _SCRIPT_PAYLOAD, "observation evidence quote")

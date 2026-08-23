@@ -15,12 +15,6 @@ Reuses the existing device-cookie identity from persistence.py
 (get_or_create_device_id) rather than inventing a second identity
 model — same device_id already used for voice_profiles.
 
-FAILS OPEN, same reasoning as render_cap.py and persistence.py: an
-unconfigured or unreachable Supabase must never block every render.
-A missed lifetime-cap check on a rare outage means a small number of
-extra free renders slip through, which is a far smaller problem than
-blocking every render, paid or free, product-wide.
-
 SCHEMA (create once in Supabase's SQL editor):
 
     create table lifetime_render_cap (
@@ -45,9 +39,35 @@ same-format assumption - checked against the live schema before
 creating this table, not copied from an earlier draft of this
 docstring.
 
-CONCURRENCY NOTE: same read-then-write pattern and same accepted
-undercounting-on-true-race caveat as render_cap.py — acceptable for a
-soft lifetime ceiling, not a billing-exact counter.
+ATOMICITY (23 Aug 2026, Phase 2 of the hardening build order): the
+check-and-reserve path now calls a Postgres RPC
+(reserve_lifetime_render, see migrations/2026_08_23_atomic_lifetime_
+render_cap.sql) that does the read-check-increment as a single
+UPDATE ... WHERE count < limit ... RETURNING statement inside the
+database, rather than reading `count` in Python and writing `count+1`
+back in a second call. That two-step version had a real race: two
+concurrent renders both reading count=14 could both pass the check and
+both write 15, letting a device exceed its cap under concurrency. A
+single UPDATE statement is atomic in Postgres — concurrent callers for
+the same device_id serialize on that row's lock — which closes the
+race entirely rather than just narrowing it.
+
+FAILS CLOSED (changed 23 Aug 2026, Phase 2): unlike render_cap.py
+(a soft, product-wide spend guard where fail-open is the deliberate,
+tested choice — see that module's own docstring), this module is the
+actual free-tier ENTITLEMENT boundary: what stands between "free" and
+"paid". If Supabase is unreachable, check_and_reserve_lifetime_render
+now DENIES the render rather than letting it through — a spend guard
+failing open just means a few extra renders happen during a rare
+outage, but an entitlement gate failing open means the free cap is
+silently unenforceable for as long as the outage lasts, which is a
+materially different and worse failure for a paid product. This
+applies ONLY to the enforcement function below. The read-only helpers
+(get_lifetime_render_count, device_has_active_subscription) remain
+fail-open, same as before — they only affect what the UI displays
+(e.g. "8 of 15 used"), never whether a render is allowed, so there is
+no entitlement risk in letting them degrade gracefully during an
+outage.
 """
 
 import os
@@ -81,57 +101,42 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
     Returns (allowed, used, limit).
 
     If allowed is True, the caller may proceed; the render already
-    counts toward this device's lifetime total (reserved optimistically
-    before the API call, matching render_cap.py's convention) - UNLESS
-    the device has an active subscription, in which case nothing is
-    counted or checked at all (see subscription check below).
+    counts toward this device's lifetime total (reserved atomically,
+    server-side, before the API call — see the module docstring's
+    ATOMICITY section) - UNLESS the device has an active subscription,
+    in which case nothing is counted or checked at all.
 
-    If allowed is False, the device has used all free renders and has
-    not yet paid — the caller shows the paywall instead of rendering.
-
-    Subscription check (19 Aug 2026, stripe_subscription.py): reads the
-    SAME row this function already queries for `count` - one extra
-    column (subscription_status), no extra Supabase call. An active
-    subscription short-circuits before the limit check and before any
-    count increment, so paying subscribers are never capped and their
-    lifetime count stops moving once they've paid (nothing left for it
-    to gate). See stripe_subscription.py's docstring for why this
-    couldn't be wired in without that module landing first.
-
-    Fails OPEN: no Supabase configured, or any error, returns
-    (True, 0, limit) — same contract as render_cap.py, same reasoning
-    in this module's docstring.
+    If allowed is False, either the device has used all free renders
+    and has not yet paid, OR the reservation could not be verified at
+    all (Supabase unreachable/unconfigured) — see FAILS CLOSED in the
+    module docstring for why this function, unlike render_cap.py,
+    denies rather than allows when it can't check.
     """
     limit = _max_lifetime_renders()
     client = get_supabase_client()
     if client is None:
         log.error("lifetime_cap_check_unavailable", reason="supabase_not_configured")
-        return True, 0, limit
+        return False, 0, limit
 
     try:
-        existing = (
-            client.table(_TABLE)
-            .select("count, subscription_status")
-            .eq("device_id", device_id)
-            .limit(1)
-            .execute()
-        )
-        rows = existing.data or []
-        current = rows[0]["count"] if rows else 0
+        result = client.rpc(
+            "reserve_lifetime_render",
+            {"p_device_id": device_id, "p_limit": limit},
+        ).execute()
+        rows = result.data or []
+        if not rows:
+            log.error("lifetime_cap_check_unavailable", reason="rpc_returned_no_rows")
+            return False, 0, limit
 
-        if rows and rows[0].get("subscription_status") == "active":
-            return True, current, limit
-
-        if current >= limit:
-            log.info("lifetime_cap_reached", used=current, limit=limit)
-            return False, current, limit
-
-        new_count = current + 1
-        client.table(_TABLE).upsert({"device_id": device_id, "count": new_count}).execute()
-        return True, new_count, limit
+        row = rows[0]
+        allowed = bool(row["allowed"])
+        used = row["used_count"]
+        if not allowed:
+            log.info("lifetime_cap_reached", used=used, limit=limit)
+        return allowed, used, limit
     except Exception:
         log.error("lifetime_cap_check_unavailable", reason="supabase_error", exc_info=True)
-        return True, 0, limit
+        return False, 0, limit
 
 
 def device_has_active_subscription(device_id: str) -> bool:
@@ -162,7 +167,10 @@ def get_lifetime_render_count(device_id: str) -> tuple[int, int]:
     """Read-only: returns (used, limit) without reserving a render.
     For UI display (e.g. 'You have used 8 of 15 free renders') where
     a check shouldn't itself consume a render. Fails open to (0, limit)
-    on any error, same as the reserving function above."""
+    on any error, same as before — this is a display helper, not the
+    entitlement check itself, so it keeps the old fail-open contract
+    (see module docstring's FAILS CLOSED section for why the actual
+    enforcement function above no longer does)."""
     limit = _max_lifetime_renders()
     client = get_supabase_client()
     if client is None:
@@ -194,18 +202,12 @@ def release_reserved_lifetime_render(device_id: str) -> None:
     2026: "Separate the reservation from confirmed consumption, or add
     a release-on-failure path"). This is the release-on-failure path.
 
-    Deliberately NOT a change to check_and_reserve_lifetime_render's
-    own return signature - that function is unpacked as a fixed
-    3-tuple in 10+ existing call sites and tests; widening it to
-    signal "was this reservation real" would be a much larger,
-    riskier change for the same result. Instead this function is
-    self-contained: it reads subscription_status itself before
-    deciding whether to decrement, rather than trusting the caller to
-    know whether check_and_reserve_lifetime_render actually
-    incremented anything for this device. An active-subscription
-    device is never incremented in the first place (that function's
-    own early-return path), so this correctly no-ops for a subscriber
-    rather than incorrectly lowering a count that was never raised.
+    Calls the atomic release_lifetime_render RPC (see this module's
+    ATOMICITY docstring section and the migration file) rather than a
+    separate read-then-write, for the same reason the reservation path
+    is atomic — though the consequence of losing this particular race
+    is minor (an extra free render slips through), not a correctness
+    issue worth leaving unfixed given the RPC already exists.
 
     Fails open and silently on any error, same contract as every
     other write in this module - a failed release just means one
@@ -216,20 +218,6 @@ def release_reserved_lifetime_render(device_id: str) -> None:
     if client is None:
         return
     try:
-        existing = (
-            client.table(_TABLE)
-            .select("count, subscription_status")
-            .eq("device_id", device_id)
-            .limit(1)
-            .execute()
-        )
-        rows = existing.data or []
-        if not rows:
-            return
-        if rows[0].get("subscription_status") == "active":
-            return
-        current = rows[0]["count"]
-        new_count = max(0, current - 1)
-        client.table(_TABLE).update({"count": new_count}).eq("device_id", device_id).execute()
+        client.rpc("release_lifetime_render", {"p_device_id": device_id}).execute()
     except Exception:
         log.error("lifetime_cap_release_failed", reason="supabase_error", exc_info=True)
