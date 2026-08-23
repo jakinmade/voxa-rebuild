@@ -109,20 +109,11 @@ st.markdown("""
        covers native widgets (buttons, checkboxes, focus rings) CSS
        alone can't reliably reach across Streamlit versions.
 
-       Visual identity (23 Aug 2026 design pass): previously a fairly
-       generic navy-on-white SaaS palette with a single sans face used
-       everywhere — competent, but disconnected from what the product
-       actually is. VOICOVA's whole pitch is authenticating that a
-       piece of writing is genuinely someone's, measured against a
-       fingerprint — closer to forensic authentication than a generic
-       dashboard. Retheme grounds in that: ink/garnet/brass rather
-       than corporate blue, a serif display face with real character
-       for headlines (used with restraint, not everywhere), and a
-       small waveform/fingerprint signature mark echoed through the
-       progress indicator. Deliberately avoids the cream+terracotta
-       AI-design cliché (garnet reads as authentication ink/wax-seal,
-       not clay) as well as near-black+neon and dense broadsheet
-       layouts — see /mnt/skills/public/frontend-design/SKILL.md.
+       Palette: ink/garnet/brass, grounded in the product's actual
+       subject (authenticating genuine writing against a fingerprint,
+       closer to forensic authentication than a generic SaaS
+       dashboard). Serif display face used only for headlines, kept
+       restrained elsewhere.
        --------------------------------------------------------------- */
     :root {
         --ink: #1C1B29;
@@ -217,16 +208,9 @@ st.markdown("""
         max-width: 54ch;
     }
 
-    /* Your Voice checklist — new in v3, replaces prose observation cards.
-       Staggered entrance (22 Aug 2026): this screen is the payoff of
-       the whole onboarding flow — the first time someone sees their
-       own fingerprint reflected back. It was rendering all four cards
-       simultaneously, instantly, same as any other list on the site.
-       CSS-only staggered fade/rise, animation-delay set per-card by
-       screen_reveal() in Python — no JS, no new dependency, respects
-       the existing prefers-reduced-motion rule above (which disables
-       all animation/transition wholesale, so this degrades to an
-       instant static list for anyone who's asked for that). */
+    /* "Your Voice" checklist. CSS-only staggered fade/rise, animation-
+       delay set per-card by screen_reveal() in Python. Respects the
+       prefers-reduced-motion rule above (degrades to a static list). */
     @keyframes voice-check-in {
         from { opacity: 0; transform: translateY(8px); }
         to   { opacity: 1; transform: translateY(0); }
@@ -414,19 +398,12 @@ st.markdown("""
     }
 
     /* ---------------------------------------------------------------
-       Confidence signal-bars (23 Aug 2026, evidence-based redesign —
-       cross-referenced against NN/g's error-message guidelines
-       ("design errors by impact" — differentiate a barrier from a
-       good-to-know signal), IBM Carbon's status-indicator pattern
-       and WCAG 1.4.1 (never rely on color alone), and UX Movement's
-       status-badge guidance (badges that don't require action
-       shouldn't compete visually with ones that do). Confidence never
-       gates a render — only Risk (via requires_review) and Content
-       Lock do — so it deliberately never uses the same red/amber/
-       green alert-pill language as Risk. A neutral filled-bar meter
-       (the same visual grammar as a phone signal-strength icon)
-       reads as "how much data," not "something's wrong," and stays
-       legible without relying on color at all.
+       Confidence signal-bars. Confidence never gates a render, only
+       Risk and Content Lock do, so it deliberately avoids the red/
+       amber/green alert-pill language used for Risk: a neutral
+       filled-bar meter reads as "how much data," not "something's
+       wrong," and stays legible without relying on color alone
+       (per WCAG 1.4.1).
        --------------------------------------------------------------- */
     .signal-bars {
         display: inline-flex;
@@ -661,18 +638,9 @@ st.markdown("""
         border-radius: var(--radius-sm);
     }
 
-    /* Spinner — brand-matched, 20 Aug 2026. Streamlit's default spin
-       icon is unstyled grey, the one visual element in the render/
-       onboarding flow that never picked up --accent or --font-sans
-       like every other component above. Targets stSpinner's public
-       data-testid (documented Streamlit contract, same targeting
-       convention as the button rules above) plus the underlying
-       <i> icon Streamlit renders the spin animation with. CSS-only,
-       zero logic risk — a wrong selector here just means the rule
-       doesn't apply, not a functional break, so this hasn't been
-       verified against the compiled frontend bundle the way the
-       button rules above explicitly were; confirm visually next time
-       the app is open. */
+    /* Spinner, brand-matched via Streamlit's stSpinner data-testid
+       (same public-contract targeting convention as the button rules
+       above). */
     div[data-testid="stSpinner"] {
         color: var(--ink);
         font-family: var(--font-sans);
@@ -718,12 +686,8 @@ elif st.query_params.get("payment") == "cancelled":
 
 
 # ============================================================
-# Shared pricing-tier content — used by both the standalone
-# /pricing screen and the in-paywall "here's what you get"
-# comparison, so the two can never drift out of sync with each
-# other (22 Aug 2026 UX audit: previously the paywall said nothing
-# beyond "Upgrade — £X", and there was no /pricing route to check
-# beforehand at all — voicova.com routed straight into Step 1).
+# Shared pricing-tier content, used by both the standalone /pricing
+# screen and the in-paywall comparison, so the two stay in sync.
 # ============================================================
 
 _PRICING_TIERS = (
@@ -899,14 +863,11 @@ _PROGRESS_STEP_NAMES = ("Paste", "Your voice", "Calibrate", "Write")
 
 
 def _voiceprint_svg(width: int = 220, height: int = 64, bar_width: int = 4, gap: int = 4) -> str:
-    """The product's signature graphic (23 Aug 2026 design pass): a
-    voiceprint/waveform mark, echoing 'fingerprint' and 'voice' —
-    language already used throughout the product's own copy — rather
-    than an arbitrary decorative shape. Heights are a fixed pattern,
-    not randomised per render, so this reads as a stable mark across
-    the product (landing hero here, miniature echo in progress_dots())
-    rather than changing decoration. Every fourth bar picks up --gold
-    as a small, deliberate accent — restrained, not a rainbow.
+    """The product's signature graphic: a voiceprint/waveform mark,
+    echoing "fingerprint" and "voice" language already used
+    throughout the product's own copy. Heights are a fixed pattern,
+    not randomised, so this reads as a stable mark across the product
+    rather than changing decoration.
     """
     heights_pattern = [0.35, 0.55, 0.8, 0.5, 1.0, 0.65, 0.4, 0.85, 0.6, 0.3, 0.75, 0.45]
     n = max(1, width // (bar_width + gap))
@@ -930,11 +891,9 @@ def _voiceprint_svg(width: int = 220, height: int = 64, bar_width: int = 4, gap:
 
 
 def progress_dots(current: int, total: int = 4):
-    # Waveform-bar progress mark (23 Aug 2026 design pass): echoes the
-    # landing hero's signature voiceprint graphic in miniature, rather
-    # than plain generic circles. Bar heights are fixed per position,
-    # not randomised, so the shape is stable and recognisable across
-    # renders — a genuine mark, not decoration that changes every time.
+    # Waveform-bar progress mark, echoing the landing hero's voiceprint
+    # graphic in miniature rather than plain circles. Bar heights are
+    # fixed per position, not randomised, so the shape stays stable.
     _bar_heights = (7, 11, 6, 10)
     bars = ""
     for i in range(1, total + 1):
@@ -1097,13 +1056,10 @@ def screen_paste():
         label_visibility="collapsed",
     )
 
-    # Live orientation cue (22 Aug 2026 UX audit): the actual gate below
-    # is quality-scored, not a hard word count (see _fitness_gate /
-    # _score_sample_fitness in voice_engine.py), so a literal progress
-    # bar against a fixed number would overclaim precision that isn't
-    # there. This gives a live word count plus the honest range instead
-    # of leaving someone to guess after two rejected pastes, which is
-    # what the friction audit actually found.
+    # Live word count: the actual gate below is quality-scored, not a
+    # hard word count (see _fitness_gate / _score_sample_fitness in
+    # voice_engine.py), so a fixed-number progress bar would overclaim
+    # precision. Gives a live count plus an honest range instead.
     _live_word_count = len(text.split()) if text and text.strip() else 0
     st.markdown(
         f'<div class="microcopy" style="margin-top:-0.6rem;">'
@@ -1199,11 +1155,8 @@ def screen_paste():
             "no third-party analytics on this data."
         )
 
-    # Pricing link (22 Aug 2026 UX audit — "needs a design decision"
-    # item): free tier is generous (15 lifetime renders) but there was
-    # previously no way to check pricing before investing the time in
-    # onboarding at all. A plain button, not a big promotional push —
-    # this screen's job is still onboarding, not selling.
+    # Plain link to /pricing, not a promotional push. This screen's
+    # job is onboarding, not selling.
     if st.button("See pricing \u2192", key="pricing_link_screen1"):
         go_to(7)
         st.rerun()
@@ -1267,13 +1220,8 @@ def screen_reveal():
         """, unsafe_allow_html=True)
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-    # Un-collapsed by default (22 Aug 2026 UX audit): previously this
-    # well-designed panel was easy to miss entirely since it defaulted
-    # to a collapsed expander with no visual weight pulling the eye to
-    # it. Screen 4's caveat-framed version already opens expanded on
-    # purpose when it's actually relevant to a specific result; this
-    # brings the same visibility to the generic Screen 2 version, which
-    # previously had no such signal at all.
+    # Un-collapsed by default so this doesn't get missed the way a
+    # collapsed expander with no visual weight would.
     _deepen_fingerprint_panel(expanded=True)
     st.markdown("")
 
@@ -1469,18 +1417,11 @@ def screen_sample2():
                         st.session_state.get("baseline_fingerprint"), m
                     )
                 save_profile_if_available()
-                # Un-collapse the sidebar for first-time completers too
-                # (22 Aug 2026 UX audit): "My Voice" and "Past renders"
-                # are real, built features, but previously only ever
-                # became visible via _returning_user_sidebar, a flag
-                # set solely by restore_profile_if_available() for an
-                # actually-returning visitor. A first-time completer
-                # who just finished onboarding had no cue these existed
-                # at all. Deliberately a separate flag from
-                # _returning_user_sidebar rather than reusing it — that
-                # one also drives the "Write as me" vs "Paste the text
-                # to restore" copy and whether the Step 4 progress dots
-                # show, none of which should change just because the
+                # Unlocks the sidebar ("My Voice" / "Past renders") for
+                # first-time completers, not just returning visitors.
+                # Kept as a separate flag from _returning_user_sidebar,
+                # which also drives screen copy and progress-dot
+                # visibility and shouldn't change just because the
                 # sidebar unlocks.
                 st.session_state["_sidebar_unlocked"] = True
                 go_to(4)
@@ -1581,11 +1522,10 @@ def _run_render(
     prompt, which itself re-checks mode == "elevate" before honouring
     it, so this parameter can never trigger paragraph restructuring
     through the preserve path even if a future caller passes it
-    incorrectly. Originally built LinkedIn-only (18 Aug 2026), then
-    generalised the same session once it became clear the underlying
-    convention wasn't LinkedIn-specific (see build_correction_prompt's
-    docstring). Same as render_context, this doesn't touch the
-    baseline targets.
+    incorrectly. Originally LinkedIn-only, then generalised once it
+    became clear the underlying convention wasn't LinkedIn-specific
+    (see build_correction_prompt's docstring). Same as render_context,
+    this doesn't touch the baseline targets.
 
     Returns True on success, False on failure. Callers must check this
     before treating the render as having happened (e.g. before marking
@@ -1640,15 +1580,11 @@ def _run_render(
     # site resolving its own copy.
     device_id = st.session_state.get("_device_id") or get_or_create_device_id()
     st.session_state["_device_id"] = device_id
-    # Render accounting (Section 15.2 item 2, engineering review
-    # response, resolved 21 Aug 2026): "one user render = original
-    # generation + its included refinement, one lifetime-counter
-    # decrement, not two". Only the ORIGINAL generation reserves a
-    # lifetime render; a refinement of that same render is included in
-    # the one already spent, not a second draw against the person's 15.
-    # Confirmed as a real bug, not hypothetical, before this fix: the
-    # reserve call fired unconditionally regardless of is_refinement,
-    # so every refinement silently cost a second free render.
+    # Render accounting: "one user render = original generation + its
+    # included refinement, one lifetime-counter decrement, not two."
+    # Only the ORIGINAL generation reserves a lifetime render; a
+    # refinement of that same render is included in the one already
+    # spent, not a second draw against the person's 15.
     if is_refinement:
         lifetime_allowed, lifetime_used, lifetime_limit = True, 0, 0
     else:
@@ -1745,22 +1681,19 @@ def _run_render(
             "That didn't go through. Your text is safe, try again."
         )
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
-        # Release-on-failure (Section 15.2 item 5, 20 Aug 2026): the
-        # lifetime cap reserved this render optimistically, before
-        # this API call ran (see check_and_reserve_lifetime_render's
-        # own docstring for why - same convention as render_cap.py).
-        # If the call itself failed, the person never got a render out
-        # of it and shouldn't lose one of their 15 for VOICOVA's own
-        # API failure. release_reserved_lifetime_render is self-
-        # contained and safe to call unconditionally for an original
-        # render - it no-ops for an active subscriber (never
-        # incremented in the first place) and fails open silently on
-        # any Supabase error, same as everything else in that module.
-        # Guarded on is_refinement here (21 Aug 2026, render-accounting
-        # fix above): a refinement never reserved a lifetime render in
-        # the first place, so releasing one on its failure would
-        # wrongly hand back a slot from an earlier, successful original
-        # render instead.
+        # Release-on-failure: the lifetime cap reserved this render
+        # optimistically, before this API call ran (see
+        # check_and_reserve_lifetime_render's own docstring). If the
+        # call itself failed, the person never got a render out of it
+        # and shouldn't lose one of their 15 for VOICOVA's own API
+        # failure. release_reserved_lifetime_render is self-contained
+        # and safe to call unconditionally for an original render — it
+        # no-ops for an active subscriber and fails open silently on
+        # any Supabase error, same as the rest of that module.
+        # Guarded on is_refinement: a refinement never reserved a
+        # lifetime render in the first place, so releasing one on its
+        # failure would wrongly hand back a slot from an earlier,
+        # successful original render instead.
         if not is_refinement:
             release_reserved_lifetime_render(device_id)
         return False
@@ -1846,20 +1779,20 @@ def _run_render(
             clean, ownership_over_fixed = _fix_first_person_over_ratio(
                 clean, d["baseline"], d["output"], input_text
             )
-            # General, alignment-based fallback (18 Aug 2026) — runs
-            # after the pattern-based fixer above, not instead of it,
-            # since it needs the SAME sentence-alignment machinery but
-            # answers a structurally different question (does this
-            # sentence have a marker the original didn't have at all,
-            # regardless of specific wording) rather than matching a
-            # known verb pattern. Catches whatever the pattern fixer's
-            # enumerated list doesn't — see restore_fabricated_
-            # ownership_sentences' own docstring for why pattern
-            # enumeration alone can never be complete for this failure
-            # class. Safe to always run: it only ever touches a
-            # sentence where the aligned original had zero first-person
-            # markers, so it can't touch anything the fixer above
-            # already correctly left alone.
+            # General, alignment-based fallback — runs after the
+            # pattern-based fixer above, not instead of it, since it
+            # needs the same sentence-alignment machinery but answers
+            # a structurally different question (does this sentence
+            # have a marker the original didn't have at all, regardless
+            # of specific wording) rather than matching a known verb
+            # pattern. Catches whatever the pattern fixer's enumerated
+            # list doesn't — see restore_fabricated_ownership_sentences'
+            # own docstring for why pattern enumeration alone can never
+            # be complete for this failure class. Safe to always run:
+            # it only ever touches a sentence where the aligned
+            # original had zero first-person markers, so it can't
+            # touch anything the fixer above already correctly left
+            # alone.
             clean, ownership_restored = restore_fabricated_ownership_sentences(clean, input_text)
             ownership_fixed = ownership_fixed or ownership_over_fixed or ownership_restored
         else:
@@ -1970,10 +1903,10 @@ def _run_render(
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
 
-                # Word-level fidelity check, platform_format only —
+                # Word-level fidelity check, platform_format only:
                 # verifies the model actually obeyed "rearrange, don't
                 # rewrite" rather than trusting the instruction alone.
-                # Confirmed necessary live (18 Aug 2026): a real render
+                # Confirmed necessary against a real render that
                 # restructured two declarative sentences into a "When
                 # X... When Y..." conditional, introducing "when" and
                 # "occurs" — real rewriting, not rearrangement, despite
@@ -2096,9 +2029,9 @@ def _run_render(
         # original_input_text=input_text: exempts phrases genuinely
         # present in the person's own input from being flagged as an
         # AI tell — see score_ai_tells' docstring for the real
-        # false-positive this fixes (18 Aug 2026: "curious whether",
-        # "i suspect", "i would push back" all appeared verbatim in a
-        # real original input and were flagged anyway).
+        # false-positive this fixes ("curious whether", "i suspect",
+        # "i would push back" all appeared verbatim in a real original
+        # input and were flagged anyway).
         ai_tells = score_ai_tells(clean, original_input_text=input_text)
         if not ai_tells["clean"]:
             clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
@@ -2123,8 +2056,8 @@ def _run_render(
 
         # Mirror case, OVER-owned direction: input DOES have opinion
         # content (so the block above didn't apply), but is more
-        # opinion-dense than the person's baseline. Confirmed live (18
-        # Aug 2026): a 72% ownership drift on a genuinely opinionated
+        # opinion-dense than the person's baseline. Confirmed against a
+        # real render: a 72% ownership drift on a genuinely opinionated
         # email dropped to ~37% after both fixer passes ran their full
         # course, and every remaining first-person sentence checked out
         # as the person's own genuine wording, not a defect — an
@@ -2159,7 +2092,7 @@ def _run_render(
         risk = compute_risk(delta, semantic, ai_tells, insertion_check)
         risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)
         # The ONLY thing that gates the rewritten text behind
-        # review_gate.py's confirmation wall as of 19 Aug 2026 — see
+        # review_gate.py's confirmation wall — see
         # has_content_integrity_hard_fail's docstring. risk above still
         # reflects style-drift severity too (informational badge), but
         # style drift alone must never block delivery.
@@ -2173,8 +2106,8 @@ def _run_render(
         # so any check built on "did the correction pass add a
         # sentence" would have silently seen only half the picture.
         # Found while scoping Content Lock's "no sentences invented"
-        # check (18 Aug 2026) — this gap existed before that feature,
-        # not introduced by it.
+        # check — this gap existed before that feature, not
+        # introduced by it.
         st.session_state.render_insertion_check = insertion_check
         # Persisted (not recomputed at click-time) for the same reason
         # as render_insertion_check above: the AI-Slop Firewall "Clean
@@ -2192,12 +2125,11 @@ def _run_render(
             ai_tells_clean=ai_tells["clean"],
             missed_dimensions=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
         )
-        # Correction-frequency instrumentation (Section 15.2 item 8,
-        # 20 Aug 2026): all four inputs are already in scope at this
-        # point in _run_render, computed earlier in this same
-        # function - hedge_fixed/modal_fixed/rhythm_fixed/
-        # ownership_fixed/directive_fixed from the deterministic
-        # fixer pass (~line 1412), correction_prompt from
+        # Correction-frequency instrumentation: all four inputs are
+        # already in scope at this point in _run_render, computed
+        # earlier in this same function - hedge_fixed/modal_fixed/
+        # rhythm_fixed/ownership_fixed/directive_fixed from the
+        # deterministic fixer pass (~line 1412), correction_prompt from
         # build_correction_prompt (~line 1488), content_integrity_
         # hard_fail just above. Checked in this order because a hard
         # fail is the most severe outcome regardless of what else
@@ -2295,8 +2227,7 @@ def _build_what_changed_html(biggest_changes: list[str]) -> str:
     position in the report card. The full percentage figures still
     appear in the Voice Match table further down for anyone who wants
     them — this is the "here's what you need to know" layer above it,
-    same principle as the Content Lock banner (VOICOVA UX review, 19
-    Aug 2026).
+    same principle as the Content Lock banner.
 
     Falls back to a plain "no drift" line when biggest_changes is
     empty, same wording the old inline sentence used, so nothing reads
@@ -2321,21 +2252,19 @@ def _build_what_changed_html(biggest_changes: list[str]) -> str:
 def _sentence_growth_label(count: int) -> str:
     """Shared phrasing for both the banner and the full checklist, so
     they can never say this two different ways. Plain pluralisation
-    instead of the "sentence(s)" construct that was here before -
-    part of what was flagged as reading heavy (19 Aug 2026, F1 test
-    render). The reported count itself is still the raw sentence-
-    count delta from _check_uncorrected_insertions - an attempt to
-    attribute it to specific sentences was tried and reverted the
-    same session after it proved unreliable against heavily-
-    paraphrased real text (see that function's own docstring)."""
+    instead of the "sentence(s)" construct that was here before. The
+    reported count itself is still the raw sentence-count delta from
+    _check_uncorrected_insertions - an attempt to attribute it to
+    specific sentences was tried and reverted after it proved
+    unreliable against heavily-paraphrased real text (see that
+    function's own docstring)."""
     noun = "sentence" if count == 1 else "sentences"
     return f"Added {count} new {noun} not in the original"
 
 
 def _confidence_signal_html(tier: str) -> str:
-    """Neutral signal-strength meter for the Confidence badge (23 Aug
-    2026 evidence-based redesign — see the .signal-bars CSS comment
-    for the sourcing). Three bars, filled left-to-right by tier, in
+    """Neutral signal-strength meter for the Confidence badge. Three
+    bars, filled left-to-right by tier, in
     plain ink — never red/amber/green, since Confidence never gates a
     render and shouldn't visually read as an alert the way Risk does.
     """
@@ -2376,24 +2305,22 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
     new_hedges) — this adds no new detection, it's a second, higher-
     prominence view of data already computed. The full checklist below
     still renders for anyone who wants the row-by-row detail; this is
-    the "here's what you need to know" layer above it (VOICOVA UX
-    review, 19 Aug 2026 — Content Lock as visible status, not buried
-    diagnostic).
+    the "here's what you need to know" layer above it, Content Lock as
+    visible status rather than a buried diagnostic.
 
     Reasons list mirrors _build_content_lock_html's four checks so the
     banner's summary and the checklist below it can never disagree
     about what failed.
 
-    lexical_fidelity_breaks (19 Aug 2026) is deliberately NOT one of
-    the four "reasons" above and never flips this banner to fail —
-    that would contradict the explicit decision (detect_lexical_
-    fidelity_breaks' own docstring) that a watchlist hit is informational,
-    not a content-integrity failure. Fixing the earlier gap where this
-    signal was computed but shown nowhere: it now renders as its own
-    amber note, in the SAME banner position either state lands in, so
-    it's visible either way rather than silently swallowed - but it's
-    styled and worded as a lower-severity notice, not folded into the
-    red fail state or the checklist below it.
+    lexical_fidelity_breaks is deliberately NOT one of the four
+    "reasons" above and never flips this banner to fail — that would
+    contradict the explicit decision (detect_lexical_fidelity_breaks'
+    own docstring) that a watchlist hit is informational, not a
+    content-integrity failure. It renders as its own amber note, in
+    the SAME banner position either state lands in, so it's visible
+    either way rather than silently swallowed - but it's styled and
+    worded as a lower-severity notice, not folded into the red fail
+    state or the checklist below it.
     """
     dropped = report.get("dropped_entities", [])
     swaps = report.get("attribution_swaps", [])
@@ -2447,7 +2374,7 @@ def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
     logic of its own.
 
     Four checks, not five. The original design brief (a market-
-    landscape review, 18 Aug 2026) proposed five: names preserved,
+    landscape review) proposed five: names preserved,
     numbers preserved, attribution preserved, no new claims detected,
     no sentences invented. "No new claims detected" doesn't map
     cleanly onto any single measured signal — score_semantic_drift
@@ -2675,14 +2602,11 @@ def screen_render():
         st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
 
-    # Persistent free-render counter (22 Aug 2026 UX audit): previously
-    # nothing on any onboarding or write screen mentioned the 15-
-    # lifetime-render cap at all — someone could paste real writing,
-    # do the live-typed calibration, and only discover a meter existed
-    # once it hit zero. get_lifetime_render_count() is read-only (does
-    # not itself consume a render), same fail-open design as the rest
-    # of lifetime_cap.py. Skipped entirely for an active subscriber —
-    # the cap doesn't apply to them, so showing it would just confuse.
+    # Persistent free-render counter: get_lifetime_render_count() is
+    # read-only (does not itself consume a render), same fail-open
+    # design as the rest of lifetime_cap.py. Skipped entirely for an
+    # active subscriber — the cap doesn't apply to them, so showing it
+    # would just confuse.
     if not device_has_active_subscription(device_id_for_ui):
         _used, _limit = get_lifetime_render_count(device_id_for_ui)
         _remaining = max(_limit - _used, 0)
@@ -2703,8 +2627,8 @@ def screen_render():
     # the person's own blended voice, this only steers word choice and
     # formality at generation time. Same fast-path-by-default pattern as
     # the deepen-fingerprint panel: visible, not gated, easy to ignore.
-    # Section 9.1 / Section 11 decision (19 Aug 2026): default to the
-    # last-used context rather than forcing a choice every render.
+    # Defaults to the last-used context rather than forcing a choice
+    # every render.
     # Seeded into session_state BEFORE the widget is created, not
     # passed via value= below — Streamlit ignores a keyed widget's
     # value= after its first run, session_state is what actually
@@ -2741,14 +2665,14 @@ def screen_render():
     # build_correction_prompt's docstring for why this isn't just
     # folded into elevate mode itself.
     #
-    # Originally LinkedIn-only (18 Aug 2026); generalised the same
-    # session once it was clear the underlying convention (short
-    # paragraphs, hook-first) wasn't LinkedIn-specific, and a second,
-    # genuinely different target (email) was worth adding alongside
-    # it rather than stretching one instruction to cover both. A
-    # selectbox rather than a second checkbox, since these are
-    # mutually exclusive targets, not independent toggles — a render
-    # is formatted for exactly one destination or none.
+    # Originally LinkedIn-only; generalised once it was clear the
+    # underlying convention (short paragraphs, hook-first) wasn't
+    # LinkedIn-specific, and a second, genuinely different target
+    # (email) was worth adding alongside it rather than stretching one
+    # instruction to cover both. A selectbox rather than a second
+    # checkbox, since these are mutually exclusive targets, not
+    # independent toggles — a render is formatted for exactly one
+    # destination or none.
     platform_format = None
     if render_mode == "elevate":
         platform_choice = st.selectbox(
@@ -2813,11 +2737,9 @@ def screen_render():
             # why this reuses that pattern rather than building new
             # Stripe surface for a subscription specifically).
             #
-            # "Here's what you get" (22 Aug 2026 UX audit): previously
-            # this screen said only "Upgrade — £X" with nothing about
-            # what upgrading actually unlocks. Reuses the same
-            # _PRICING_TIERS content as the standalone /pricing screen
-            # so the two can't drift apart.
+            # "Here's what you get" reuses the same _PRICING_TIERS
+            # content as the standalone /pricing screen so the two
+            # can't drift apart.
             st.markdown(_pricing_tiers_html(compact=True), unsafe_allow_html=True)
 
             pay_col1, pay_col2 = st.columns(2)
@@ -2830,17 +2752,16 @@ def screen_render():
                     st.session_state["_checkout_plan_requested"] = "annual"
                     st.rerun()
 
-            # One click, not two (22 Aug 2026 UX audit): previously
-            # clicking "Upgrade" only revealed a second "Continue to
-            # payment →" button that did the actual navigating, with
-            # nothing informative shown in between — so the first click
-            # was pure friction, easy to mistake for a dead click.
-            # Streamlit still needs a rerun to render the checkout URL
-            # once Stripe returns it, so the click itself can't literally
-            # navigate — but a meta-refresh auto-redirects the browser
-            # the instant that URL exists, with no second click needed.
-            # The manual link below is a fallback only, for a browser
-            # that blocks the auto-refresh, not a required second step.
+            # One click, not two: clicking "Upgrade" used to only
+            # reveal a second "Continue to payment →" button that did
+            # the actual navigating, with nothing informative shown in
+            # between. Streamlit still needs a rerun to render the
+            # checkout URL once Stripe returns it, so the click itself
+            # can't literally navigate — but a meta-refresh
+            # auto-redirects the browser the instant that URL exists,
+            # with no second click needed. The manual link below is a
+            # fallback only, for a browser that blocks the
+            # auto-refresh, not a required second step.
             _requested_plan = st.session_state.pop("_checkout_plan_requested", None)
             if _requested_plan:
                 checkout_url = create_subscription_checkout(device_id_for_ui, plan=_requested_plan)
@@ -2960,16 +2881,15 @@ def screen_render():
             </div>
             """, unsafe_allow_html=True)
 
-            # Explicit, always-visible explainer for Confidence vs Risk
-            # (22 Aug 2026 UX audit): these two badges can land as
-            # "Confidence: Low" + "Risk: High", directly under a green
-            # "Content safe" banner, and previously the only
-            # explanation was a hover title="" tooltip on each label —
-            # invisible on touch devices, and easy to miss even on
-            # desktop. Confidence and Risk measure genuinely different
-            # things (sample size vs meaning drift), and first reaction
-            # to seeing both look bad at once is alarm, not clarity.
-            # One persistent line, not another hover target, fixes that.
+            # Explicit, always-visible explainer for Confidence vs
+            # Risk: these two badges can land as "Confidence: Low" +
+            # "Risk: High", directly under a green "Content safe"
+            # banner, and a hover title="" tooltip alone is invisible
+            # on touch devices and easy to miss on desktop. Confidence
+            # and Risk measure genuinely different things (sample size
+            # vs meaning drift), and first reaction to seeing both look
+            # bad at once is alarm, not clarity. One persistent line,
+            # not another hover target, fixes that.
             st.markdown(
                 '<div class="microcopy" style="margin-top:-0.4rem;margin-bottom:0.6rem;">'
                 'Confidence reflects how much of your writing we\'ve seen so far, '
@@ -2982,8 +2902,8 @@ def screen_render():
             # AI-Slop Firewall — outside the raw-HTML block above,
             # since it needs a real st.button (Streamlit widgets can't
             # live inside an unsafe_allow_html string). ai_tell_phrases
-            # comes from score_ai_tells' flagged_phrases field (18 Aug
-            # 2026) — the raw, individual phrase list, not the
+            # comes from score_ai_tells' flagged_phrases field, the raw,
+            # individual phrase list, not the
             # pre-joined "AI-typical phrasing found: X, Y, Z" prose
             # string ai_tell_flags carries; parsing that string on the
             # UI side would be fragile against any future wording
@@ -3080,8 +3000,8 @@ def screen_render():
                     f'<div class="microcopy">{note}</div>',
                     unsafe_allow_html=True,
                 )
-            # Double-render fix (22 Aug 2026): this text_area used to
-            # fire unconditionally, so any render with a flagged phrase
+            # Double-render fix: this text_area used to fire
+            # unconditionally, so any render with a flagged phrase
             # showed the same rewritten text twice — once highlighted
             # above, once plain here. The plain copy is only needed
             # when there's nothing highlighted to show it in place of;
@@ -3104,17 +3024,12 @@ def screen_render():
                 unsafe_allow_html=True
             )
 
-            # Copy-to-clipboard (22 Aug 2026 UX audit): after all of
-            # onboarding, the finished text previously sat in a plain
-            # textarea with no one-click way to copy it — Write again /
-            # Start over / Export / Download, but nothing that actually
-            # gets the rewritten text onto the clipboard, for a tool
-            # whose entire output is text meant to go elsewhere. The
-            # text is embedded via json.dumps rather than read from the
-            # text_area's DOM node, since Streamlit's own key-based
-            # re-render can detach a plain <script> from that element
-            # between runs; embedding the value directly is more
-            # robust than depending on DOM lookup timing.
+            # Copy-to-clipboard: text is embedded via json.dumps rather
+            # than read from the text_area's DOM node, since
+            # Streamlit's own key-based re-render can detach a plain
+            # <script> from that element between runs; embedding the
+            # value directly is more robust than depending on DOM
+            # lookup timing.
             import json as _json
             _copy_btn_id = f"copybtn_{output_key}"
             st.markdown(f"""
@@ -3188,18 +3103,18 @@ def screen_render():
                 "sentence_growth": "This render added content that wasn't in your original text.",
                 "aggregate_band": "This render drifted further from your voice than usual, across several measures.",
             }
-            # Specific, not generic (22 Aug 2026, per friction audit +
-            # research on confirmation-copy anti-patterns: NN/g and
-            # Intuit's own content design guidelines both flag vague
-            # "I understand"/"are you sure" acknowledgments as
-            # ineffective - people click through boilerplate without
-            # reading it, and it erodes attention for warnings that
-            # actually matter. risk_reason was already computed and
-            # logged (compute_risk_reason, review_gate.py) but never
-            # shown to the person it's about - it just sat in
-            # analytics. Showing the actual specific reason, and
-            # making the checkbox confirm that specific thing, is the
-            # fix backed by that research, not just a tone change.
+            # Specific, not generic: per research on confirmation-copy
+            # anti-patterns, NN/g and Intuit's own content design
+            # guidelines both flag vague "I understand"/"are you sure"
+            # acknowledgments as ineffective - people click through
+            # boilerplate without reading it, and it erodes attention
+            # for warnings that actually matter. risk_reason was
+            # already computed and logged (compute_risk_reason,
+            # review_gate.py) but never shown to the person it's about
+            # - it just sat in analytics. Showing the actual specific
+            # reason, and making the checkbox confirm that specific
+            # thing, is the fix backed by that research, not just a
+            # tone change.
             reason_text = _risk_reason_copy.get(
                 st.session_state.get("risk_reason", ""),
                 "This render needs a closer look before you send it.",
@@ -3226,14 +3141,13 @@ def screen_render():
                 )
                 st.rerun()
 
-        # Moved here (17 Aug 2026, JA feedback) from its previous spot
-        # between the report warnings and the output text_area - that
-        # ordering put an optional "improve your fingerprint" upsell
-        # ahead of the actual rewritten text the person came here for,
-        # which read as backwards. Runs regardless of gated/show_output
-        # state (still relevant even if output is hidden pending
-        # confirmation), just positioned after the report+output/gate
-        # resolve rather than wedged in the middle of them.
+        # Positioned after the report+output/gate resolve rather than
+        # wedged between the report warnings and the output text_area
+        # - that ordering put an optional "improve your fingerprint"
+        # upsell ahead of the actual rewritten text the person came
+        # here for, which read as backwards. Runs regardless of
+        # gated/show_output state (still relevant even if output is
+        # hidden pending confirmation).
         if report:
             caveat = confidence_caveat(st.session_state.get("dimension_stability"))
             if caveat:
@@ -3336,12 +3250,12 @@ def screen_render():
                     use_container_width=True,
                 )
         with col5:
-            # Human-readable export (22 Aug 2026 UX audit): the JSON
-            # exports above are developer-facing outputs; this is the
-            # "show my manager" version — clean plain text, pasteable
-            # straight into an email or Slack message, no tooling
-            # needed to read it. Same gating as "Download the record"
-            # since it's built from the same authenticity_report dict.
+            # Human-readable export: the JSON exports above are
+            # developer-facing outputs; this is the "show my manager"
+            # version, clean plain text, pasteable straight into an
+            # email or Slack message, no tooling needed to read it.
+            # Same gating as "Download the record" since it's built
+            # from the same authenticity_report dict.
             if report and st.session_state.get("render_id"):
                 st.download_button(
                     "Download as text",
