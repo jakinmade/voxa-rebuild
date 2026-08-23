@@ -15,7 +15,7 @@ from datetime import datetime
 
 def init_state():
     defaults = {
-        "screen": 1,
+        "screen": 0,
         "raw_text": "",
         "observations": [],
         "intent_mode": "GET_IT_DONE",
@@ -61,10 +61,15 @@ def go_to(screen: int):
 
 
 def reset_all():
-    """Full reset — start over. Clears every key, re-initialises defaults."""
+    """Full reset — start over. Clears every key, re-initialises
+    defaults. Explicitly lands back on Step 1, not the marketing
+    landing screen (screen 0) — landing is for a first-ever visit
+    only; someone hitting "Start over" from mid-flow has already
+    seen it and wants straight back into onboarding."""
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     init_state()
+    st.session_state.screen = 1
 
 
 def generate_receipt(session_start: str, word_count: int) -> dict:

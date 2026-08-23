@@ -74,6 +74,7 @@ def _run_screen4_with_mocked_render(input_text: str = "Please write a short note
             mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
 
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run()
 
             combined = BASELINE_SAMPLE_1 + " " + BASELINE_SAMPLE_2
@@ -119,6 +120,7 @@ def _land_on_screen4_no_render(input_text: str = "Please write a short note abou
     need to inspect button/session-state right before or during the
     two-phase click, not after a render has already completed."""
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
 
     combined = BASELINE_SAMPLE_1 + " " + BASELINE_SAMPLE_2
@@ -251,6 +253,7 @@ def test_insufficient_baseline_samples_handled_without_crashing():
             )
 
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run()
 
             at.session_state["screen"] = 4

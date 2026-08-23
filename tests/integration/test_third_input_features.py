@@ -88,6 +88,7 @@ def _onboard_to_screen4(monkeypatch, create_side_effect):
         mock_client.messages.create.side_effect = create_side_effect
 
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run(timeout=15)
         at.text_area[0].set_value(SAMPLE_TEXT)
         at.button[0].click()

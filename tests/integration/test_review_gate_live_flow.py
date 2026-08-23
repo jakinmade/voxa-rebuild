@@ -51,6 +51,7 @@ def _run_screen4_forced_high_risk():
             mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
 
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run()
 
             combined = BASELINE_SAMPLE_1 + " " + BASELINE_SAMPLE_2

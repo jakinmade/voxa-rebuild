@@ -68,6 +68,7 @@ def test_elevate_toggle_renders_and_survives_full_render_pipeline(monkeypatch):
         mock_client.messages.create.side_effect = controlled_create
 
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run(timeout=15)
         at.text_area[0].set_value(SAMPLE_TEXT)
         at.button[0].click()

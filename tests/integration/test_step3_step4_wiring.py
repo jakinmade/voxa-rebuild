@@ -78,6 +78,7 @@ def _seed_screen4(at: AppTest):
 def test_context_field_empty_on_first_ever_visit():
     # Nothing used before - must not seed anything that isn't there.
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     _seed_screen4(at)
     at.run()
@@ -88,6 +89,7 @@ def test_context_field_empty_on_first_ever_visit():
 
 def test_context_field_prefills_with_last_used_context():
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     _seed_screen4(at)
     # Simulate a previous render in this session having used a context.
@@ -100,6 +102,7 @@ def test_context_field_prefills_with_last_used_context():
 
 def test_context_field_remains_editable_after_prefill():
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     _seed_screen4(at)
     at.session_state["render_context_input"] = "LinkedIn post for a client"
@@ -144,6 +147,7 @@ def test_write_render_history_called_on_successful_render():
             mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
 
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run()
             _seed_screen4(at)
             at.session_state["render_context_input"] = "A quick client email"
@@ -182,6 +186,7 @@ def test_write_render_history_content_lock_pass_matches_hard_fail_state():
             mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
 
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run()
             _seed_screen4(at)
             at.run()
@@ -204,6 +209,7 @@ def test_write_render_history_not_called_when_render_fails():
     with patch("render_cap.check_and_reserve_render", return_value=(False, 40, 40)), \
          patch("render_history.get_supabase_client", return_value=client):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -236,6 +242,7 @@ def test_history_screen_shows_empty_state_with_no_renders():
     client, _ = _mock_supabase_client_with_history([])
     with patch("render_history.get_supabase_client", return_value=client):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         at.session_state["screen"] = 6
         at.session_state["_device_id"] = "test-device-1"
@@ -262,6 +269,7 @@ def test_history_screen_lists_past_renders():
     client, _ = _mock_supabase_client_with_history(rows)
     with patch("render_history.get_supabase_client", return_value=client):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         at.session_state["screen"] = 6
         at.session_state["_device_id"] = "test-device-1"
@@ -283,6 +291,7 @@ def test_history_screen_reopen_shows_before_and_after_text():
     client, _ = _mock_supabase_client_with_history(rows)
     with patch("render_history.get_supabase_client", return_value=client):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         at.session_state["screen"] = 6
         at.session_state["_device_id"] = "test-device-1"
@@ -300,6 +309,7 @@ def test_history_nav_buttons_present_from_write_and_my_voice():
     client, _ = _mock_supabase_client_with_history([])
     with patch("render_history.get_supabase_client", return_value=client):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -316,6 +326,7 @@ def test_history_back_to_write_button_navigates():
     client, _ = _mock_supabase_client_with_history([])
     with patch("render_history.get_supabase_client", return_value=client):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)  # sets baseline_fingerprint, needed for the sidebar nav to show
         at.session_state["screen"] = 6
@@ -336,6 +347,7 @@ def test_paywall_shows_upgrade_buttons_not_try_again():
          patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)), \
          patch("render_history.get_supabase_client", return_value=MagicMock()):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -358,6 +370,7 @@ def test_non_paywall_error_still_shows_try_again_not_upgrade():
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}), \
          patch("render_cap.check_and_reserve_render", return_value=(False, 40, 40)):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -391,6 +404,7 @@ def test_upgrade_monthly_button_calls_checkout_with_correct_plan_and_shows_link(
          patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)), \
          patch.object(stripe.checkout.Session, "create", return_value=fake_session) as mock_create:
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -424,6 +438,7 @@ def test_upgrade_annual_button_calls_checkout_with_correct_plan():
          patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)), \
          patch.object(stripe.checkout.Session, "create", return_value=fake_session) as mock_create:
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -447,6 +462,7 @@ def test_upgrade_button_shows_error_when_checkout_fails():
          patch("stripe_subscription._get_secret", return_value=None), \
          patch("lifetime_cap.check_and_reserve_lifetime_render", return_value=(False, 15, 15)):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -480,6 +496,7 @@ def test_checkout_success_query_param_shows_confirmation_banner():
          patch("stripe_subscription.get_supabase_client", return_value=client), \
          patch("persistence.get_or_create_device_id", return_value="test-device-1"):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         # The banner lives on screen_render (screen 4) - in production
         # this is exactly where a returning device lands, because
@@ -503,6 +520,7 @@ def test_checkout_success_query_param_shows_failure_banner_when_verify_fails():
          patch.object(stripe.checkout.Session, "retrieve", side_effect=Exception("boom")), \
          patch("persistence.get_or_create_device_id", return_value="test-device-1"):
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         at.session_state["screen"] = 4
         at.session_state["baseline_fingerprint"] = {}
@@ -515,6 +533,7 @@ def test_checkout_success_query_param_shows_failure_banner_when_verify_fails():
 
 def test_checkout_cancelled_query_param_shows_no_banner():
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     at.session_state["screen"] = 4
     at.session_state["baseline_fingerprint"] = {}

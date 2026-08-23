@@ -35,7 +35,7 @@ from render_history import write_render_history, get_render_history
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
-from authenticity_report import build_authenticity_report, export_authenticity_report_json
+from authenticity_report import build_authenticity_report, export_authenticity_report_json, export_authenticity_report_text
 from voice_engine import (
     analyse_writing, _analyse_intro,
     compute_baseline_metrics, _merge_baseline,
@@ -650,6 +650,183 @@ elif st.query_params.get("payment") == "cancelled":
     st.query_params.clear()
 
 
+# ============================================================
+# Shared pricing-tier content — used by both the standalone
+# /pricing screen and the in-paywall "here's what you get"
+# comparison, so the two can never drift out of sync with each
+# other (22 Aug 2026 UX audit: previously the paywall said nothing
+# beyond "Upgrade — £X", and there was no /pricing route to check
+# beforehand at all — voicova.com routed straight into Step 1).
+# ============================================================
+
+_PRICING_TIERS = (
+    {
+        "name": "Free",
+        "price": "£0",
+        "cadence": "",
+        "features": [
+            "15 renders, lifetime",
+            "Full voice fingerprint + Content Lock",
+            "AI-tell check on every render",
+            "No account, no card required",
+        ],
+    },
+    {
+        "name": "Monthly",
+        "price": "£6.99",
+        "cadence": "/month",
+        "features": [
+            "Unlimited renders",
+            "Everything in Free",
+            "Priority processing",
+            "Cancel anytime",
+        ],
+    },
+    {
+        "name": "Annual",
+        "price": "£49",
+        "cadence": "/year",
+        "features": [
+            "Unlimited renders",
+            "Everything in Monthly",
+            "Works out at ~£4.08/month",
+            "Save about 42% vs paying monthly",
+        ],
+    },
+)
+
+
+def _pricing_tiers_html(compact: bool = False) -> str:
+    """compact=True drops the feature bullets to a single summary
+    line per tier — used in the paywall, where the full /pricing
+    layout would push the actual upgrade buttons below the fold.
+    Full bullets are for the standalone /pricing screen."""
+    cards = []
+    for tier in _PRICING_TIERS:
+        if compact:
+            body = f'<div class="sub">{", ".join(tier["features"][:2])}</div>'
+        else:
+            body = "".join(f'<div class="microcopy">&#8226; {f}</div>' for f in tier["features"])
+        cards.append(f"""
+        <div style="border:0.5px solid var(--border);border-radius:10px;
+            padding:14px 16px;flex:1;min-width:150px;">
+            <div class="tagline">{tier['name']}</div>
+            <div class="headline" style="font-size:1.4rem;">{tier['price']}
+                <span style="font-size:0.8rem;color:var(--muted);">{tier['cadence']}</span>
+            </div>
+            {body}
+        </div>
+        """)
+    return f'<div style="display:flex;gap:12px;flex-wrap:wrap;margin:0.8rem 0;">{"".join(cards)}</div>'
+
+
+def screen_landing():
+    st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-family:var(--font-mono);font-size:0.85rem;color:var(--muted);'
+        'margin-top:-0.6rem;margin-bottom:1.4rem;letter-spacing:0.02em;">'
+        'Your voice. Still yours.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="headline">AI can write well now. It just doesn\'t write like you.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub">Paste your draft. Voicova rewrites it so it sounds like you '
+        'wrote it — not like a chatbot did.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # How it works — three steps, no jargon. Cross-referenced against
+    # Noren's own landing page (closest direct competitor) — their
+    # structure is a single positioning line, a concrete before/after,
+    # a trust/ownership note, one CTA. Same shape here.
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    step_col1, step_col2, step_col3 = st.columns(3)
+    with step_col1:
+        st.markdown(
+            '<div class="microcopy"><strong>1. Paste</strong><br>'
+            'A few things you\'ve actually written. No account needed.</div>',
+            unsafe_allow_html=True,
+        )
+    with step_col2:
+        st.markdown(
+            '<div class="microcopy"><strong>2. Calibrate</strong><br>'
+            'A couple of quick, typed sentences sharpen the fingerprint.</div>',
+            unsafe_allow_html=True,
+        )
+    with step_col3:
+        st.markdown(
+            '<div class="microcopy"><strong>3. Write</strong><br>'
+            'Paste any AI draft. Get it back sounding like you.</div>',
+            unsafe_allow_html=True,
+        )
+
+    # One concrete before/after, not an abstract feature list — same
+    # reasoning as the step section above. Invented example text, not
+    # drawn from any real user's writing.
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    ex_col1, ex_col2 = st.columns(2)
+    with ex_col1:
+        st.markdown('<div class="sub">A generic AI draft</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
+            'border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;'
+            'font-size:0.85rem;color:var(--body-text);">'
+            'I wanted to reach out regarding the project timeline. I believe we should '
+            'consider adjusting our approach moving forward to ensure optimal outcomes.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    with ex_col2:
+        st.markdown('<div class="sub">Rewritten in your voice</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
+            'border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;'
+            'font-size:0.85rem;color:var(--body-text);">'
+            'Quick one on the timeline — I think we need to change tack here. Happy to '
+            'talk it through whenever works.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="microcopy">No account or signup. Your profile is tied to a device '
+        'cookie, not an email — clear your cookies and it\'s gone. No selling, no sharing, '
+        'no third-party analytics on what you write.</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("")
+    cta_col1, cta_col2 = st.columns([2, 1])
+    with cta_col1:
+        if st.button("Get started \u2192", type="primary", use_container_width=True):
+            go_to(1)
+            st.rerun()
+    with cta_col2:
+        if st.button("See pricing", use_container_width=True):
+            go_to(7)
+            st.rerun()
+
+
+def screen_pricing():
+    st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">Pricing.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub">Try it free. No card required to start.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(_pricing_tiers_html(compact=False), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="microcopy">Cancel anytime. Renders don\'t roll over month to month '
+        'on the paid tiers — they\'re unlimited while your subscription is active.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
+    if st.button("\u2190 Back", use_container_width=True):
+        go_to(0 if not st.session_state.get("baseline_fingerprint") else 4)
+        st.rerun()
+
+
 _PROGRESS_STEP_NAMES = ("Paste", "Your voice", "Calibrate", "Write")
 
 
@@ -917,6 +1094,15 @@ def screen_paste():
             "Clear your cookies and it's gone. No selling, no sharing, "
             "no third-party analytics on this data."
         )
+
+    # Pricing link (22 Aug 2026 UX audit — "needs a design decision"
+    # item): free tier is generous (15 lifetime renders) but there was
+    # previously no way to check pricing before investing the time in
+    # onboarding at all. A plain button, not a big promotional push —
+    # this screen's job is still onboarding, not selling.
+    if st.button("See pricing \u2192", key="pricing_link_screen1"):
+        go_to(7)
+        st.rerun()
 
 
 # ============================================================
@@ -2488,21 +2674,50 @@ def screen_render():
             # AQE/CLEARANCE (see stripe_subscription.py's docstring for
             # why this reuses that pattern rather than building new
             # Stripe surface for a subscription specifically).
+            #
+            # "Here's what you get" (22 Aug 2026 UX audit): previously
+            # this screen said only "Upgrade — £X" with nothing about
+            # what upgrading actually unlocks. Reuses the same
+            # _PRICING_TIERS content as the standalone /pricing screen
+            # so the two can't drift apart.
+            st.markdown(_pricing_tiers_html(compact=True), unsafe_allow_html=True)
+
             pay_col1, pay_col2 = st.columns(2)
             with pay_col1:
                 if st.button("Upgrade — £6.99/month", key="upgrade_monthly", use_container_width=True):
-                    checkout_url = create_subscription_checkout(device_id_for_ui, plan="monthly")
-                    if checkout_url:
-                        st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
-                    else:
-                        st.error("Couldn't start checkout. Please try again shortly.")
+                    st.session_state["_checkout_plan_requested"] = "monthly"
+                    st.rerun()
             with pay_col2:
                 if st.button("Upgrade — £49/year", key="upgrade_annual", use_container_width=True):
-                    checkout_url = create_subscription_checkout(device_id_for_ui, plan="annual")
-                    if checkout_url:
-                        st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
-                    else:
-                        st.error("Couldn't start checkout. Please try again shortly.")
+                    st.session_state["_checkout_plan_requested"] = "annual"
+                    st.rerun()
+
+            # One click, not two (22 Aug 2026 UX audit): previously
+            # clicking "Upgrade" only revealed a second "Continue to
+            # payment →" button that did the actual navigating, with
+            # nothing informative shown in between — so the first click
+            # was pure friction, easy to mistake for a dead click.
+            # Streamlit still needs a rerun to render the checkout URL
+            # once Stripe returns it, so the click itself can't literally
+            # navigate — but a meta-refresh auto-redirects the browser
+            # the instant that URL exists, with no second click needed.
+            # The manual link below is a fallback only, for a browser
+            # that blocks the auto-refresh, not a required second step.
+            _requested_plan = st.session_state.pop("_checkout_plan_requested", None)
+            if _requested_plan:
+                checkout_url = create_subscription_checkout(device_id_for_ui, plan=_requested_plan)
+                if checkout_url:
+                    st.markdown(
+                        f'<meta http-equiv="refresh" content="0;url={checkout_url}">',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        '<div class="microcopy">Redirecting to secure checkout...</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
+                else:
+                    st.error("Couldn't start checkout. Please try again shortly.")
         else:
             if st.button("Try again", key="retry_render"):
                 last_attempt = st.session_state.get("render_last_attempt", input_text)
@@ -2939,7 +3154,7 @@ def screen_render():
                 st.rerun()
 
         st.markdown("")
-        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
         with col1:
             if st.button("Write again", use_container_width=True):
                 st.session_state.render_input_text = ""
@@ -2978,6 +3193,21 @@ def screen_render():
                     data=export_authenticity_report_json(authenticity_report),
                     file_name="voicova-authenticity-report.json",
                     mime="application/json",
+                    use_container_width=True,
+                )
+        with col5:
+            # Human-readable export (22 Aug 2026 UX audit): the JSON
+            # exports above are developer-facing outputs; this is the
+            # "show my manager" version — clean plain text, pasteable
+            # straight into an email or Slack message, no tooling
+            # needed to read it. Same gating as "Download the record"
+            # since it's built from the same authenticity_report dict.
+            if report and st.session_state.get("render_id"):
+                st.download_button(
+                    "Download as text",
+                    data=export_authenticity_report_text(authenticity_report),
+                    file_name="voicova-authenticity-report.txt",
+                    mime="text/plain",
                     use_container_width=True,
                 )
 
@@ -3136,7 +3366,9 @@ def screen_history():
 
 screen = st.session_state.screen
 
-if screen == 1:
+if screen == 0:
+    screen_landing()
+elif screen == 1:
     screen_paste()
 elif screen == 2:
     screen_reveal()
@@ -3148,6 +3380,8 @@ elif screen == 5:
     screen_my_voice()
 elif screen == 6:
     screen_history()
+elif screen == 7:
+    screen_pricing()
 else:
     go_to(1)
     st.rerun()

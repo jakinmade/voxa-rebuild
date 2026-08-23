@@ -92,6 +92,7 @@ def _reach_screen4_with_low_stability(monkeypatch):
         )
 
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run(timeout=15)
         at.text_area[0].set_value(SAMPLE_TEXT)
         at.button[0].click()

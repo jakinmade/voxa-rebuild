@@ -58,6 +58,7 @@ def test_screen3_requires_both_contrasting_starters_via_ui():
     from the live click path, not just the harness mirror.
     """
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run(timeout=15)
 
     at.text_area[0].set_value(SAMPLE_TEXT)
@@ -109,6 +110,7 @@ def test_screen4_caveat_and_deepen_panel_resolve_low_confidence_via_ui():
     with no way to take it.
     """
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run(timeout=15)
 
     at.text_area[0].set_value(SAMPLE_TEXT)
@@ -173,6 +175,7 @@ def test_screen4_caveat_and_deepen_panel_resolve_low_confidence_via_ui():
 
 def test_paste_to_fingerprint_to_export_no_api_call():
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     assert not at.exception
 

@@ -123,6 +123,7 @@ def test_completing_onboarding_saves_a_profile_silently(fake_db):
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=no_cookie):
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at = _complete_onboarding_through_screen3(at)
 
     assert not at.exception, f"Onboarding + save raised: {at.exception}"
@@ -143,6 +144,7 @@ def test_returning_visit_with_matching_cookie_restores_straight_to_screen4(fake_
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=no_cookie):
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at = _complete_onboarding_through_screen3(at)
     saved_id, saved_row = next(iter(fake_db.items()))
 
@@ -152,6 +154,7 @@ def test_returning_visit_with_matching_cookie_restores_straight_to_screen4(fake_
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=returning_cookie):
             at2 = AppTest.from_file(_APP_PATH)
+            at2.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at2.run(timeout=15)
 
     assert not at2.exception, f"Returning-visit load raised: {at2.exception}"
@@ -169,6 +172,7 @@ def test_unrecognised_cookie_falls_back_to_fresh_onboarding(fake_db):
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=unknown_cookie):
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run(timeout=15)
 
     assert not at.exception, f"Unmatched-cookie load raised: {at.exception}"
@@ -189,6 +193,7 @@ def test_supabase_unreachable_on_load_fails_open_to_fresh_onboarding(fake_db):
     with patch("persistence.get_supabase_client", return_value=broken_client):
         with patch("persistence.CookieController", return_value=some_cookie):
             at = AppTest.from_file(_APP_PATH)
+            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
             at.run(timeout=15)
 
     assert not at.exception, f"Supabase-down load raised instead of failing open: {at.exception}"

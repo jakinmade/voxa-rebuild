@@ -78,6 +78,7 @@ def test_real_fitness_gate_fires_for_a_strong_sample():
     via the real button, not seeded state. If this fails, the fixture
     text itself needs adjusting - it's not a signal about app logic."""
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     at.text_area[0].input(STRONG_ONBOARDING_SAMPLE)
     at.button[0].click()
@@ -97,6 +98,7 @@ def test_full_onboarding_flow_via_real_clicks_no_exceptions():
     behaviour - this exact path was never exercised via real clicks
     before this test existed."""
     at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
     at.run()
     assert not at.exception
     assert _ss(at, "screen") == 1

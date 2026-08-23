@@ -138,3 +138,50 @@ def export_authenticity_report_json(report: dict) -> str:
     just a hash blob, so anyone receiving this (a client, an editor,
     a platform) can read the actual scores without tooling."""
     return json.dumps(report, indent=2, sort_keys=True, default=str)
+
+
+def export_authenticity_report_text(report: dict) -> str:
+    """Formatted plain-text version, alongside the JSON export (22 Aug
+    2026 UX audit): the JSON exports are developer-facing — accurate,
+    but not something a manager, client, or editor wants to open cold.
+    Plain text over PDF deliberately, per the same audit's design
+    decision — the actual use case ("show someone this render is
+    genuine") is served by clean text pasteable into an email or Slack
+    message; PDF generation would add a new dependency and layout work
+    for marginal benefit over that. Field labels and order mirror the
+    JSON export's _VOICE_REPORT_FIELDS plus the integrity fields, so
+    the two exports never disagree about what they're reporting.
+    """
+    lines = [
+        "VOICOVA — Authenticity Report",
+        "=" * 32,
+        "",
+        f"Render ID:              {report.get('render_id', 'n/a')}",
+        f"Created:                {report.get('created_at', 'n/a')}",
+        "",
+        f"Voice match:            {report.get('voice_match_tier', 'n/a')}",
+        f"Semantic match:         {report.get('semantic_match', 'n/a')}",
+        f"Confidence:             {report.get('confidence', 'n/a')}",
+        f"Risk:                   {report.get('risk', 'n/a')}",
+        f"AI-tell check:          {'Clean' if report.get('ai_tell_clean') else 'Flagged'}",
+        "",
+    ]
+    biggest_changes = report.get("biggest_changes") or []
+    if biggest_changes:
+        lines.append("What changed:")
+        for change in biggest_changes:
+            lines.append(f"  - {change}")
+        lines.append("")
+    lines.extend([
+        f"Scoring rules version:  {report.get('scoring_rules_version', 'n/a')}",
+        f"Baseline hash:          {report.get('baseline_hash', 'n/a')}",
+        f"Integrity hash:         {report.get('integrity_hash', 'n/a')}",
+        "",
+        "This report compares the render against this person's own",
+        "writing baseline, built before any AI touched the text — not",
+        "a bare AI-detection score. The integrity hash confirms this",
+        "exact report hasn't been edited since VOICOVA issued it; it",
+        "does not independently prove the report came from VOICOVA",
+        "(that needs server-side signing, out of scope for this report).",
+    ])
+    return "\n".join(lines)

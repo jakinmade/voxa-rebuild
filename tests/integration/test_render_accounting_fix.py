@@ -86,6 +86,7 @@ def test_refinement_does_not_reserve_a_second_lifetime_render():
         mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
 
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
@@ -147,6 +148,7 @@ def test_refinement_failure_does_not_release_a_reservation_it_never_made():
         mock_client.messages.create.side_effect = _create_side_effect
 
         at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
         _seed_screen4(at)
         at.run()
