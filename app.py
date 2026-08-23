@@ -1209,15 +1209,13 @@ def screen_reveal():
             f'<div class="voice-check-evidence">e.g. "{quote_match.group(1)}"</div>'
             if quote_match else ""
         )
-        st.markdown(f"""
-        <div class="voice-check" style="animation-delay: {i * 0.12}s;">
-            <div class="voice-check-mark">\u2713</div>
-            <div>
-                <div class="voice-check-text">{obs['headline']}</div>
-                {evidence_html}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="voice-check" style="animation-delay: {i * 0.12}s;">'
+            f'<div class="voice-check-mark">\u2713</div>'
+            f'<div><div class="voice-check-text">{obs["headline"]}</div>'
+            f'{evidence_html}</div></div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     # Un-collapsed by default so this doesn't get missed the way a
@@ -3030,28 +3028,50 @@ def screen_render():
             # <script> from that element between runs; embedding the
             # value directly is more robust than depending on DOM
             # lookup timing.
-            import json as _json
             _copy_btn_id = f"copybtn_{output_key}"
-            st.markdown(f"""
-            <button id="{_copy_btn_id}" onclick="
-                navigator.clipboard.writeText({_json.dumps(output)});
-                var b = document.getElementById('{_copy_btn_id}');
-                var original = b.dataset.label;
-                b.innerText = 'Copied';
-                setTimeout(function() {{ b.innerText = original; }}, 1500);
-            " data-label="Copy text" style="
-                font-family: var(--font-sans);
-                font-size: 0.85rem;
-                font-weight: 500;
-                color: var(--accent);
-                background: var(--accent-soft);
-                border: 1px solid var(--border);
-                border-radius: 8px;
-                padding: 0.4rem 0.9rem;
-                cursor: pointer;
-                margin-bottom: 0.6rem;
-            ">Copy text</button>
-            """, unsafe_allow_html=True)
+            _copy_source_id = f"copysrc_{output_key}"
+            # Zero-indent, single-line HTML deliberately (23 Aug 2026
+            # bug fix): a multi-line f-string here, indented to match
+            # the surrounding Python code, gets treated as an indented
+            # code block by Streamlit's markdown parser and rendered
+            # as literal visible text instead of an actual button —
+            # confirmed live, this exact block was the reported bug.
+            #
+            # Second, independent bug fixed at the same time: the
+            # previous version embedded json.dumps(output) (a
+            # double-quoted JSON string) directly inside a
+            # double-quoted onclick="..." attribute. Any quote
+            # character in the actual rendered text (apostrophes like
+            # "it's", "doesn't" are near-certain in real output) broke
+            # the attribute early and corrupted the whole element,
+            # regardless of the indentation issue. Fixed properly, not
+            # by picking a different quote character (json.dumps only
+            # guarantees escaping ", not ', so single-quoting the
+            # attribute would just move the same collision to the
+            # first apostrophe instead): the text is written into a
+            # hidden textarea via html.escape (escapes both " and '
+            # for safe attribute/content embedding), and the button's
+            # JS reads it back via .value, which the browser correctly
+            # decodes from HTML entities to the original text. This is
+            # the standard safe pattern for embedding arbitrary text
+            # for JS to consume, not a one-off escaping hack.
+            import html as _html
+            st.markdown(
+                f'<textarea id="{_copy_source_id}" style="display:none">'
+                f'{_html.escape(output)}</textarea>'
+                f'<button id="{_copy_btn_id}" data-label="Copy text" '
+                f'onclick="navigator.clipboard.writeText('
+                f'document.getElementById(\'{_copy_source_id}\').value);'
+                f'var b=document.getElementById(\'{_copy_btn_id}\');'
+                f'var o=b.dataset.label;b.innerText=\'Copied\';'
+                f'setTimeout(function(){{b.innerText=o;}},1500);" '
+                f'style="font-family: var(--font-sans); font-size: 0.85rem; '
+                f'font-weight: 500; color: var(--accent); '
+                f'background: var(--accent-soft); border: 1px solid var(--border); '
+                f'border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer; '
+                f'margin-bottom: 0.6rem;">Copy text</button>',
+                unsafe_allow_html=True,
+            )
 
             # Opt-in firm signal — offered once per session, only after
             # an actually-gated (Medium/High) render was confirmed.
@@ -3160,16 +3180,14 @@ def screen_render():
         if show_output and st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
             receipt = generate_receipt(st.session_state.session_start, st.session_state.word_count)
-            st.markdown(f"""
-            <div class="receipt">
-                <div class="receipt-title">Your render record</div>
-                <div>{receipt['summary']}</div>
-                <br>
-                <div><strong>Session started:</strong> {receipt['session_started']}</div>
-                <div><strong>Words analysed:</strong> {receipt['words_analysed']}</div>
-                <div><strong>Rendered:</strong> {receipt['rendered_at']}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="receipt"><div class="receipt-title">Your render record</div>'
+                f'<div>{receipt["summary"]}</div><br>'
+                f'<div><strong>Session started:</strong> {receipt["session_started"]}</div>'
+                f'<div><strong>Words analysed:</strong> {receipt["words_analysed"]}</div>'
+                f'<div><strong>Rendered:</strong> {receipt["rendered_at"]}</div></div>',
+                unsafe_allow_html=True,
+            )
 
         # Sample 3 — one refinement, per the v4 spec. Combo: tags + free text.
         # Gated on show_output too — refining text the person hasn't been
@@ -3329,15 +3347,13 @@ def screen_my_voice():
             f'<div class="voice-check-evidence">e.g. "{quote_match.group(1)}"</div>'
             if quote_match else ""
         )
-        st.markdown(f"""
-        <div class="voice-check">
-            <div class="voice-check-mark">\u2713</div>
-            <div>
-                <div class="voice-check-text">{obs['headline']}</div>
-                {evidence_html}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="voice-check">'
+            f'<div class="voice-check-mark">\u2713</div>'
+            f'<div><div class="voice-check-text">{obs["headline"]}</div>'
+            f'{evidence_html}</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 def screen_history():
