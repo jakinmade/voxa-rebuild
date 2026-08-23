@@ -153,7 +153,7 @@ def export_authenticity_report_text(report: dict) -> str:
     the two exports never disagree about what they're reporting.
     """
     lines = [
-        "VOICOVA — Authenticity Report",
+        "VOICOVA: Authenticity Report",
         "=" * 32,
         "",
         f"Render ID:              {report.get('render_id', 'n/a')}",
@@ -178,7 +178,7 @@ def export_authenticity_report_text(report: dict) -> str:
         f"Integrity hash:         {report.get('integrity_hash', 'n/a')}",
         "",
         "This report compares the render against this person's own",
-        "writing baseline, built before any AI touched the text — not",
+        "writing baseline, built before any AI touched the text. Not",
         "a bare AI-detection score. The integrity hash confirms this",
         "exact report hasn't been edited since VOICOVA issued it; it",
         "does not independently prove the report came from VOICOVA",

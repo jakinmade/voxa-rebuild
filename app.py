@@ -799,7 +799,7 @@ def screen_landing():
     st.markdown('<div class="headline">AI can write well now. It just doesn\'t write like you.</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="sub">Paste your draft. Voicova rewrites it so it sounds like you '
-        'wrote it — not like a chatbot did.</div>',
+        'wrote it, not like a chatbot did.</div>',
         unsafe_allow_html=True,
     )
 
@@ -850,7 +850,7 @@ def screen_landing():
             '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
             'border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;'
             'font-size:0.85rem;color:var(--body-text);">'
-            'Quick one on the timeline — I think we need to change tack here. Happy to '
+            'Quick one on the timeline. I think we need to change tack here. Happy to '
             'talk it through whenever works.'
             '</div>',
             unsafe_allow_html=True,
@@ -859,7 +859,7 @@ def screen_landing():
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     st.markdown(
         '<div class="microcopy">No account or signup. Your profile is tied to a device '
-        'cookie, not an email — clear your cookies and it\'s gone. No selling, no sharing, '
+        'cookie, not an email. Clear your cookies and it\'s gone. No selling, no sharing, '
         'no third-party analytics on what you write.</div>',
         unsafe_allow_html=True,
     )
@@ -886,7 +886,7 @@ def screen_pricing():
     st.markdown(_pricing_tiers_html(compact=False), unsafe_allow_html=True)
     st.markdown(
         '<div class="microcopy">Cancel anytime. Renders don\'t roll over month to month '
-        'on the paid tiers — they\'re unlimited while your subscription is active.</div>',
+        'on the paid tiers. They\'re unlimited while your subscription is active.</div>',
         unsafe_allow_html=True,
     )
     st.markdown("")
@@ -1187,14 +1187,14 @@ def screen_paste():
     )
     with st.expander("What we store, and why"):
         st.markdown(
-            "- **Your writing sample and voice fingerprint** — so VOICOVA "
+            "- **Your writing sample and voice fingerprint**: so VOICOVA "
             "recognises your voice next time, without you re-onboarding.\n"
-            "- **A summary of your voice profile** — used to write in your "
+            "- **A summary of your voice profile**: used to write in your "
             "voice on future renders.\n"
-            "- **Your render history** (last 50) — so you can revisit past "
+            "- **Your render history** (last 50): so you can revisit past "
             "renders.\n\n"
-            "This is tied to a device cookie, not an account or email — "
-            "we don't know who you are unless you choose to subscribe. "
+            "This is tied to a device cookie, not an account or email. "
+            "We don't know who you are unless you choose to subscribe. "
             "Clear your cookies and it's gone. No selling, no sharing, "
             "no third-party analytics on this data."
         )
@@ -1366,11 +1366,11 @@ def screen_sample2():
 
     st.markdown('<div class="headline">Two more samples.</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="sub">Finish both starters, typed live. Deliberately different situations - '
-        'that contrast is what lets us tell your real voice apart from just this one scenario. '
-        'Don\'t think it through, don\'t edit - first version only. '
-        '<strong>Paste is switched off on these two fields on purpose</strong> — '
-        'typing live is what makes the sample real.</div>',
+        '<div class="sub">Finish both starters, typed live. Deliberately different situations. '
+        'That contrast is what lets us tell your real voice apart from just this one scenario. '
+        'Don\'t think it through, don\'t edit. First version only. '
+        '<strong>Paste is switched off on these two fields on purpose.</strong> '
+        'Typing live is what makes the sample real.</div>',
         unsafe_allow_html=True
     )
 
@@ -2405,7 +2405,7 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
     if dropped:
         reasons.append(f"Facts dropped: {', '.join(dropped)}")
     if swaps:
-        reasons.append("Attribution may have changed — check before sending.")
+        reasons.append("Attribution may have changed. Check before sending.")
     if sentence_growth:
         reasons.append(_sentence_growth_label(sentence_growth))
     if new_hedges:
@@ -2476,7 +2476,7 @@ def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
         (not dropped, "Facts preserved",
          f"{len(dropped)} dropped: {', '.join(dropped)}" if dropped else None),
         (not swaps, "Attribution preserved",
-         "Whose point this was may have changed — check before sending." if swaps else None),
+         "Whose point this was may have changed. Check before sending." if swaps else None),
         (sentence_growth == 0, "No sentences invented",
          _sentence_growth_label(sentence_growth) if sentence_growth else None),
         (not new_hedges, "No new hedging introduced",
@@ -2487,7 +2487,7 @@ def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
     for passed, label, detail in checks:
         state = "pass" if passed else "fail"
         mark = "\u2713" if passed else "\u2717"
-        detail_html = f" — {detail}" if detail else ""
+        detail_html = f": {detail}" if detail else ""
         rows.append(
             f'<div class="content-lock-item {state}">'
             f'<span class="content-lock-mark">{mark}</span>'
@@ -2822,11 +2822,11 @@ def screen_render():
 
             pay_col1, pay_col2 = st.columns(2)
             with pay_col1:
-                if st.button("Upgrade — £6.99/month", key="upgrade_monthly", use_container_width=True):
+                if st.button("Upgrade: £6.99/month", key="upgrade_monthly", use_container_width=True):
                     st.session_state["_checkout_plan_requested"] = "monthly"
                     st.rerun()
             with pay_col2:
-                if st.button("Upgrade — £49/year", key="upgrade_annual", use_container_width=True):
+                if st.button("Upgrade: £49/year", key="upgrade_annual", use_container_width=True):
                     st.session_state["_checkout_plan_requested"] = "annual"
                     st.rerun()
 
@@ -2870,7 +2870,7 @@ def screen_render():
                 st.rerun()
 
     if st.session_state.get("subscription_just_confirmed"):
-        st.success("You're subscribed. Thanks for backing VOICOVA — write away.")
+        st.success("You're subscribed. Thanks for backing VOICOVA. Write away.")
         st.session_state.subscription_just_confirmed = False
     if st.session_state.get("subscription_confirm_failed"):
         st.error(
@@ -3399,7 +3399,7 @@ def screen_my_voice():
         )
     else:
         st.markdown(
-            '<div class="sub">Not established yet — write a few renders to build confidence.</div>',
+            '<div class="sub">Not established yet. Write a few renders to build confidence.</div>',
             unsafe_allow_html=True,
         )
 
