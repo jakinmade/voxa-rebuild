@@ -408,6 +408,49 @@ st.markdown("""
     .badge-green { background: var(--success-soft); color: var(--success); }
     .badge-amber { background: var(--warning-soft); color: var(--warning); }
     .badge-red   { background: var(--danger-soft);  color: var(--danger); }
+    .badge-icon {
+        display: inline-flex;
+        margin-right: 0.05rem;
+    }
+
+    /* ---------------------------------------------------------------
+       Confidence signal-bars (23 Aug 2026, evidence-based redesign —
+       cross-referenced against NN/g's error-message guidelines
+       ("design errors by impact" — differentiate a barrier from a
+       good-to-know signal), IBM Carbon's status-indicator pattern
+       and WCAG 1.4.1 (never rely on color alone), and UX Movement's
+       status-badge guidance (badges that don't require action
+       shouldn't compete visually with ones that do). Confidence never
+       gates a render — only Risk (via requires_review) and Content
+       Lock do — so it deliberately never uses the same red/amber/
+       green alert-pill language as Risk. A neutral filled-bar meter
+       (the same visual grammar as a phone signal-strength icon)
+       reads as "how much data," not "something's wrong," and stays
+       legible without relying on color at all.
+       --------------------------------------------------------------- */
+    .signal-bars {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--ink);
+    }
+    .signal-bars-marks {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 2px;
+    }
+    .signal-bar {
+        display: inline-block;
+        width: 4px;
+        border-radius: 1px;
+        background: var(--border);
+    }
+    .signal-bar.filled {
+        background: var(--ink);
+    }
     .what-changed-row {
         display: flex;
         flex-wrap: wrap;
@@ -2289,6 +2332,40 @@ def _sentence_growth_label(count: int) -> str:
     return f"Added {count} new {noun} not in the original"
 
 
+def _confidence_signal_html(tier: str) -> str:
+    """Neutral signal-strength meter for the Confidence badge (23 Aug
+    2026 evidence-based redesign — see the .signal-bars CSS comment
+    for the sourcing). Three bars, filled left-to-right by tier, in
+    plain ink — never red/amber/green, since Confidence never gates a
+    render and shouldn't visually read as an alert the way Risk does.
+    """
+    fill_count = {"Low": 1, "Medium": 2, "High": 3}.get(tier, 1)
+    bar_heights = (7, 11, 15)
+    bars = "".join(
+        f'<span class="signal-bar{" filled" if i < fill_count else ""}" '
+        f'style="height:{bar_heights[i]}px;"></span>'
+        for i in range(3)
+    )
+    return (
+        f'<span class="signal-bars">'
+        f'<span class="signal-bars-marks">{bars}</span>{tier}</span>'
+    )
+
+
+_RISK_ICON = {
+    "Low": "",
+    "Medium": '<svg class="badge-icon" width="11" height="11" viewBox="0 0 16 16" '
+              'xmlns="http://www.w3.org/2000/svg"><path d="M8 1l7 13H1L8 1z" '
+              'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>'
+              '<circle cx="8" cy="11.3" r="0.9" fill="currentColor"/></svg>',
+    "High": '<svg class="badge-icon" width="11" height="11" viewBox="0 0 16 16" '
+            'xmlns="http://www.w3.org/2000/svg"><path d="M8 1l7 13H1L8 1z" '
+            'fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>'
+            '<rect x="7.3" y="5.5" width="1.4" height="4" fill="var(--canvas)"/>'
+            '<circle cx="8" cy="11.3" r="0.9" fill="var(--canvas)"/></svg>',
+}
+
+
 def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) -> str:
     """
     Leading summary state for Content Lock — 'CONTENT SAFE' or 'NEEDS
@@ -2826,12 +2903,14 @@ def screen_render():
 
         if report:
             badge_class = {"Low": "badge-green", "Medium": "badge-amber", "High": "badge-red"}
-            conf_badge_class = {"High": "badge-green", "Medium": "badge-amber", "Low": "badge-red"}
             ai_tell_html = (
                 '<span class="badge badge-green">Clean</span>'
                 if report.get("ai_tell_clean", True)
                 else f'<span class="badge badge-red">Flagged</span>: {"; ".join(report.get("ai_tell_flags", []))}'
             )
+            risk_tier = report.get("risk", "Low")
+            risk_icon = _RISK_ICON.get(risk_tier, "")
+            confidence_html = _confidence_signal_html(report.get("confidence", "Low"))
             vm_badge = report.get('voice_match_badge', 'badge-amber')
             vm_tier = report.get('voice_match_tier', 'Unrated')
             vm_evidence = report.get('voice_match_evidence', '')
@@ -2856,11 +2935,11 @@ def screen_render():
                     </div>
                     <div class="vr-stat">
                         <div class="vr-stat-label" title="{_metric_gloss['confidence']}">Confidence</div>
-                        <span class="badge {conf_badge_class.get(report['confidence'], 'badge-amber')}">{report['confidence']}</span>
+                        {confidence_html}
                     </div>
                     <div class="vr-stat">
                         <div class="vr-stat-label" title="{_metric_gloss['risk']}">Risk</div>
-                        <span class="badge {badge_class.get(report['risk'], 'badge-amber')}">{report['risk']}</span>
+                        <span class="badge {badge_class.get(report['risk'], 'badge-amber')}">{risk_icon}{report['risk']}</span>
                     </div>
                     <div class="vr-stat">
                         <div class="vr-stat-label" title="{_metric_gloss['ai_tell']}">AI-tell check</div>
