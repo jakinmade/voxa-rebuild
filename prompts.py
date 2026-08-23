@@ -418,7 +418,7 @@ def _build_system_prompt(
     a render with none (generation failed, or hasn't happened yet for
     this baseline) proceeds exactly as it did before this existed.
 
-    platform_format: added 19 Aug 2026, "social" | "email" | None. Only
+    platform_format: "social" | "email" | None. Only
     affects rule 10 below (opening-salutation preservation) — carves
     out the one case where dropping the addressee's name at generation
     time, not just at the correction-pass stage, is correct: a public
@@ -636,10 +636,10 @@ def _apply_uk_english(text: str) -> str:
     replacements = [
         # AI-default vocabulary
         #
-        # "surfaces" -> "brings up" removed 21 Aug 2026. Root cause of
+        # "surfaces" -> "brings up" removed. Root cause of
         # the recurring live "It brings up when someone finally asks"
         # grammar break (documented in voice_engine.py's
-        # LEXICAL_FIDELITY_WATCHLIST, added 19 Aug after the same
+        # LEXICAL_FIDELITY_WATCHLIST after the same
         # incident): this was the actual source of the bad swap, not
         # just a gap in the grammar-fix pass. "Surfaces" used
         # intransitively ("it surfaces when...") has no object;
@@ -947,9 +947,9 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     available. Without it, the claude_constructions and analytical_
     constructions replace-lists below fire unconditionally — including
     on phrases that are the person's own genuine wording, not an AI
-    tell. Confirmed as a real bug (19 Aug 2026): score_ai_tells already
-    exempts phrases appearing verbatim in original_input_text (added 18
-    Aug 2026 for exactly this reason — "I suspect", "I would push
+    tell. Confirmed as a real bug: score_ai_tells already
+    exempts phrases appearing verbatim in original_input_text (added
+    for exactly this reason — "I suspect", "I would push
     back", "curious whether" all appeared verbatim in a real person's
     input and were still getting flagged), but this function — the one
     that actually performs the replacement, not just the flagging —
@@ -1068,7 +1068,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     # copies, not one accidentally forked twice. Root doesn't depend on
     # packages/ at all — converting the live deployment to install
     # packages/ is a separate, higher-risk decision, explicitly scoped
-    # out during the August 2026 guardrail-consolidation fix (see that
+    # out during the guardrail-consolidation fix (see that
     # module's docstring for the full "Option A vs Option B" note). If
     # you fix a bug here, mirror it in voxa_core.text_guardrail, or the
     # gap this consolidation closed reopens on the API side.
@@ -1125,7 +1125,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
         (r'\bUnlock the potential\b', 'Make the most'),
         (r'\bUnparalleled\b', 'Rare'),
         (r'\bParamount\b', 'Vital'),
-        # Added 20 Aug 2026 — researched addition, see the matching
+        # Researched addition, see the matching
         # comment on _AI_TELL_PHRASES in voice_engine.py for the
         # rationale on why this list stops here and doesn't include
         # generic professional vocabulary (harness, streamline, etc.).
@@ -1150,7 +1150,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
         doesn't pass it — identical behaviour to plain re.sub before
         this existed.
 
-        CASE-MATCHING, fixed 20 Aug 2026: every replacement string in
+        CASE-MATCHING: every replacement string in
         claude_constructions/analytical_constructions is written
         capitalised (e.g. 'Use', 'Strong', 'Note that'), because most
         entries were only ever hand-tested sentence-initial. The match
@@ -1199,8 +1199,8 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
             (r'\bdrifting\b', 'changing'),
             (r'\blands? on\b', 'settles on'),
             (r'\blanded on\b', 'settled on'),
-            # NOT ADDING a "surface" replacement here — corrected 20 Aug
-            # 2026. Initially misread as a gap; the test suite already
+            # NOT ADDING a "surface" replacement here.
+            # Initially misread as a gap; the test suite already
             # documents this is DELIBERATE (test_ai_tell_register.py,
             # TestRegexSweepFixesAnalyticalTells): "surface(s)" has no
             # reliable noun/verb split via regex — same problem class as
@@ -1328,7 +1328,7 @@ def _grammar_fix_pass(text: str, client) -> str:
     Brief: find and fix grammar errors. Do not rewrite. Do not change voice.
     Returns corrected text. If no errors found, returns original text unchanged.
 
-    Expanded 19 Aug 2026 (JA: "grammarly is flagging some grammar issues,
+    Expanded ("grammarly is flagging some grammar issues,
     that cannot happen, that is a credibility killer") from 6 fixable
     categories to 12 named categories plus a catch-all. Root cause: the
     original 6-item whitelist meant any error outside those categories
@@ -1523,8 +1523,8 @@ def merge_starter_evidence(blended_delta: dict, starter_delta: dict | None) -> d
 # return the corrected text in a single required field rather than free
 # text, so there is no room for it to narrate its own reasoning
 # ("I notice this doesn't need changes...") alongside or instead of the
-# actual correction — the failure mode that reached a live render on
-# 18 Aug 2026. Tool-choice forcing is stable Anthropic functionality,
+# actual correction — the failure mode that reached a live render.
+# Tool-choice forcing is stable Anthropic functionality,
 # not a beta feature, so this is the lower-risk of the two structured-
 # output paths available.
 CORRECTION_TOOL = {
@@ -1544,7 +1544,7 @@ CORRECTION_TOOL = {
 
 # Safety net under the schema fix, not a replacement for it — catches
 # whatever a future model or edge case still slips past the forced
-# tool call. Phrases drawn from the actual leak seen in the 18 Aug 2026
+# tool call. Phrases drawn from the actual leak seen in a real
 # incident (see the Scott/CLEARANCE render). Deliberately narrow and
 # first-person-reasoning-specific so it doesn't false-positive on
 # legitimate first-person voice in the user's own text.
@@ -1606,8 +1606,8 @@ def build_correction_prompt(
 
     mode: "preserve" (default) is the original, unchanged behaviour —
     this function returns None whenever correction_instructions ends up
-    empty, exactly as before. "elevate" is new (18 Aug 2026 groundwork):
-    it adds line-editing instructions — old-to-new sentence ordering
+    empty, exactly as before. "elevate" is new: it adds line-editing
+    instructions — old-to-new sentence ordering
     (Williams, "Style: Toward Clarity and Grace") — grounded in
     established editorial craft, not invented case-by-case. These are
     appended unconditionally when mode == "elevate", so a correction
@@ -1641,11 +1641,11 @@ def build_correction_prompt(
     deliberately: each needs its own tailored, tested instruction, not
     a generic one stretched to cover cases that weren't actually
     checked. "social" generalises what was originally built LinkedIn-
-    specific (18 Aug 2026) — the actual convention (short paragraphs,
+    specific — the actual convention (short paragraphs,
     blank-line breaks, hook-first opening) isn't unique to LinkedIn at
     all, it's shared by X/Twitter and Threads too, so the instruction
     itself didn't need to change, only its scope and label. "email"
-    is a genuinely different convention added the same session,
+    is a genuinely different convention added later,
     deliberately NOT sharing the "hook-first" instruction — an email
     wants a clear greeting and sign-off kept in their conventional
     place, not restructured to lead with the strongest line the way a
@@ -1671,7 +1671,7 @@ def build_correction_prompt(
     standard, not to match the writer's own baseline (that's what
     preserve mode and the voice-dimension deltas above already do).
     Grade level > 12 (college level, per the readability literature's
-    own convention — see 18 Aug 2026 research into Flesch-Kincaid and
+    own convention — see research into Flesch-Kincaid and
     its arXiv:2502.11150 caveat) triggers an economy instruction.
     Passive-sentence ratio > 0.3 triggers an active-voice instruction.
     Both thresholds are deliberately conservative — only firing on
@@ -1741,7 +1741,7 @@ def build_correction_prompt(
     # New in v4 — semantic correction targets, parallel to voice correction
     dropped = (semantic or {}).get("dropped_entities", [])
     if dropped:
-        # 19 Aug 2026: no platform_format branching needed here — when
+        # No platform_format branching needed here — when
         # platform_format == "social", score_semantic_drift itself
         # already excludes the opening-salutation name from
         # dropped_entities before this function ever sees it (see its
@@ -1780,8 +1780,8 @@ def build_correction_prompt(
     # deliberately narrow: sentence-level economy and ordering, never
     # restructuring content, argument, or paragraph order. "Preserve
     # what makes you sound like you, then help you sound like the best
-    # version of you" (the established line-editing distinction, see
-    # 18 Aug 2026 research) — voice and word choice are the writer's;
+    # version of you" (the established line-editing distinction) —
+    # voice and word choice are the writer's;
     # only sentence-level packaging is in scope here.
     if mode == "elevate":
         old_to_new_exception = (
@@ -1851,11 +1851,11 @@ def build_correction_prompt(
         # stretched to cover both:
         #  - "social" (LinkedIn/X/Threads): short paragraphs, blank-
         #    line breaks, promote the strongest line to a hook-first
-        #    opening. This is the original 18 Aug 2026 instruction,
+        #    opening. This is the original instruction,
         #    unchanged — the convention was never LinkedIn-specific,
         #    only its label was.
-        #  - "email": a genuinely different convention added the same
-        #    session. Deliberately does NOT get the hook-first
+        #  - "email": a genuinely different convention added
+        #    later. Deliberately does NOT get the hook-first
         #    instruction — restructuring an email to lead with its
         #    strongest line, the way a social post should, would be
         #    wrong; a greeting belongs at the top and a sign-off at
