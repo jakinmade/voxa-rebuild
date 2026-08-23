@@ -68,6 +68,7 @@ from deterministic_fixers import (
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id
 from stripe_subscription import create_subscription_checkout, verify_and_record_subscription
+from lifetime_cap import get_lifetime_render_count, device_has_active_subscription
 
 log = get_logger(__name__)
 
@@ -86,7 +87,10 @@ st.set_page_config(
     page_title="Voicova - Communication Identity",
     page_icon="\U0001F535",
     layout="centered",
-    initial_sidebar_state="expanded" if st.session_state.get("_returning_user_sidebar") else "collapsed",
+    initial_sidebar_state="expanded" if (
+        st.session_state.get("_returning_user_sidebar")
+        or st.session_state.get("_sidebar_unlocked")
+    ) else "collapsed",
 )
 
 # ---- Styles ----
@@ -812,6 +816,22 @@ def screen_paste():
         label_visibility="collapsed",
     )
 
+    # Live orientation cue (22 Aug 2026 UX audit): the actual gate below
+    # is quality-scored, not a hard word count (see _fitness_gate /
+    # _score_sample_fitness in voice_engine.py), so a literal progress
+    # bar against a fixed number would overclaim precision that isn't
+    # there. This gives a live word count plus the honest range instead
+    # of leaving someone to guess after two rejected pastes, which is
+    # what the friction audit actually found.
+    _live_word_count = len(text.split()) if text and text.strip() else 0
+    st.markdown(
+        f'<div class="microcopy" style="margin-top:-0.6rem;">'
+        f'{_live_word_count} words so far &middot; most fingerprints need '
+        f'roughly 100&ndash;250 words of real writing, more specific and '
+        f'personal than formal.</div>',
+        unsafe_allow_html=True,
+    )
+
     col1, col2 = st.columns([3, 1])
     with col1:
         if st.button("Show me my fingerprint \u2192", type="primary", use_container_width=True):
@@ -1152,6 +1172,20 @@ def screen_sample2():
                         st.session_state.get("baseline_fingerprint"), m
                     )
                 save_profile_if_available()
+                # Un-collapse the sidebar for first-time completers too
+                # (22 Aug 2026 UX audit): "My Voice" and "Past renders"
+                # are real, built features, but previously only ever
+                # became visible via _returning_user_sidebar, a flag
+                # set solely by restore_profile_if_available() for an
+                # actually-returning visitor. A first-time completer
+                # who just finished onboarding had no cue these existed
+                # at all. Deliberately a separate flag from
+                # _returning_user_sidebar rather than reusing it — that
+                # one also drives the "Write as me" vs "Paste the text
+                # to restore" copy and whether the Step 4 progress dots
+                # show, none of which should change just because the
+                # sidebar unlocks.
+                st.session_state["_sidebar_unlocked"] = True
                 go_to(4)
                 st.rerun()
 
@@ -2282,7 +2316,10 @@ def screen_render():
     device_id_for_ui = st.session_state.get("_device_id") or get_or_create_device_id()
     st.session_state["_device_id"] = device_id_for_ui
 
-    if st.session_state.get("baseline_fingerprint"):
+    if st.session_state.get("baseline_fingerprint") and (
+        st.session_state.get("_returning_user_sidebar")
+        or st.session_state.get("_sidebar_unlocked")
+    ):
         with st.sidebar:
             _updated_raw = st.session_state.get("_voice_profile_updated_at")
             if _updated_raw:
@@ -2306,6 +2343,23 @@ def screen_render():
     else:
         st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
+
+    # Persistent free-render counter (22 Aug 2026 UX audit): previously
+    # nothing on any onboarding or write screen mentioned the 15-
+    # lifetime-render cap at all — someone could paste real writing,
+    # do the live-typed calibration, and only discover a meter existed
+    # once it hit zero. get_lifetime_render_count() is read-only (does
+    # not itself consume a render), same fail-open design as the rest
+    # of lifetime_cap.py. Skipped entirely for an active subscriber —
+    # the cap doesn't apply to them, so showing it would just confuse.
+    if not device_has_active_subscription(device_id_for_ui):
+        _used, _limit = get_lifetime_render_count(device_id_for_ui)
+        _remaining = max(_limit - _used, 0)
+        st.markdown(
+            f'<div class="microcopy" style="margin-bottom:0.6rem;">'
+            f'{_remaining} of {_limit} free renders left this lifetime.</div>',
+            unsafe_allow_html=True,
+        )
 
     # Optional, skippable, per-render — not onboarding. Register/audience
     # is a genuinely separate axis from personal voice (the field's own
@@ -2544,6 +2598,25 @@ def screen_render():
             </div>
             """, unsafe_allow_html=True)
 
+            # Explicit, always-visible explainer for Confidence vs Risk
+            # (22 Aug 2026 UX audit): these two badges can land as
+            # "Confidence: Low" + "Risk: High", directly under a green
+            # "Content safe" banner, and previously the only
+            # explanation was a hover title="" tooltip on each label —
+            # invisible on touch devices, and easy to miss even on
+            # desktop. Confidence and Risk measure genuinely different
+            # things (sample size vs meaning drift), and first reaction
+            # to seeing both look bad at once is alarm, not clarity.
+            # One persistent line, not another hover target, fixes that.
+            st.markdown(
+                '<div class="microcopy" style="margin-top:-0.4rem;margin-bottom:0.6rem;">'
+                'Confidence reflects how much of your writing we\'ve seen so far, '
+                'not whether anything\'s wrong. Risk reflects how much this render '
+                'may have drifted from what you meant. They can move independently.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
             # AI-Slop Firewall — outside the raw-HTML block above,
             # since it needs a real st.button (Streamlit widgets can't
             # live inside an unsafe_allow_html string). ai_tell_phrases
@@ -2668,6 +2741,40 @@ def screen_render():
                 '<div class="microcopy">Written as you. Not for you.</div>',
                 unsafe_allow_html=True
             )
+
+            # Copy-to-clipboard (22 Aug 2026 UX audit): after all of
+            # onboarding, the finished text previously sat in a plain
+            # textarea with no one-click way to copy it — Write again /
+            # Start over / Export / Download, but nothing that actually
+            # gets the rewritten text onto the clipboard, for a tool
+            # whose entire output is text meant to go elsewhere. The
+            # text is embedded via json.dumps rather than read from the
+            # text_area's DOM node, since Streamlit's own key-based
+            # re-render can detach a plain <script> from that element
+            # between runs; embedding the value directly is more
+            # robust than depending on DOM lookup timing.
+            import json as _json
+            _copy_btn_id = f"copybtn_{output_key}"
+            st.markdown(f"""
+            <button id="{_copy_btn_id}" onclick="
+                navigator.clipboard.writeText({_json.dumps(output)});
+                var b = document.getElementById('{_copy_btn_id}');
+                var original = b.dataset.label;
+                b.innerText = 'Copied';
+                setTimeout(function() {{ b.innerText = original; }}, 1500);
+            " data-label="Copy text" style="
+                font-family: var(--font-sans);
+                font-size: 0.85rem;
+                font-weight: 500;
+                color: var(--accent);
+                background: var(--accent-soft);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 0.4rem 0.9rem;
+                cursor: pointer;
+                margin-bottom: 0.6rem;
+            ">Copy text</button>
+            """, unsafe_allow_html=True)
 
             # Opt-in firm signal — offered once per session, only after
             # an actually-gated (Medium/High) render was confirmed.

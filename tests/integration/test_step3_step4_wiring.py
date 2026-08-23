@@ -63,6 +63,12 @@ def _seed_screen4(at: AppTest):
     at.session_state["fingerprint_sample_texts"] = [BASELINE_SAMPLE_1, BASELINE_SAMPLE_2]
     at.session_state["sample2_completions"] = ["", "", "", ""]
     at.session_state["_device_id"] = "test-device-1"
+    # Real onboarding sets this at the go_to(4) call site (22 Aug 2026
+    # UX audit fix, sidebar visibility) — this helper jumps straight to
+    # screen 4 in session_state, bypassing that code path, so it needs
+    # setting explicitly to keep simulating a completed-onboarding
+    # arrival at screen 4 rather than a mid-onboarding state.
+    at.session_state["_sidebar_unlocked"] = True
 
 
 # ---------------------------------------------------------------------------
