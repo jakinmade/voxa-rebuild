@@ -6,10 +6,10 @@
 # either changes, check the other stays in sync.
 [theme]
 base = "light"
-primaryColor = "#2B4C7E"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F7FA"
-textColor = "#12172B"
+primaryColor = "#7A2632"
+backgroundColor = "#FBF9F6"
+secondaryBackgroundColor = "#F3EEE6"
+textColor = "#1C1B29"
 font = "sans serif"
 
 [browser]

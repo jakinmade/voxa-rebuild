@@ -96,7 +96,7 @@ st.set_page_config(
 # ---- Styles ----
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -108,27 +108,45 @@ st.markdown("""
        Kept in sync with .streamlit/config.toml's [theme] block, which
        covers native widgets (buttons, checkboxes, focus rings) CSS
        alone can't reliably reach across Streamlit versions.
+
+       Visual identity (23 Aug 2026 design pass): previously a fairly
+       generic navy-on-white SaaS palette with a single sans face used
+       everywhere — competent, but disconnected from what the product
+       actually is. VOICOVA's whole pitch is authenticating that a
+       piece of writing is genuinely someone's, measured against a
+       fingerprint — closer to forensic authentication than a generic
+       dashboard. Retheme grounds in that: ink/garnet/brass rather
+       than corporate blue, a serif display face with real character
+       for headlines (used with restraint, not everywhere), and a
+       small waveform/fingerprint signature mark echoed through the
+       progress indicator. Deliberately avoids the cream+terracotta
+       AI-design cliché (garnet reads as authentication ink/wax-seal,
+       not clay) as well as near-black+neon and dense broadsheet
+       layouts — see /mnt/skills/public/frontend-design/SKILL.md.
        --------------------------------------------------------------- */
     :root {
-        --ink: #12172B;
-        --body-text: #3C4257;
-        --muted: #6B7280;
-        --faint: #9AA1B1;
-        --canvas: #FFFFFF;
-        --surface: #F7F8FB;
-        --border: #E4E7EE;
-        --accent: #2B4C7E;
-        --accent-hover: #1F3A5F;
-        --accent-soft: #EAF0F9;
-        --success: #1E7D46;
-        --success-soft: #E3F5EA;
-        --warning: #A5690B;
-        --warning-soft: #FDF2DF;
-        --danger: #B3382C;
-        --danger-soft: #FBE4E2;
+        --ink: #1C1B29;
+        --body-text: #4A4658;
+        --muted: #7A7488;
+        --faint: #A79FB0;
+        --canvas: #FBF9F6;
+        --surface: #F3EEE6;
+        --border: #E4DBCC;
+        --accent: #7A2632;
+        --accent-hover: #5E1D26;
+        --accent-soft: #F4E1DE;
+        --gold: #B08947;
+        --gold-soft: #F3E9D6;
+        --success: #3F6B3F;
+        --success-soft: #E7EFDE;
+        --warning: #96631E;
+        --warning-soft: #F6EAD5;
+        --danger: #AE4530;
+        --danger-soft: #FAE5DC;
         --radius-sm: 6px;
         --radius-md: 10px;
         --radius-lg: 14px;
+        --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
         --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
     }
@@ -181,10 +199,12 @@ st.markdown("""
     }
 
     .headline {
-        font-size: 2.1rem;
-        font-weight: 700;
+        font-family: var(--font-display);
+        font-optical-sizing: auto;
+        font-size: 2.3rem;
+        font-weight: 600;
         color: var(--ink);
-        line-height: 1.15;
+        line-height: 1.12;
         letter-spacing: -0.01em;
         margin-bottom: 0.5rem;
     }
@@ -268,7 +288,7 @@ st.markdown("""
         line-height: 1.75;
         color: var(--ink);
         white-space: pre-wrap;
-        box-shadow: 0 1px 2px rgba(18, 23, 43, 0.04), 0 4px 16px rgba(18, 23, 43, 0.04);
+        box-shadow: 0 1px 2px rgba(28, 27, 41, 0.05), 0 4px 16px rgba(28, 27, 41, 0.05);
     }
 
     .receipt {
@@ -300,17 +320,21 @@ st.markdown("""
 
     .progress {
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: center;
-        gap: 0.5rem;
+        gap: 5px;
         margin-bottom: 2.5rem;
-        color: var(--border);
-        font-size: 0.9rem;
     }
-    .progress .active {
-        color: var(--accent);
-        transform: scale(1.3);
-        transition: transform 0.2s ease;
+    .progress .bar {
+        display: inline-block;
+        width: 3px;
+        border-radius: 2px;
+        background: var(--border);
+        transition: background-color 0.2s ease, transform 0.2s ease;
+    }
+    .progress .bar.active {
+        background: var(--accent);
+        transform: scaleY(1.15);
     }
 
     .divider {
@@ -395,7 +419,7 @@ st.markdown("""
         font-size: 0.78rem;
         padding: 0.25rem 0.55rem;
         border-radius: 999px;
-        background: var(--surface-2, #f2f2f2);
+        background: var(--surface-2, var(--surface));
         color: var(--ink);
     }
     .what-changed-empty {
@@ -721,7 +745,8 @@ def _pricing_tiers_html(compact: bool = False) -> str:
 
 
 def screen_landing():
-    st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
+    st.markdown(_voiceprint_svg(width=200, height=52), unsafe_allow_html=True)
+    st.markdown('<div class="tagline" style="margin-top:0.7rem;">VOICOVA</div>', unsafe_allow_html=True)
     st.markdown(
         '<div style="font-family:var(--font-mono);font-size:0.85rem;color:var(--muted);'
         'margin-top:-0.6rem;margin-bottom:1.4rem;letter-spacing:0.02em;">'
@@ -830,18 +855,54 @@ def screen_pricing():
 _PROGRESS_STEP_NAMES = ("Paste", "Your voice", "Calibrate", "Write")
 
 
+def _voiceprint_svg(width: int = 220, height: int = 64, bar_width: int = 4, gap: int = 4) -> str:
+    """The product's signature graphic (23 Aug 2026 design pass): a
+    voiceprint/waveform mark, echoing 'fingerprint' and 'voice' —
+    language already used throughout the product's own copy — rather
+    than an arbitrary decorative shape. Heights are a fixed pattern,
+    not randomised per render, so this reads as a stable mark across
+    the product (landing hero here, miniature echo in progress_dots())
+    rather than changing decoration. Every fourth bar picks up --gold
+    as a small, deliberate accent — restrained, not a rainbow.
+    """
+    heights_pattern = [0.35, 0.55, 0.8, 0.5, 1.0, 0.65, 0.4, 0.85, 0.6, 0.3, 0.75, 0.45]
+    n = max(1, width // (bar_width + gap))
+    bars = []
+    x = 0
+    for i in range(n):
+        frac = heights_pattern[i % len(heights_pattern)]
+        bar_h = max(3, int(height * frac))
+        y = (height - bar_h) / 2
+        color = "var(--gold)" if (i % 4 == 3) else "var(--accent)"
+        bars.append(
+            f'<rect x="{x}" y="{y:.1f}" width="{bar_width}" height="{bar_h}" '
+            f'rx="{bar_width / 2:.1f}" fill="{color}" opacity="0.9"/>'
+        )
+        x += bar_width + gap
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Voicova voiceprint mark">'
+        f'{"".join(bars)}</svg>'
+    )
+
+
 def progress_dots(current: int, total: int = 4):
-    dots = ""
+    # Waveform-bar progress mark (23 Aug 2026 design pass): echoes the
+    # landing hero's signature voiceprint graphic in miniature, rather
+    # than plain generic circles. Bar heights are fixed per position,
+    # not randomised, so the shape is stable and recognisable across
+    # renders — a genuine mark, not decoration that changes every time.
+    _bar_heights = (7, 11, 6, 10)
+    bars = ""
     for i in range(1, total + 1):
-        if i == current:
-            dots += '<span class="active">\u25CF</span> '
-        else:
-            dots += "\u25CB "
+        h = _bar_heights[(i - 1) % len(_bar_heights)]
+        cls = "bar active" if i == current else "bar"
+        bars += f'<span class="{cls}" style="height:{h}px;"></span>'
     step_name = _PROGRESS_STEP_NAMES[current - 1] if 1 <= current <= len(_PROGRESS_STEP_NAMES) else ""
     st.markdown(
-        f'<div class="progress">{dots}'
+        f'<div class="progress">{bars}'
         f'<span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--faint);'
-        f'letter-spacing:0.04em;margin-left:0.4rem;">'
+        f'letter-spacing:0.04em;margin-left:0.6rem;">'
         f'Step {current} of {total}{" \u00b7 " + step_name if step_name else ""}</span></div>',
         unsafe_allow_html=True,
     )
@@ -1063,12 +1124,12 @@ def screen_paste():
         tier = fitness.get("tier", "thin")
         if nudge:
             st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;color:#A5690B;">{nudge}</div>',
+                f'<div class="microcopy" style="margin-top:0.5rem;color:var(--warning);">{nudge}</div>',
                 unsafe_allow_html=True
             )
         elif tier == "gold":
             st.markdown(
-                '<div class="microcopy" style="margin-top:0.5rem;color:#1E7D46;">Strong sample. Your fingerprint is ready.</div>',
+                '<div class="microcopy" style="margin-top:0.5rem;color:var(--success);">Strong sample. Your fingerprint is ready.</div>',
                 unsafe_allow_html=True
             )
         else:
@@ -2868,7 +2929,7 @@ def screen_render():
             swaps = report.get("attribution_swaps", [])
             if swaps:
                 st.markdown(
-                    '<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
+                    '<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
                     '\u26a0 Check who gets credit before sending. The rewrite may have swapped '
                     'whose point this was.</div>',
                     unsafe_allow_html=True
@@ -2884,7 +2945,7 @@ def screen_render():
                     f' Original: "{source_sentence}"' if source_sentence else ""
                 )
                 st.markdown(
-                    f'<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
+                    f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
                     f'\u26a0 Missing from the rewrite: {listed}. This can mean the rewrite '
                     f'drifted into different content, not just a different style - read it '
                     f'in full before sending, don\'t just skim the changes above.{context_line}</div>',
@@ -2908,7 +2969,7 @@ def screen_render():
             # voice_engine.py for what specifically gets checked.
             if st.session_state.get("restructure_declined"):
                 st.markdown(
-                    '<div class="microcopy" style="margin-top:0.5rem;color:#8A6D1D;">'
+                    '<div class="microcopy" style="margin-top:0.5rem;color:var(--warning);">'
                     '\u26a0 Platform formatting was attempted but introduced wording that '
                     'could not be verified, so it was left out. This is your line-edited '
                     'version, not restructured for the platform. Voice and content are '
@@ -2935,7 +2996,7 @@ def screen_render():
                     note = "Highlighted: a word choice worth a second look. Hover to see why."
                 st.markdown(
                     f'<div style="white-space:pre-wrap;line-height:1.6;'
-                    f'background:#fff;border:0.5px solid #E4E7EE;border-radius:10px;'
+                    f'background:var(--canvas);border:0.5px solid var(--border);border-radius:10px;'
                     f'padding:14px 16px;margin-bottom:0.6rem;">{highlighted}</div>'
                     f'<div class="microcopy">{note}</div>',
                     unsafe_allow_html=True,
@@ -3065,7 +3126,7 @@ def screen_render():
                 "This render needs a closer look before you send it.",
             )
             st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;color:#B3382C;">'
+                f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
                 f'\u26a0 {reason_text} Read the report above before sending.</div>',
                 unsafe_allow_html=True
             )
