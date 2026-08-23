@@ -670,7 +670,7 @@ def progress_dots(current: int, total: int = 4):
     )
 
 
-def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
+def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool = False):
     """
     Visible from first use, not gated behind anything — per the v4 spec's
     decision (Section 6/10): fast path is the default, but anyone who
@@ -694,7 +694,7 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False):
         "Paste more of your own writing. Each sample strengthens the baseline, "
         "useful if you want a higher bar than the fast path gives you."
     )
-    with st.expander(label, expanded=show_caveat_framing):
+    with st.expander(label, expanded=(show_caveat_framing or expanded)):
         st.markdown(
             f'<div class="sub" style="margin-bottom:0.8rem;">{body}</div>',
             unsafe_allow_html=True,
@@ -977,7 +977,14 @@ def screen_reveal():
         """, unsafe_allow_html=True)
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-    _deepen_fingerprint_panel()
+    # Un-collapsed by default (22 Aug 2026 UX audit): previously this
+    # well-designed panel was easy to miss entirely since it defaulted
+    # to a collapsed expander with no visual weight pulling the eye to
+    # it. Screen 4's caveat-framed version already opens expanded on
+    # purpose when it's actually relevant to a specific result; this
+    # brings the same visibility to the generic Screen 2 version, which
+    # previously had no such signal at all.
+    _deepen_fingerprint_panel(expanded=True)
     st.markdown("")
 
     col1, col2 = st.columns([1, 1])
