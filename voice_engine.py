@@ -1728,9 +1728,13 @@ def highlight_attribution_swaps(output_text: str, attribution_swaps: list[str]) 
         phrase = html.escape(m.group(1))
         pattern = re.compile(r"\b" + re.escape(phrase) + r"\b", re.I)
         tooltip = html.escape(swap)
+        # Uses var(--danger) not hardcoded hex, same reasoning as
+        # highlight_flagged_phrases' RED/AMBER constants (23 Aug 2026
+        # theme-drift fix) - keeps this in sync with the rest of the
+        # palette automatically if it ever changes again.
         escaped = pattern.sub(
             lambda mo, t=tooltip: (
-                f'<span style="background:#FBE4E2;border-bottom:2px solid #B3382C;'
+                f'<span style="background:var(--danger-soft);border-bottom:2px solid var(--danger);'
                 f'padding:1px 2px;border-radius:3px;" title="{t}">{mo.group(0)}</span>'
             ),
             escaped, count=1,
@@ -1791,8 +1795,17 @@ def highlight_flagged_phrases(
         m = re.search(r"became '([^']+)'", entry)
         return m.group(1) if m else None
 
-    RED = "background:#FBE4E2;border-bottom:2px solid #B3382C;"
-    AMBER = "background:#FDF2DF;border-bottom:2px solid #A5690B;"
+    # Uses the CSS custom properties (var(--danger) etc.), not
+    # hardcoded hex, deliberately: a prior hardcoded version of these
+    # two constants was found still pointing at the pre-redesign
+    # palette (#FBE4E2/#B3382C, #FDF2DF/#A5690B) after the 23 Aug 2026
+    # visual redesign changed --danger/--warning elsewhere, a real
+    # drift bug caught during a benchmarking pass against known
+    # Streamlit HTML-embedding pitfalls. Referencing the variables
+    # instead of hex means this can't silently drift from the rest of
+    # the theme again.
+    RED = "background:var(--danger-soft);border-bottom:2px solid var(--danger);"
+    AMBER = "background:var(--warning-soft);border-bottom:2px solid var(--warning);"
 
     spans: list[tuple[int, int, str, str]] = []
 

@@ -19,7 +19,7 @@ def test_attribution_swap_highlighted_red():
     assert '<span' in result
     assert 'my point' in result
     assert 'title=' in result
-    assert '#B3382C' in result  # red border, matches highlight_attribution_swaps
+    assert 'var(--danger)' in result  # red border, matches highlight_attribution_swaps
 
 
 def test_multiple_attribution_swaps_each_highlighted():
@@ -42,8 +42,8 @@ def test_lexical_fidelity_break_highlighted_amber():
     result = ve.highlight_flagged_phrases(output, lexical_fidelity_breaks=breaks)
     assert '<span' in result
     assert 'brings up' in result
-    assert '#A5690B' in result  # amber border, matches content-lock-banner-note
-    assert '#B3382C' not in result  # must NOT be styled red
+    assert 'var(--warning)' in result  # amber border, matches content-lock-banner-note
+    assert 'var(--danger)' not in result  # must NOT be styled red
 
 
 def test_multiple_lexical_fidelity_breaks_each_highlighted():
@@ -66,8 +66,8 @@ def test_both_signals_present_both_highlighted_correct_colours():
     breaks = ["'surfaces' became 'brings up' - breaks grammar"]
     result = ve.highlight_flagged_phrases(output, attribution_swaps=swaps, lexical_fidelity_breaks=breaks)
     assert result.count('<span') == 2
-    assert '#B3382C' in result
-    assert '#A5690B' in result
+    assert 'var(--danger)' in result
+    assert 'var(--warning)' in result
 
 
 def test_overlapping_spans_attribution_swap_wins():
@@ -83,8 +83,8 @@ def test_overlapping_spans_attribution_swap_wins():
     # Only one span should win the contested text - not two nested
     # or corrupted spans.
     assert result.count('<span') == 1
-    assert '#B3382C' in result
-    assert '#A5690B' not in result
+    assert 'var(--danger)' in result
+    assert 'var(--warning)' not in result
 
 
 def test_adjacent_non_overlapping_spans_both_render_cleanly():
