@@ -2844,40 +2844,39 @@ def screen_render():
                 "ai_tell": "Whether wording that reads as AI-generated survived into the rewrite.",
             }
             st.markdown(f"""
-            <div class="voice-report">
-                {content_lock_banner}
-                {what_changed}
-                <div class="vr-grid">
-                    <div class="vr-stat">
-                        <div class="vr-stat-label" title="{_metric_gloss['consistency']}">Voice consistency</div>
-                        <span class="badge {vm_badge}">{vm_tier}</span>
-                    </div>
-                    <div class="vr-stat">
-                        <div class="vr-stat-label" title="{_metric_gloss['confidence']}">Confidence</div>
-                        {confidence_html}
-                    </div>
-                    <div class="vr-stat">
-                        <div class="vr-stat-label" title="{_metric_gloss['risk']}">Risk</div>
-                        <span class="badge {badge_class.get(report['risk'], 'badge-amber')}">{risk_icon}{report['risk']}</span>
-                    </div>
-                    <div class="vr-stat">
-                        <div class="vr-stat-label" title="{_metric_gloss['ai_tell']}">AI-tell check</div>
-                        {ai_tell_html}
-                    </div>
-                </div>
-                <div class="vr-changes">{vm_evidence}</div>
-                <details style="margin-top:0.7rem;">
-                    <summary style="cursor:pointer;font-family:var(--font-mono);font-size:0.7rem;
-                        color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">
-                        Show the per-dimension breakdown
-                    </summary>
-                    <div style="margin-top:0.5rem;">
-                        {_build_voice_match_table_html(st.session_state.get("render_delta") or {})}
-                    </div>
-                </details>
-                {_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
-            </div>
-            """, unsafe_allow_html=True)
+<div class="voice-report">
+{content_lock_banner}
+{what_changed}
+<div class="vr-grid">
+<div class="vr-stat">
+<div class="vr-stat-label" title="{_metric_gloss['consistency']}">Voice consistency</div>
+<span class="badge {vm_badge}">{vm_tier}</span>
+</div>
+<div class="vr-stat">
+<div class="vr-stat-label" title="{_metric_gloss['confidence']}">Confidence</div>
+{confidence_html}
+</div>
+<div class="vr-stat">
+<div class="vr-stat-label" title="{_metric_gloss['risk']}">Risk</div>
+<span class="badge {badge_class.get(report['risk'], 'badge-amber')}">{risk_icon}{report['risk']}</span>
+</div>
+<div class="vr-stat">
+<div class="vr-stat-label" title="{_metric_gloss['ai_tell']}">AI-tell check</div>
+{ai_tell_html}
+</div>
+</div>
+<div class="vr-changes">{vm_evidence}</div>
+<details style="margin-top:0.7rem;">
+<summary style="cursor:pointer;font-family:var(--font-mono);font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">
+Show the per-dimension breakdown
+</summary>
+<div style="margin-top:0.5rem;">
+{_build_voice_match_table_html(st.session_state.get("render_delta") or {})}
+</div>
+</details>
+{_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
+</div>
+""", unsafe_allow_html=True)
 
             # Explicit, always-visible explainer for Confidence vs
             # Risk: these two badges can land as "Confidence: Low" +
