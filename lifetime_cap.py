@@ -113,8 +113,10 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
     denies rather than allows when it can't check.
     """
     limit = _max_lifetime_renders()
+    print(f"DIAG check_and_reserve_lifetime_render: device_id={device_id} limit={limit}", flush=True)
     client = get_supabase_client()
     if client is None:
+        print("DIAG check_and_reserve_lifetime_render: client is None, failing closed", flush=True)
         log.error("lifetime_cap_check_unavailable", reason="supabase_not_configured")
         return False, 0, limit
 
@@ -124,6 +126,7 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
             {"p_device_id": device_id, "p_limit": limit},
         ).execute()
         rows = result.data or []
+        print(f"DIAG check_and_reserve_lifetime_render: rpc returned rows={rows}", flush=True)
         if not rows:
             log.error("lifetime_cap_check_unavailable", reason="rpc_returned_no_rows")
             return False, 0, limit
@@ -134,7 +137,8 @@ def check_and_reserve_lifetime_render(device_id: str) -> tuple[bool, int, int]:
         if not allowed:
             log.info("lifetime_cap_reached", used=used, limit=limit)
         return allowed, used, limit
-    except Exception:
+    except Exception as e:
+        print(f"DIAG check_and_reserve_lifetime_render: EXCEPTION {type(e).__name__}: {e}", flush=True)
         log.error("lifetime_cap_check_unavailable", reason="supabase_error", exc_info=True)
         return False, 0, limit
 
