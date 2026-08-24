@@ -739,16 +739,16 @@ def _pricing_tiers_html(compact: bool = False) -> str:
             body = f'<div class="sub">{", ".join(tier["features"][:2])}</div>'
         else:
             body = "".join(f'<div class="microcopy">&#8226; {f}</div>' for f in tier["features"])
-        cards.append(f"""
-        <div style="border:0.5px solid var(--border);border-radius:10px;
-            padding:14px 16px;flex:1;min-width:150px;">
-            <div class="tagline">{tier['name']}</div>
-            <div class="headline" style="font-size:1.4rem;">{tier['price']}
-                <span style="font-size:0.8rem;color:var(--muted);">{tier['cadence']}</span>
-            </div>
-            {body}
-        </div>
-        """)
+        cards.append(
+            '<div style="border:0.5px solid var(--border);border-radius:10px;'
+            'padding:14px 16px;flex:1;min-width:150px;">'
+            f'<div class="tagline">{tier["name"]}</div>'
+            f'<div class="headline" style="font-size:1.4rem;">{tier["price"]}'
+            f'<span style="font-size:0.8rem;color:var(--muted);">{tier["cadence"]}</span>'
+            '</div>'
+            f'{body}'
+            '</div>'
+        )
     return f'<div style="display:flex;gap:12px;flex-wrap:wrap;margin:0.8rem 0;">{"".join(cards)}</div>'
 
 
