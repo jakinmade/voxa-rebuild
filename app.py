@@ -841,6 +841,35 @@ def screen_landing():
             st.rerun()
 
 
+def _handle_checkout_plan_request() -> None:
+    """Shared by screen_pricing() and the Step-4 paywall: if an Upgrade
+    button on EITHER screen just set _checkout_plan_requested, create
+    the Stripe Checkout Session and redirect. Pulled out as one
+    function specifically because the pricing-page Upgrade buttons
+    needed the exact same create-session-and-redirect behaviour the
+    paywall already had, without a second copy of the meta-refresh /
+    fallback-link logic to drift out of sync with the first.
+    """
+    _requested_plan = st.session_state.pop("_checkout_plan_requested", None)
+    if not _requested_plan:
+        return
+    device_id_for_checkout = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = device_id_for_checkout
+    checkout_url = create_subscription_checkout(device_id_for_checkout, plan=_requested_plan)
+    if checkout_url:
+        st.markdown(
+            f'<meta http-equiv="refresh" content="0;url={_safe_html(checkout_url)}">',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="microcopy">Redirecting to secure checkout...</div>',
+            unsafe_allow_html=True,
+        )
+        st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
+    else:
+        st.error("Couldn't start checkout. Please try again shortly.")
+
+
 def screen_pricing():
     st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
     st.markdown('<div class="headline">Pricing.</div>', unsafe_allow_html=True)
@@ -854,6 +883,28 @@ def screen_pricing():
         'on the paid tiers. They\'re unlimited while your subscription is active.</div>',
         unsafe_allow_html=True,
     )
+    st.markdown("")
+
+    # Same upgrade pattern as the paywall (_checkout_plan_requested ->
+    # rerun -> checkout URL), added here to close a real conversion
+    # leak: this standalone screen previously had no way to actually
+    # subscribe, only "<- Back" - a visitor curious about pricing
+    # before spending any renders had no path to pay. Distinct keys
+    # (pricing_page_*) so Streamlit doesn't collide with the paywall's
+    # own upgrade_monthly/upgrade_annual buttons if both ever render
+    # in the same session history.
+    pay_col1, pay_col2 = st.columns(2)
+    with pay_col1:
+        if st.button("Upgrade: £6.99/month", key="pricing_page_upgrade_monthly", use_container_width=True):
+            st.session_state["_checkout_plan_requested"] = "monthly"
+            st.rerun()
+    with pay_col2:
+        if st.button("Upgrade: £49/year", key="pricing_page_upgrade_annual", use_container_width=True):
+            st.session_state["_checkout_plan_requested"] = "annual"
+            st.rerun()
+
+    _handle_checkout_plan_request()
+
     st.markdown("")
     if st.button("\u2190 Back", use_container_width=True):
         go_to(0 if not st.session_state.get("baseline_fingerprint") else 4)
@@ -1114,6 +1165,16 @@ def screen_paste():
                     st.rerun()
                 else:
                     st.session_state.fitness_nudge = gate.get("message")
+                    # The gate correctly asking for more text was being
+                    # read as "the button did nothing" (real UX finding,
+                    # not a code bug — first click DOES score the sample,
+                    # it just correctly declines to advance on a thin
+                    # sample). A toast makes that outcome visible
+                    # immediately, on top of the existing inline message
+                    # below, rather than relying on the person to notice
+                    # new text appear under the button after rerun.
+                    if gate.get("message"):
+                        st.toast(gate["message"], icon="\u270d\ufe0f")
                     st.rerun()
 
     fitness = st.session_state.get("sample_fitness")
@@ -2774,21 +2835,11 @@ def screen_render():
             # with no second click needed. The manual link below is a
             # fallback only, for a browser that blocks the
             # auto-refresh, not a required second step.
-            _requested_plan = st.session_state.pop("_checkout_plan_requested", None)
-            if _requested_plan:
-                checkout_url = create_subscription_checkout(device_id_for_ui, plan=_requested_plan)
-                if checkout_url:
-                    st.markdown(
-                        f'<meta http-equiv="refresh" content="0;url={_safe_html(checkout_url)}">',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(
-                        '<div class="microcopy">Redirecting to secure checkout...</div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
-                else:
-                    st.error("Couldn't start checkout. Please try again shortly.")
+            #
+            # Shared with screen_pricing()'s own Upgrade buttons via
+            # _handle_checkout_plan_request() - one create-session-and-
+            # redirect implementation, not two copies to keep in sync.
+            _handle_checkout_plan_request()
         else:
             if st.button("Try again", key="retry_render"):
                 last_attempt = st.session_state.get("render_last_attempt", input_text)
