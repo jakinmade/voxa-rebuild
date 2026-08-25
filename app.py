@@ -825,7 +825,8 @@ def screen_landing():
     st.markdown(
         '<div class="microcopy">No account or signup. Your profile is tied to a device '
         'cookie, not an email. Clear your cookies and it\'s gone. No selling, no sharing, '
-        'no third-party analytics on what you write.</div>',
+        'no third-party analytics on what you write. 15 renders free, then £6.99/month '
+        'or £49/year for unlimited.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1200,7 +1201,9 @@ def screen_paste():
             )
 
     st.markdown(
-        '<div class="microcopy">No account or signup. Your profile is saved securely so you don\'t have to rebuild it.</div>',
+        '<div class="microcopy">No account or signup. Your profile is tied to a device '
+        'cookie, not an email — so it\'s there next time you\'re on this browser, gone if '
+        'you clear cookies or switch devices.</div>',
         unsafe_allow_html=True
     )
     with st.expander("What we store, and why"):
