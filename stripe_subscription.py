@@ -242,3 +242,210 @@ def _record_subscription(device_id: str, stripe_customer_id: str, subscription_s
         }).execute()
     except Exception:
         log.error("record_subscription_write_failed", reason="supabase_error", exc_info=True)
+
+
+def request_subscription_restore(email: str) -> None:
+    """Step 1 of restore-by-magic-link: if `email` belongs to a Stripe
+    customer with an active subscription, emails them a one-time link.
+    Always returns None and never reveals whether the email matched -
+    same "one plain message regardless of case" posture as the old
+    restore_subscription_by_email had, now extended to the token step
+    too. This is deliberate: telling an unauthenticated caller "no
+    subscription found for that email" would let anyone probe which
+    emails are paying customers.
+
+    SECURITY NOTE - why this replaced the earlier draft: an email-only
+    restore_subscription_by_email(email, device_id) that immediately
+    granted access was a real vulnerability - anyone who knew a
+    subscriber's email (not even the account itself, just knowledge of
+    the address) could attach that person's active subscription to
+    their own device_id. A magic link fixes this the standard way
+    (Auth0/Supabase/FusionAuth all converge on this pattern for
+    passwordless account recovery): only proof of inbox access, via
+    clicking the emailed link, can bind the subscription to a device.
+    Matches VOICOVA's own existing convention of carrying state through
+    a URL query param (?payment=success&session_id=... already does
+    this for checkout) - ?restore=<token> is the same shape, not a new
+    one.
+
+    Token: 32 bytes of secrets.token_urlsafe, stored server-side in the
+    SAME lifetime_render_cap row keyed by the found stripe_customer_id
+    (restore_token, restore_token_expires_at columns - see this file's
+    module docstring for the schema this joins), single-use, 15-minute
+    expiry - the industry-converged window (Supertokens, Slack) for
+    magic-link tokens, short enough to limit exposure, long enough that
+    an email arriving in 2-3 minutes doesn't feel like a race.
+
+    Email delivery reuses CLEARANCE's proven SendGrid pattern
+    (clearance-app/app.py send_report_email): same SENDGRID_API_KEY
+    account, same EMAIL_ENABLED kill switch, same defensive key-
+    cleaning (a stray pasted newline broke CLEARANCE's key in
+    production on 30 Jun 2026 - stripped here too). Only the body
+    changes: a plain restore link instead of a PDF attachment.
+    """
+    import secrets as secrets_module
+    import stripe
+    secret_key = _get_secret("STRIPE_API_KEY", ("stripe", "API_KEY"))
+    if not secret_key:
+        log.error("restore_request_unavailable", reason="stripe_not_configured")
+        return
+
+    stripe.api_key = secret_key
+    try:
+        customers = stripe.Customer.list(email=email, limit=1)
+    except Exception:
+        log.error("restore_request_failed", reason="stripe_customer_lookup_error", exc_info=True)
+        return
+    if not customers.data:
+        log.info("restore_request_no_customer", email_present=True)
+        return
+
+    customer = customers.data[0]
+    try:
+        subscriptions = stripe.Subscription.list(customer=customer.id, status="active", limit=1)
+    except Exception:
+        log.error("restore_request_failed", reason="stripe_subscription_lookup_error", exc_info=True)
+        return
+    if not subscriptions.data:
+        log.info("restore_request_no_active_subscription", email_present=True)
+        return
+
+    token = secrets_module.token_urlsafe(32)
+    expires_at = _utcnow_iso_plus_minutes(15)
+
+    client = get_supabase_client()
+    if client is None:
+        log.error("restore_request_unavailable", reason="supabase_not_configured")
+        return
+    try:
+        client.table(_TABLE).update({
+            "restore_token": token,
+            "restore_token_expires_at": expires_at,
+        }).eq("stripe_customer_id", customer.id).execute()
+    except Exception:
+        log.error("restore_request_write_failed", reason="supabase_error", exc_info=True)
+        return
+
+    _send_restore_email(to_email=email, token=token)
+    log.info("restore_request_sent", email_present=True)
+
+
+def confirm_subscription_restore(token: str, device_id: str) -> bool:
+    """Step 2: called when the user lands on ?restore=<token>. Binds
+    the subscription behind that token to THIS device_id - fails
+    closed (False) on expired, already-used, or unknown tokens, same
+    posture as verify_and_record_subscription's own fail-closed
+    reasoning. Consuming the token (clearing it after use) makes it
+    genuinely single-use, not just single-intended.
+    """
+    client = get_supabase_client()
+    if client is None:
+        log.error("restore_confirm_unavailable", reason="supabase_not_configured")
+        return False
+    try:
+        result = (
+            client.table(_TABLE)
+            .select("stripe_customer_id, restore_token_expires_at")
+            .eq("restore_token", token)
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        log.error("restore_confirm_failed", reason="supabase_error", exc_info=True)
+        return False
+
+    if not result.data:
+        log.info("restore_confirm_invalid_token")
+        return False
+
+    row = result.data[0]
+    if _is_expired(row.get("restore_token_expires_at")):
+        log.info("restore_confirm_expired_token")
+        return False
+
+    _record_subscription(
+        device_id=device_id,
+        stripe_customer_id=row["stripe_customer_id"],
+        subscription_status="active",
+    )
+    try:
+        client.table(_TABLE).update({
+            "restore_token": None,
+            "restore_token_expires_at": None,
+        }).eq("stripe_customer_id", row["stripe_customer_id"]).execute()
+    except Exception:
+        log.error("restore_confirm_token_clear_failed", reason="supabase_error", exc_info=True)
+
+    log.info("restore_confirm_succeeded", device_id_present=True)
+    return True
+
+
+def _utcnow_iso_plus_minutes(minutes: int) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+
+
+def _is_expired(expires_at_iso: str | None) -> bool:
+    if not expires_at_iso:
+        return True
+    from datetime import datetime, timezone
+    try:
+        expires_at = datetime.fromisoformat(expires_at_iso)
+    except ValueError:
+        return True
+    return datetime.now(timezone.utc) > expires_at
+
+
+def _send_restore_email(to_email: str, token: str) -> None:
+    """Sends the restore link via SendGrid, same account/pattern as
+    CLEARANCE's send_report_email (clearance-app/app.py) - reused
+    deliberately per the standing cross-product convention documented
+    at the top of this file, not reinvented."""
+    if os.environ.get("EMAIL_ENABLED", "true").strip().lower() == "false":
+        log.info("restore_email_skipped", reason="EMAIL_ENABLED=false")
+        return
+
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if api_key:
+        api_key = "".join(c for c in api_key if 33 <= ord(c) <= 126).strip()
+    if not api_key:
+        log.error("restore_email_unavailable", reason="sendgrid_key_not_set")
+        return
+
+    app_url = _get_secret("VOICOVA_APP_URL", ("VOICOVA_APP_URL",), "http://localhost:8501")
+    restore_url = f"{app_url}/?restore={token}"
+
+    html_body = f"""
+<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#111827;">
+  <div style="padding:2rem 1.5rem;">
+    <p style="font-size:0.95rem;color:#374151;line-height:1.7;">
+      Click below to restore your VOICOVA subscription on this device.
+    </p>
+    <p style="margin:1.5rem 0;">
+      <a href="{restore_url}"
+         style="background:#111827;color:#ffffff;padding:0.75rem 1.5rem;
+                border-radius:6px;text-decoration:none;font-size:0.95rem;">
+        Restore access
+      </a>
+    </p>
+    <p style="font-size:0.8rem;color:#6b7280;">
+      This link expires in 15 minutes and works once. If you didn't
+      request this, you can ignore this email.
+    </p>
+  </div>
+</div>
+"""
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        from_email = os.environ.get("VOICOVA_EMAIL_FROM", "hello@voicova.com")
+        message = Mail(
+            from_email=from_email,
+            to_emails=to_email,
+            subject="Restore your VOICOVA access",
+            html_content=html_body,
+        )
+        sg = SendGridAPIClient(api_key)
+        sg.send(message)
+    except Exception:
+        log.error("restore_email_send_failed", exc_info=True)

@@ -68,7 +68,12 @@ from deterministic_fixers import (
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id
-from stripe_subscription import create_subscription_checkout, verify_and_record_subscription
+from stripe_subscription import (
+    create_subscription_checkout,
+    verify_and_record_subscription,
+    request_subscription_restore,
+    confirm_subscription_restore,
+)
 from lifetime_cap import get_lifetime_render_count, device_has_active_subscription
 
 log = get_logger(__name__)
@@ -685,6 +690,22 @@ if st.query_params.get("payment") == "success":
 elif st.query_params.get("payment") == "cancelled":
     st.query_params.clear()
 
+# Restore-by-magic-link handling - same top-level query-param pattern
+# as the payment=success handler above, one screen pass, then cleared
+# so a page refresh doesn't re-consume an already-used token. Binds
+# the subscription behind this token to WHATEVER device is currently
+# viewing the link - correct behaviour, since the whole point is
+# restoring access on a device that lost its own cookie.
+if st.query_params.get("restore"):
+    _restore_token = st.query_params.get("restore")
+    _device_id_for_restore = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = _device_id_for_restore
+    if confirm_subscription_restore(_restore_token, _device_id_for_restore):
+        st.session_state["subscription_just_confirmed"] = True
+    else:
+        st.session_state["restore_failed"] = True
+    st.query_params.clear()
+
 
 # ============================================================
 # Shared pricing-tier content, used by both the standalone /pricing
@@ -871,6 +892,59 @@ def _handle_checkout_plan_request() -> None:
         st.error("Couldn't start checkout. Please try again shortly.")
 
 
+def _render_restore_access_expander(key_prefix: str = "") -> None:
+    """Shared by screen_pricing() and the Step-4 paywall: the
+    "Already subscribed? Restore access" recovery path for the
+    device-cookie identity model's one real gap (see
+    stripe_subscription.py's module docstring) - a real subscriber
+    whose cookie is gone has no other way back in without this.
+    Collapsed expander, not a prominent button, on both screens - this
+    is for the rare returning-subscriber case, not competing for
+    attention with the upgrade CTAs it sits below.
+
+    key_prefix keeps Streamlit widget keys unique if this ever renders
+    on two screens in the same session history (same reasoning as
+    screen_pricing()'s own pricing_page_* button keys).
+    """
+    if st.session_state.get("restore_failed"):
+        st.error(
+            "That link didn't work — it may have expired or already "
+            "been used. Request a new one below."
+        )
+        st.session_state["restore_failed"] = False
+
+    with st.expander("Already subscribed? Restore access"):
+        st.markdown(
+            '<div class="microcopy">Enter the email you subscribed with. '
+            "If it matches an active subscription, we'll email you a link "
+            'to restore access on this device.</div>',
+            unsafe_allow_html=True,
+        )
+        _restore_email = st.text_input(
+            label="Email",
+            key=f"{key_prefix}restore_email_input",
+            label_visibility="collapsed",
+            placeholder="you@example.com",
+        )
+        if st.button("Send restore link", key=f"{key_prefix}send_restore_link"):
+            if _restore_email and "@" in _restore_email:
+                request_subscription_restore(_restore_email.strip())
+                st.session_state["restore_requested"] = True
+            else:
+                st.error("Enter a valid email address.")
+        # Always the SAME message whether or not a match was found -
+        # request_subscription_restore() never reports back which case
+        # it was (see its own docstring: telling an unauthenticated
+        # caller "no subscription found" would let anyone probe which
+        # emails belong to paying customers).
+        if st.session_state.get("restore_requested"):
+            st.success(
+                "If that email matches an active subscription, a restore "
+                "link is on its way. It expires in 15 minutes."
+            )
+            st.session_state["restore_requested"] = False
+
+
 def screen_pricing():
     st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
     st.markdown('<div class="headline">Pricing.</div>', unsafe_allow_html=True)
@@ -905,6 +979,9 @@ def screen_pricing():
             st.rerun()
 
     _handle_checkout_plan_request()
+
+    st.markdown("")
+    _render_restore_access_expander(key_prefix="pricing_page_")
 
     st.markdown("")
     if st.button("\u2190 Back", use_container_width=True):
@@ -2843,6 +2920,13 @@ def screen_render():
             # _handle_checkout_plan_request() - one create-session-and-
             # redirect implementation, not two copies to keep in sync.
             _handle_checkout_plan_request()
+
+            # This IS the moment a returning subscriber who cleared
+            # cookies is most likely to land - they hit the same free-
+            # tier paywall as someone who never paid, since the app has
+            # no way to know they're a subscriber without this. Shared
+            # with screen_pricing()'s copy of the same expander.
+            _render_restore_access_expander(key_prefix="paywall_")
         else:
             if st.button("Try again", key="retry_render"):
                 last_attempt = st.session_state.get("render_last_attempt", input_text)

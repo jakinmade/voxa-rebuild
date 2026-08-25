@@ -21,6 +21,10 @@ pytest-asyncio==1.4.0
 
 # Cross-session persistence — device cookie + Supabase, see persistence.py
 supabase==2.23.0
+# Restore-subscription magic-link emails — same package/version as
+# clearance-app's send_report_email, reused deliberately (see
+# _send_restore_email in stripe_subscription.py)
+sendgrid>=6.11.0
 streamlit-cookies-controller==0.0.4
 
 # Subscription checkout/verification (Step 4, stripe_subscription.py) —
