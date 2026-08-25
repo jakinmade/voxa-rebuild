@@ -1186,14 +1186,22 @@ def screen_paste():
         label_visibility="collapsed",
     )
 
-    # Live word count: the actual gate below is quality-scored, not a
-    # hard word count (see _fitness_gate / _score_sample_fitness in
-    # voice_engine.py), so a fixed-number progress bar would overclaim
-    # precision. Gives a live count plus an honest range instead.
+    # NOT a true live/per-keystroke count: st.text_area only commits
+    # its value (and triggers a rerun) on blur or Ctrl+Enter - a
+    # Streamlit platform constraint, not something fixable here without
+    # swapping in a custom JS-backed component (flagged for the design
+    # pass, 25 Aug 2026 UX audit). The count below is accurate as of
+    # the last commit, not as of the last keystroke - the explicit
+    # "updates when you pause or click away" line exists specifically
+    # so a stuck-looking counter while actively typing reads as
+    # expected behaviour, not a bug (the audit's actual finding: this
+    # was previously unexplained and read as broken for a few seconds
+    # at the very start of the product).
     _live_word_count = len(text.split()) if text and text.strip() else 0
     st.markdown(
         f'<div class="microcopy" style="margin-top:-0.6rem;">'
-        f'{_live_word_count} words so far &middot; most fingerprints need '
+        f'{_live_word_count} words so far (updates when you pause typing '
+        f'or click away) &middot; most fingerprints need '
         f'roughly 100&ndash;250 words of real writing, more specific and '
         f'personal than formal.</div>',
         unsafe_allow_html=True,
@@ -1489,9 +1497,19 @@ def screen_sample2():
         completions[idx] = paste_guard(value=completions[idx], key=f"starter_{idx}")
         wc = len(completions[idx].split())
         required_word_counts[idx] = wc
+        # "X / N words" read like a fraction of a target (UX audit, 25
+        # Aug 2026) when N is actually a minimum floor, not a target to
+        # hit exactly - "at least N" states the actual rule. Also not
+        # truly live per keystroke, same platform reason as the Paste
+        # screen's counter (st.text_area only commits on blur/Ctrl+
+        # Enter) - same clarifying note here.
+        _met = wc >= SAMPLE2_REQUIRED_MIN_WORDS
         st.markdown(
-            f'<div class="microcopy" style="text-align:left;margin-top:0.4rem;">'
-            f'{wc} / {SAMPLE2_REQUIRED_MIN_WORDS} words</div>',
+            f'<div class="microcopy" style="text-align:left;margin-top:0.4rem;'
+            f'{"color:var(--success);" if _met else ""}">'
+            f'{wc} words (updates when you pause or click away) '
+            f'&middot; at least {SAMPLE2_REQUIRED_MIN_WORDS} needed'
+            f'{" &mdash; done" if _met else ""}</div>',
             unsafe_allow_html=True
         )
 
@@ -2854,21 +2872,39 @@ def screen_render():
         unsafe_allow_html=True,
     )
     render_in_progress = st.session_state.get("render_in_progress", False)
-    if st.button(
+
+    def _start_render():
+        # Guard INSIDE the callback, not just via the button's disabled=
+        # prop: on_click callbacks run before Streamlit reruns and
+        # re-sends the disabled state to the browser, closing the
+        # round-trip window a fast double-click can land in (confirmed
+        # real in the 25 Aug 2026 UX audit - a double-click burned two
+        # of the 15 lifetime, non-renewing free renders on one
+        # submission). The disabled= prop below still helps for a
+        # slower second click after the first rerun completes; this
+        # guard is what closes the fast-double-click race specifically.
+        if st.session_state.get("render_in_progress"):
+            return
+        _input = st.session_state.get("render_input_field", "")
+        if not _input or not _input.strip():
+            st.session_state["render_missing_input"] = True
+            return
+        st.session_state["render_missing_input"] = False
+        st.session_state.render_input_text = _input
+        st.session_state.render_context_input = st.session_state.get("render_context_field", "")
+        st.session_state.render_mode_input = st.session_state.get("render_mode_field", "preserve")
+        st.session_state.platform_format_input = st.session_state.get("platform_format_field")
+        st.session_state.render_output = ""
+        st.session_state.refinement_used = False
+        st.session_state.render_in_progress = True
+
+    st.button(
         "Write as me \u2192", type="primary", use_container_width=True,
-        disabled=render_in_progress,
-    ):
-        if not input_text or not input_text.strip():
-            st.error("Paste some text first.")
-        else:
-            st.session_state.render_input_text = input_text
-            st.session_state.render_context_input = render_context
-            st.session_state.render_mode_input = render_mode
-            st.session_state.platform_format_input = platform_format
-            st.session_state.render_output = ""
-            st.session_state.refinement_used = False
-            st.session_state.render_in_progress = True
-            st.rerun()
+        disabled=render_in_progress, on_click=_start_render,
+    )
+    if st.session_state.get("render_missing_input"):
+        st.error("Paste some text first.")
+        st.session_state["render_missing_input"] = False
 
     if st.session_state.get("render_in_progress"):
         _run_render(
