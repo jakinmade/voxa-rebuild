@@ -82,7 +82,40 @@ def get_or_create_device_id() -> str:
     a fresh random ID before the real one was ever read — every time.
     Deferring once, via the same rerun-idiom used elsewhere in this
     codebase for identical component-timing races, gives the real
-    value one full round trip to arrive before we decide."""
+    value one full round trip to arrive before we decide.
+
+    SECOND, WORSE INSTANCE OF THE SAME RACE FIXED (26 Aug 2026, live
+    incident): the deferral above only protects the FIRST call within
+    a session. Every other call site in this codebase (app.py, six of
+    them) already guards against redundant calls with `st.session_
+    state.get("_device_id") or get_or_create_device_id()` — but this
+    function was still being reached unconditionally on EVERY rerun
+    via restore_profile_if_available(), which is the very first thing
+    that runs on every page load and did not use that guard. Confirmed
+    live via DIAG prints: a single page load produced THREE different
+    randomly-generated device IDs in under two seconds, each
+    overwriting the last, because Streamlit's own automatic reruns
+    (while the cookie component's async round-trip is still in
+    flight) hit this function again before the previous write had
+    landed — each premature read-before-write-lands looks identical
+    to a genuinely absent cookie. The one-rerun deferral above cannot
+    protect against this, because it only fires on the very first call
+    of a session; by the second, third, etc. call, "cookies" is
+    already in st.session_state (from the first call), so the deferral
+    is skipped and a fresh read is attempted immediately — landing
+    exactly in the race window.
+
+    Fix: once this function has resolved a device_id for this session
+    (however it got it), cache it and short-circuit every subsequent
+    call within the same session — the cookie dance now only ever
+    runs once per browser session, not once per rerun. This is the
+    same "resolve once, reuse via session_state" pattern already used
+    at every other call site; it was simply missing from the one
+    function that actually does the resolving.
+    """
+    if st.session_state.get("_device_id"):
+        return st.session_state["_device_id"]
+
     if "cookies" not in st.session_state and not st.session_state.get("_device_id_cookie_wait"):
         print("DIAG get_or_create_device_id: deferring one rerun for cookie to arrive", flush=True)
         st.session_state["_device_id_cookie_wait"] = True
@@ -147,7 +180,7 @@ def restore_profile_if_available() -> bool:
         print("DIAG restore_profile_if_available: get_supabase_client() returned None, skipping restore", flush=True)
         return False
 
-    device_id = get_or_create_device_id()
+    device_id = st.session_state.get("_device_id") or get_or_create_device_id()
     st.session_state["_device_id"] = device_id
     print(f"DIAG restore_profile_if_available: querying voice_profiles for device_id={device_id}", flush=True)
 

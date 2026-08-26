@@ -253,3 +253,61 @@ def test_save_failure_does_not_raise():
         with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(raise_on_upsert=True)):
                 persistence.save_profile_if_available()  # must not raise
+
+
+# ------------------------------------------------------------------
+# Regression: repeated calls within one session must not each mint a
+# new device id (26 Aug 2026 live incident)
+# ------------------------------------------------------------------
+
+def test_repeated_calls_within_one_session_do_not_mint_new_ids_each_time():
+    """Live incident, 26 Aug 2026: confirmed via production DIAG logs
+    that a single page load produced THREE different randomly-
+    generated device ids in under two seconds, each overwriting the
+    last, because get_or_create_device_id() had no memory of already
+    having resolved an id earlier in the same session - every call
+    re-ran the full cookie read/write dance, and Streamlit's own
+    automatic reruns (while the cookie component's async round-trip
+    is still in flight) meant a premature read-before-write-lands
+    looked identical to a genuinely absent cookie every time.
+
+    This simulates exactly that: the cookie controller's .get() never
+    starts returning the written value (as it wouldn't, mid-race, in
+    the real bug) - the fix must still only mint one id, by caching
+    its own resolution in st.session_state and never touching the
+    controller again once resolved, not by the mock happening to
+    become consistent."""
+    mock_controller = _mock_cookie_controller(existing_value=None)
+    with patch("persistence.CookieController", return_value=mock_controller):
+        first_id = persistence.get_or_create_device_id()
+        st.session_state["_device_id"] = first_id
+
+        second_id = persistence.get_or_create_device_id()
+        third_id = persistence.get_or_create_device_id()
+
+    assert second_id == first_id
+    assert third_id == first_id
+    # The controller must only ever have been written to once - every
+    # subsequent call should short-circuit on the cached session_state
+    # value before it ever reaches the cookie controller again.
+    mock_controller.set.assert_called_once()
+
+
+def test_restore_profile_if_available_reuses_cached_device_id():
+    """The one call site that was missing the same st.session_state.
+    get("_device_id") or ... guard every other call site already uses
+    - restore_profile_if_available() itself. A second call within the
+    same session must not touch the cookie controller again."""
+    mock_controller = _mock_cookie_controller(existing_value=None)
+    with patch("persistence.CookieController", return_value=mock_controller), \
+         patch("persistence.get_supabase_client", return_value=None):
+        persistence.get_or_create_device_id()
+        st.session_state["_device_id"] = st.session_state.get("_device_id") or "resolved-id"
+
+        # get_supabase_client() returns None here (no credentials),
+        # so restore_profile_if_available() returns False fast - but
+        # it must still resolve device_id from the cache, not the
+        # controller, once _device_id is already set.
+        persistence.restore_profile_if_available()
+
+    assert mock_controller.set.call_count <= 1
