@@ -698,6 +698,100 @@ st.markdown("""
     div[data-testid="stSpinner"] > div > i {
         color: var(--accent) !important;
     }
+
+    /* ---------------------------------------------------------------
+       Persistent app-shell sidebar (Write / My Voice / Past renders).
+       Added per the Step 4 UX research pass (26 Aug 2026): the prior
+       fix only added a one-time text note when the shell first
+       appeared. Research on Linear/Notion/Grammarly/Jasper/Superhuman
+       converged on a different pattern - treat the shell as the
+       permanent destination, narrate its arrival with motion rather
+       than a jump-cut, teach it with exactly one anchored coachmark
+       (not a tour - NN/g's "Instructional Overlays and Coach Marks"
+       is explicit that stacked hints get dismissed faster, not read),
+       and surface usage/upgrade persistently in the shell itself
+       rather than only on the Write screen or the marketing site.
+       Styles below implement that: an entrance animation for the
+       shell's first appearance, a single-callout coachmark anchored
+       under the My Voice nav item, a static (non-button) label for
+       whichever page is current, and a usage chip with a low-balance
+       state - all reusing existing tokens, no new palette.
+       --------------------------------------------------------------- */
+    @keyframes shell-dock-in {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    /* Applied to a div this file renders directly via st.markdown, not
+       to Streamlit's own sidebar container - that container's class
+       list isn't reachable from unsafe_allow_html without injecting a
+       script to mutate it after render, which is fragile across
+       Streamlit versions and isn't done here. The coachmark below
+       carries its own fade-in instead, so the sidebar's arrival still
+       reads as motion even without a wrapper animation on the
+       sidebar element itself. */
+    .shell-intro {
+        animation: shell-dock-in 0.4s ease-out forwards;
+    }
+    .sidebar-nav-current {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--accent);
+        padding: 0.4rem 0;
+    }
+    .sidebar-nav-current::before {
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+    }
+    .sidebar-coachmark {
+        position: relative;
+        margin: 0.3rem 0 0.7rem;
+        padding: 0.6rem 0.7rem;
+        background: var(--ink);
+        color: var(--canvas);
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+        line-height: 1.45;
+        animation: voice-check-in 0.4s ease-out 0.3s forwards;
+        opacity: 0;
+    }
+    .sidebar-coachmark::before {
+        content: "";
+        position: absolute;
+        top: -5px;
+        left: 1.1rem;
+        width: 9px;
+        height: 9px;
+        background: var(--ink);
+        transform: rotate(45deg);
+    }
+    .sidebar-usage-chip {
+        margin-top: 0.9rem;
+        padding: 0.55rem 0.7rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.78rem;
+        line-height: 1.4;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--muted);
+    }
+    .sidebar-usage-chip.low {
+        background: var(--warning-soft);
+        border-color: transparent;
+        color: var(--warning);
+        font-weight: 500;
+    }
+    .sidebar-usage-chip a, .sidebar-usage-chip-link {
+        color: inherit;
+        text-decoration: underline;
+        font-weight: 600;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2800,73 +2894,144 @@ def _clean_ai_tells_and_rescore():
         st.session_state.voice_report = report
 
 
+# ============================================================
+# Shared app-shell sidebar — Write, My Voice, Past renders
+# ============================================================
+
+# key overrides preserve the exact button keys that predate this
+# consolidation (nav_to_my_voice, nav_to_history_from_write,
+# nav_back_to_write, nav_to_history_from_my_voice,
+# nav_back_to_write_from_history) - covered by
+# test_step3_step4_wiring.py. Only the History->My Voice link is new
+# (History previously had no way back to My Voice at all - a real
+# navigation gap, not a stylistic one) and gets a fresh key.
+_SHELL_NAV_KEYS = {
+    (4, 5): "nav_to_my_voice",
+    (4, 6): "nav_to_history_from_write",
+    (5, 4): "nav_back_to_write",
+    (5, 6): "nav_to_history_from_my_voice",
+    (6, 4): "nav_back_to_write_from_history",
+    (6, 5): "nav_to_my_voice_from_history",
+}
+_SHELL_SCREENS = [(4, "Write"), (5, "My Voice"), (6, "Past renders")]
+
+
+def _shell_sidebar(current_screen: int):
+    """
+    One shared sidebar for the three persistent app-shell screens,
+    replacing three separately-maintained st.sidebar blocks that had
+    already drifted (History had no link back to My Voice at all;
+    only Write showed the free-render count). Per the Step 4 UX
+    research pass (26 Aug 2026, benchmarked against Linear/Notion/
+    Grammarly/Jasper/Superhuman): the shell is a permanent surface,
+    not a one-screen afterthought, so nav/usage/upgrade need to be
+    identical from wherever you enter it.
+
+    Single coachmark, not a tour - NN/g's "Instructional Overlays and
+    Coach Marks for Mobile Apps" is explicit that stacked hints get
+    dismissed faster rather than read; this shows exactly one, tied
+    to _step4_shell_intro_shown so it appears once per session
+    regardless of which shell screen is reached first, then never
+    again. Replaces the earlier plain-text note that lived only on
+    the Write screen's main content.
+    """
+    device_id = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = device_id
+
+    with st.sidebar:
+        _updated_raw = st.session_state.get("_voice_profile_updated_at")
+        if _updated_raw:
+            try:
+                _updated_dt = datetime.fromisoformat(_updated_raw.replace("Z", "+00:00"))
+                st.caption(f"Your voice \u00b7 updated {_updated_dt.strftime('%-d %b %Y')}")
+            except Exception:
+                st.caption("Your voice \u00b7 loaded")
+        else:
+            st.caption("Your voice \u00b7 loaded")
+
+        # Persists until explicitly dismissed rather than auto-hiding
+        # after one script pass - this app's own device-cookie/profile
+        # persistence triggers an internal extra rerun on first landing
+        # here (confirmed live: the auto-consuming version set-and-
+        # cleared its own flag before the browser ever painted it, so
+        # nobody ever actually saw it - a real bug, not just theory).
+        # A real dismiss action is also just a better pattern on its
+        # own terms: NN/g's coachmark guidance is that a hint gone
+        # before it's read has defeated its own purpose, and Grammarly's
+        # hotspots are interactive/dismissible too, not timed.
+        show_coachmark = not st.session_state.get("_step4_shell_intro_shown")
+
+        for screen_id, label in _SHELL_SCREENS:
+            if screen_id == current_screen:
+                st.markdown(
+                    f'<div class="sidebar-nav-current">{label}</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                key = _SHELL_NAV_KEYS[(current_screen, screen_id)]
+                if st.button(f"{label} \u2192", key=key):
+                    go_to(screen_id)
+                    st.rerun()
+            if screen_id == 5 and show_coachmark:
+                st.markdown(
+                    '<div class="sidebar-coachmark">Your voice fingerprint lives '
+                    'here \u2014 reuse it anytime, no need to redo onboarding.</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("Got it", key=f"dismiss_coachmark_from_{current_screen}"):
+                    st.session_state["_step4_shell_intro_shown"] = True
+                    st.rerun()
+
+        # Persistent usage/upgrade surface - previously only existed as
+        # a line of text on the Write screen's main content, with no
+        # equivalent on My Voice or History, and no in-app upgrade path
+        # outside the paywall-hit error state. Notion's pattern (a
+        # sidebar usage notification plus a durable Settings ->
+        # Upgrade entry) is the model; the lifetime (not monthly) cap
+        # makes the running count especially worth keeping visible.
+        if not device_has_active_subscription(device_id):
+            _used, _limit = get_lifetime_render_count(device_id)
+            _remaining = max(_limit - _used, 0)
+            chip_class = "sidebar-usage-chip low" if _remaining <= 3 else "sidebar-usage-chip"
+            st.markdown(
+                f'<div class="{chip_class}">{_remaining} of {_limit} free renders '
+                f'left (lifetime, not monthly)</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "See plans \u2192" if _remaining > 3 else "Upgrade for unlimited \u2192",
+                key=f"shell_upgrade_from_{current_screen}", use_container_width=True,
+            ):
+                go_to(7)
+                st.rerun()
+
+
 def screen_render():
     if not st.session_state.get("_returning_user_sidebar"):
         progress_dots(4)
     _show_deepen_success_if_pending()
 
-    device_id_for_ui = st.session_state.get("_device_id") or get_or_create_device_id()
-    st.session_state["_device_id"] = device_id_for_ui
-
     if st.session_state.get("baseline_fingerprint") and (
         st.session_state.get("_returning_user_sidebar")
         or st.session_state.get("_sidebar_unlocked")
     ):
-        with st.sidebar:
-            _updated_raw = st.session_state.get("_voice_profile_updated_at")
-            if _updated_raw:
-                try:
-                    _updated_dt = datetime.fromisoformat(_updated_raw.replace("Z", "+00:00"))
-                    st.caption(f"Your voice · updated {_updated_dt.strftime('%-d %b %Y')}")
-                except Exception:
-                    st.caption("Your voice · loaded")
-            else:
-                st.caption("Your voice · loaded")
-            if st.button("My Voice \u2192", key="nav_to_my_voice"):
-                go_to(5)
-                st.rerun()
-            if st.button("Past renders \u2192", key="nav_to_history_from_write"):
-                go_to(6)
-                st.rerun()
+        _shell_sidebar(4)
 
     if st.session_state.get("_returning_user_sidebar"):
         st.markdown('<div class="headline">Write as me.</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub">Paste anything you want in your voice. Your fingerprint is loaded and ready.</div>', unsafe_allow_html=True)
     else:
+        # shell-intro: brief docking-in motion the first time this
+        # screen's content appears, narrating the layout change rather
+        # than a jump-cut - the sidebar itself carries the coachmark
+        # that explains what's new (_shell_sidebar above), so this is
+        # motion only, no duplicate text note (25 Aug 2026 UX audit
+        # flagged the abrupt shape change; the 26 Aug research pass
+        # replaced the earlier plain-text fix with this pairing).
+        st.markdown('<div class="shell-intro">', unsafe_allow_html=True)
         st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
-        # One-time signal that the layout just changed shape — Steps
-        # 1-3 were a centered, chrome-free wizard; this screen
-        # introduces the persistent sidebar for the first time with no
-        # warning otherwise (25 Aug 2026 UX audit: "the seam lands
-        # exactly where a first-time user is most attentive"). A
-        # single first-run note, not a redesign of the shell itself —
-        # the audit calls the wizard-vs-app-shell question a decision
-        # to make deliberately, not a bug to patch around; this closes
-        # the "no transition to signal it" gap without pre-empting
-        # that decision. Session-only flag, so it shows once per visit.
-        if not st.session_state.get("_step4_shell_intro_shown"):
-            st.markdown(
-                '<div class="microcopy" style="margin-top:-0.9rem;margin-bottom:1rem;">'
-                'One thing changes here: your voice now stays loaded in the sidebar, '
-                'so you can come back and write again without redoing onboarding.</div>',
-                unsafe_allow_html=True,
-            )
-            st.session_state["_step4_shell_intro_shown"] = True
-
-    # Persistent free-render counter: get_lifetime_render_count() is
-    # read-only (does not itself consume a render), same fail-open
-    # design as the rest of lifetime_cap.py. Skipped entirely for an
-    # active subscriber — the cap doesn't apply to them, so showing it
-    # would just confuse.
-    if not device_has_active_subscription(device_id_for_ui):
-        _used, _limit = get_lifetime_render_count(device_id_for_ui)
-        _remaining = max(_limit - _used, 0)
-        st.markdown(
-            f'<div class="microcopy" style="margin-bottom:0.6rem;">'
-            f'{_remaining} of {_limit} free renders left this lifetime.</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # Optional, skippable, per-render — not onboarding. Register/audience
     # is a genuinely separate axis from personal voice (the field's own
@@ -3579,13 +3744,7 @@ def screen_my_voice():
     the overall confidence badge. No new backend, no new scoring.
     """
     if st.session_state.get("baseline_fingerprint"):
-        with st.sidebar:
-            if st.button("\u2190 Back to Write", key="nav_back_to_write"):
-                go_to(4)
-                st.rerun()
-            if st.button("Past renders \u2192", key="nav_to_history_from_my_voice"):
-                go_to(6)
-                st.rerun()
+        _shell_sidebar(5)
 
     st.markdown('<div class="headline">Your voice.</div>', unsafe_allow_html=True)
 
@@ -3645,10 +3804,7 @@ def screen_history():
     honestly available.
     """
     if st.session_state.get("baseline_fingerprint"):
-        with st.sidebar:
-            if st.button("\u2190 Back to Write", key="nav_back_to_write_from_history"):
-                go_to(4)
-                st.rerun()
+        _shell_sidebar(6)
 
     st.markdown('<div class="headline">Past renders.</div>', unsafe_allow_html=True)
     st.markdown(
