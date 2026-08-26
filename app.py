@@ -365,6 +365,28 @@ st.markdown("""
         transform: scaleY(1.15);
     }
 
+    /* Render-output seam (26 Aug 2026, UI-quality pass): the moment
+       output appears after "Write as me" was styled identically to
+       starting a fresh screen — full .divider hr (2.25rem margin) +
+       full .headline (same 2.3rem serif used at the very top of the
+       flow, e.g. "Paste the text to restore."). That reads as "new
+       page", not "here's what came from what you just wrote" - the
+       single most important transition in the product given the
+       Lex/Grammarly benchmarking (26 Aug 2026 session): those
+       products keep input and output in one continuous surface,
+       never restart it. Full layout parity with a real canvas isn't
+       possible in Streamlit (see that session's notes), but this
+       specific seam is a safe, scoped fix within reach tonight -
+       a lighter continuation marker instead of a second page-start. */
+    .render-output-seam {
+        margin-top: 1.75rem;
+        padding-top: 1.1rem;
+        border-top: 1px solid var(--border);
+    }
+    .render-output-seam .tagline {
+        margin-bottom: 0.4rem;
+    }
+
     .divider {
         border: none;
         border-top: 1px solid var(--border);
@@ -3273,8 +3295,10 @@ def screen_render():
 
     output = st.session_state.get("render_output", "")
     if output:
-        st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-        st.markdown('<div class="headline">Your writing.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="render-output-seam"><span class="tagline">Your writing</span></div>',
+            unsafe_allow_html=True,
+        )
 
         import hashlib
         output_key = "out_" + hashlib.md5(output[:50].encode()).hexdigest()[:8]
