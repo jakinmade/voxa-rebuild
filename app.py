@@ -1312,7 +1312,11 @@ def screen_paste():
         unsafe_allow_html=True,
     )
     st.markdown('<div class="headline">AI can write well now. It just doesn\'t write like you.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Paste your draft. Voicova puts your voice back in.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub">Paste your draft. Voicova rewrites it so it sounds like you '
+        'wrote it, not like a chatbot did.</div>',
+        unsafe_allow_html=True,
+    )
 
     # Upfront guidance, shown before the first submission rather than
     # only as a post-rejection error (25 Aug 2026 UX audit: "the
