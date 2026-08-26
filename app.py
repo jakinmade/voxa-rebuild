@@ -981,9 +981,10 @@ def screen_landing():
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     st.markdown(
         '<div class="microcopy">No account or signup. Your profile is tied to a device '
-        'cookie, not an email. Clear your cookies and it\'s gone. No selling, no sharing, '
-        'no third-party analytics on what you write. 15 renders free, then £6.99/month '
-        'or £49/year for unlimited.</div>',
+        'cookie, not an email. Clear your cookies and it\'s gone. Per-device, too — your '
+        'phone or another computer starts fresh with its own free renders. No selling, '
+        'no sharing, no third-party analytics on what you write. 15 renders free, then '
+        '£6.99/month or £49/year for unlimited.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1461,7 +1462,10 @@ def screen_paste():
             "This is tied to a device cookie, not an account or email. "
             "We don't know who you are unless you choose to subscribe. "
             "Clear your cookies and it's gone. No selling, no sharing, "
-            "no third-party analytics on this data."
+            "no third-party analytics on this data.\n\n"
+            "It's also per-device: this browser only. On your phone or "
+            "another computer, you'll go through onboarding again and get "
+            "your own separate 15 free renders — nothing carries across."
         )
 
     # Plain link to /pricing, not a promotional push. This screen's
