@@ -758,8 +758,6 @@ st.markdown("""
         border-radius: var(--radius-sm);
         font-size: 0.8rem;
         line-height: 1.45;
-        animation: voice-check-in 0.4s ease-out 0.3s forwards;
-        opacity: 0;
     }
     .sidebar-coachmark::before {
         content: "";
@@ -3818,6 +3816,9 @@ def screen_history():
 
     if not history:
         st.info("No renders yet. Once you write something, it'll show up here.")
+        if st.button("Write your first one \u2192", key="history_empty_cta"):
+            go_to(4)
+            st.rerun()
         return
 
     for entry in history:
