@@ -26,7 +26,7 @@ no reason to carry them across a session boundary.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 from streamlit_cookies_controller import CookieController
@@ -103,7 +103,27 @@ def get_or_create_device_id() -> str:
     new_id = str(uuid.uuid4())
     print(f"DIAG get_or_create_device_id: NO existing cookie found, generating new_id={new_id}", flush=True)
     try:
-        controller.set(_COOKIE_NAME, new_id, max_age=60 * 60 * 24 * 365)
+        # BUG FIXED (26 Aug 2026, live incident): streamlit_cookies_
+        # controller's CookieController.set() silently defaults
+        # `expires` to datetime.now()+1 day WHENEVER the caller
+        # doesn't pass expires explicitly - confirmed by reading the
+        # installed package source (__getOptions in
+        # cookie_controller.py), regardless of what max_age is set to.
+        # This call only ever passed max_age=365 days, so every device
+        # cookie this app has ever set went out with BOTH a 365-day
+        # Max-Age AND a competing, silently-injected 1-day Expires in
+        # the same Set-Cookie instruction. Max-Age should win per RFC
+        # 6265, but conflicting directives are exactly the kind of
+        # thing that behaves inconsistently across browsers rather
+        # than failing outright - consistent with "recognised
+        # sometimes, not others" rather than a clean on/off failure.
+        # Fix: pass an explicit, matching expires 365 days out so the
+        # two directives agree instead of silently conflicting.
+        controller.set(
+            _COOKIE_NAME, new_id,
+            max_age=60 * 60 * 24 * 365,
+            expires=datetime.now(timezone.utc) + timedelta(days=365),
+        )
     except Exception:
         log.error("device_cookie_set_failed", exc_info=True)
     return new_id
