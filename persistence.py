@@ -157,8 +157,39 @@ def get_or_create_device_id() -> str:
             max_age=60 * 60 * 24 * 365,
             expires=datetime.now(timezone.utc) + timedelta(days=365),
         )
+        print(f"DIAG get_or_create_device_id: controller.set() call returned (fire-and-forget, no confirmation)", flush=True)
     except Exception:
         log.error("device_cookie_set_failed", exc_info=True)
+
+    # SECOND WRITE-SIDE BUG (26 Aug 2026, same live incident, found
+    # after the read-side fix above still didn't close it): the write
+    # above is the exact same kind of async Streamlit-component call
+    # as the read at the top of this function - it queues an
+    # instruction for the browser's JS to actually execute
+    # (document.cookie = ...), it does not confirm that instruction
+    # has run. The read side already needed a full extra rerun before
+    # its real value could be trusted (see the docstring above); the
+    # write side needed the identical treatment and never got it -
+    # every previous fix in this incident treated the write as
+    # complete the instant controller.set() returned, then immediately
+    # rendered the rest of the page and moved on. If the browser tears
+    # the page down (a hard refresh) before that queued JS has had a
+    # chance to actually mount and run, the cookie is never actually
+    # written at all - which exactly matches every prior attempt
+    # tonight showing existing=None on every single fresh visit, even
+    # after the within-session id-cascade bug above was fixed. Forcing
+    # one more rerun here, mirroring the read-side deferral exactly,
+    # gives the browser a full round trip to actually execute the
+    # write before this function (or anything downstream of it) is
+    # allowed to consider the id settled. Guarded by its own flag so
+    # this can only ever fire once per new id, not loop.
+    wait_key = f"_device_id_write_wait_{new_id}"
+    if not st.session_state.get(wait_key):
+        print(f"DIAG get_or_create_device_id: deferring one rerun for the write to {new_id} to actually land", flush=True)
+        st.session_state[wait_key] = True
+        st.session_state["_device_id"] = new_id
+        st.rerun()
+
     return new_id
 
 
