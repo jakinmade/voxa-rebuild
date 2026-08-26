@@ -49,6 +49,7 @@ from voice_engine import (
     compute_dimension_stability, confidence_caveat,
     compute_burrows_delta,
     compute_sentence_economy, compute_passive_voice,
+    score_draft_check,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -2918,8 +2919,17 @@ _SHELL_NAV_KEYS = {
     (5, 6): "nav_to_history_from_my_voice",
     (6, 4): "nav_back_to_write_from_history",
     (6, 5): "nav_to_my_voice_from_history",
+    # Screen 8 ("Check a draft", added 26 Aug 2026) added as a fourth
+    # shell screen alongside the original three — same key-per-pair
+    # pattern as above, one new key per direction.
+    (4, 8): "nav_to_check_from_write",
+    (5, 8): "nav_to_check_from_my_voice",
+    (6, 8): "nav_to_check_from_history",
+    (8, 4): "nav_back_to_write_from_check",
+    (8, 5): "nav_to_my_voice_from_check",
+    (8, 6): "nav_to_history_from_check",
 }
-_SHELL_SCREENS = [(4, "Write"), (5, "My Voice"), (6, "Past renders")]
+_SHELL_SCREENS = [(4, "Write"), (5, "My Voice"), (6, "Past renders"), (8, "Check a draft")]
 
 
 def _shell_sidebar(current_screen: int):
@@ -3789,6 +3799,113 @@ def screen_my_voice():
         )
 
 
+def screen_check_draft():
+    """
+    Check a draft against your voice — compare-only mode, added 26 Aug
+    2026. Paste a draft you already have (from anywhere — VOICOVA,
+    another tool, a human writer) and see whether it matches your
+    saved voice fingerprint. No rewrite, no LLM call: this is a purely
+    deterministic read against score_draft_check, same scoring
+    machinery the Screen 4 Voice Report uses, just without generating
+    anything. Does not touch the render cap — this isn't a render.
+
+    Gated on baseline_fingerprint existing, same pattern as
+    screen_my_voice: there's nothing to check a draft against until
+    onboarding has produced a baseline.
+    """
+    if st.session_state.get("baseline_fingerprint"):
+        _shell_sidebar(8)
+
+    st.markdown('<div class="headline">Check a draft.</div>', unsafe_allow_html=True)
+
+    if not st.session_state.get("baseline_fingerprint"):
+        st.markdown(
+            '<div class="sub">No voice profile yet. Paste some of your writing on '
+            'the Write screen first to build one.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        '<div class="sub">Paste a finished draft — yours, someone else\'s, '
+        'AI-written, doesn\'t matter. See if it holds up against your voice, '
+        'without rewriting it.</div>',
+        unsafe_allow_html=True,
+    )
+
+    draft_text = st.text_area(
+        "Draft to check", height=220, label_visibility="collapsed",
+        placeholder="Paste the draft you want to check\u2026",
+        key="check_draft_input",
+    )
+
+    if st.button("Check against my voice \u2192", type="primary", key="check_draft_submit"):
+        if not draft_text or not draft_text.strip():
+            st.session_state.check_draft_error = "Paste some text first."
+            st.session_state.check_draft_result = None
+        else:
+            st.session_state.check_draft_error = None
+            st.session_state.check_draft_result = score_draft_check(
+                st.session_state.baseline_fingerprint,
+                draft_text,
+                baseline_texts=st.session_state.get("fingerprint_sample_texts", []),
+            )
+
+    if st.session_state.get("check_draft_error"):
+        st.warning(st.session_state.check_draft_error)
+
+    result = st.session_state.get("check_draft_result")
+    if not result:
+        return
+
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+
+    verdict = result["verdict"]
+    verdict_badge = "badge-green" if verdict == "PASS" else "badge-amber"
+    st.markdown(
+        f'<div class="sub">Voice match: '
+        f'<span class="badge {result["badge"]}">{result["tier"]}</span>'
+        f'&nbsp;&nbsp;Verdict: '
+        f'<span class="badge {verdict_badge}">{verdict}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    verdict_mark = "\u2713" if verdict == "PASS" else "!"
+    st.markdown(
+        f'<div class="voice-check">'
+        f'<div class="voice-check-mark">{verdict_mark}</div>'
+        f'<div><div class="voice-check-text">{_safe_html(result["evidence"])}</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    ai_ok = result["ai_tells_clean"]
+    ai_mark = "\u2713" if ai_ok else "!"
+    ai_text = (
+        "No generic AI phrasing detected." if ai_ok
+        else "Generic AI phrasing detected: " + _safe_html(", ".join(result["ai_tells_flagged"]))
+    )
+    st.markdown(
+        f'<div class="voice-check">'
+        f'<div class="voice-check-mark">{ai_mark}</div>'
+        f'<div><div class="voice-check-text">{ai_text}</div></div></div>',
+        unsafe_allow_html=True,
+    )
+
+    burrows = result.get("burrows_delta") or {}
+    burrows_tier = burrows.get("tier")
+    if burrows_tier and "Insufficient" not in burrows_tier:
+        burrows_mark = "\u2713" if burrows_tier == "Close" else "!"
+        st.markdown(
+            f'<div class="voice-check">'
+            f'<div class="voice-check-mark">{burrows_mark}</div>'
+            f'<div><div class="voice-check-text">Word-choice fingerprint: {burrows_tier} '
+            f'to your baseline (function-word analysis, a second independent signal).'
+            f'</div></div></div>',
+            unsafe_allow_html=True,
+        )
+
+
 def screen_history():
     """
     Section 9.4 (Step 5) - list of past renders, click to reopen.
@@ -3885,6 +4002,8 @@ elif screen == 6:
     screen_history()
 elif screen == 7:
     screen_pricing()
+elif screen == 8:
+    screen_check_draft()
 else:
     go_to(1)
     st.rerun()

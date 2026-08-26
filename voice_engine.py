@@ -2569,6 +2569,58 @@ _DIMENSION_LABELS = {
 }
 
 
+def score_draft_check(baseline: dict, draft_text: str, baseline_texts: list[str] | None = None) -> dict:
+    """
+    Compare-only voice check (added 26 Aug 2026): scores an
+    already-finished draft against a saved baseline fingerprint, with
+    no rewrite and no LLM call — the read-only counterpart to
+    score_render_delta's use inside the render pipeline. Reuses
+    score_render_delta, voice_match_label, score_ai_tells, and
+    compute_burrows_delta exactly as built for the Screen 4 Voice
+    Report, so this can never quietly diverge on what "matches" means.
+    Deliberately does not call score_semantic_drift or the content-
+    lock/attribution checks — those measure fidelity between an input
+    and a rewritten output, and there is no rewrite here: draft_text
+    is the only text in play.
+
+    original_input_text is not passed to score_ai_tells here for the
+    same reason: that parameter exists to exempt phrases that appear
+    in the person's own original input to a rewrite. There is no
+    separate "original" here — the draft being checked IS the text.
+
+    baseline_texts: the user's own raw baseline samples, if available
+    (st.session_state.fingerprint_sample_texts) - passed through to
+    compute_burrows_delta for the second, independently-grounded
+    voice-match signal. Optional; compute_burrows_delta already
+    handles fewer than 2 samples by reporting insufficient baseline
+    rather than guessing, so omitting this is safe.
+
+    verdict is driven purely by the voice-match tier (PASS iff the
+    tier's own badge is green — i.e. "Strong" or "Good"), not by
+    ai_tells. Generic/AI-construction phrasing is a genuinely separate
+    signal (a draft can sound exactly like someone's established voice
+    and still contain a stray AI tell, or vice versa) and is reported
+    as its own line rather than folded into one pass/fail gate — same
+    separation the brainstormed MVP report card called for.
+    """
+    delta = score_render_delta(baseline, draft_text)
+    match = voice_match_label(delta)
+    ai_tells = score_ai_tells(draft_text)
+    burrows = compute_burrows_delta(baseline_texts or [], draft_text)
+
+    return {
+        "verdict": "PASS" if match["badge"] == "badge-green" else "REVIEW",
+        "tier": match["tier"],
+        "badge": match["badge"],
+        "match_pct": match["_raw_pct"],
+        "evidence": match["evidence"],
+        "delta": delta,
+        "ai_tells_clean": ai_tells["clean"],
+        "ai_tells_flagged": ai_tells["flagged"],
+        "burrows_delta": burrows,
+    }
+
+
 # ============================================================
 # Burrows' Delta — function-word frequency distance
 # ============================================================
