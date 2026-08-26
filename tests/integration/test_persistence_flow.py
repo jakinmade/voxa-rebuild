@@ -69,6 +69,19 @@ def _cookie_controller_returning(value):
     return controller
 
 
+def _context_cookies_returning(value):
+    """Mocks st.context — the synchronous read path persistence.py now
+    uses (see persistence.py's module docstring, 26 Aug 2026 rewrite).
+    AppTest runs the real script but has no real browser/HTTP request
+    behind it, so st.context.cookies needs mocking here the same way
+    persistence.CookieController already was for the write path."""
+    mock_cookies = MagicMock()
+    mock_cookies.get.return_value = value
+    mock_context = MagicMock()
+    mock_context.cookies = mock_cookies
+    return mock_context
+
+
 def _click(at, label_substr):
     for b in at.button:
         if label_substr in b.label:
@@ -122,9 +135,10 @@ def test_completing_onboarding_saves_a_profile_silently(fake_db):
 
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=no_cookie):
-            at = AppTest.from_file(_APP_PATH)
-            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
-            at = _complete_onboarding_through_screen3(at)
+            with patch("persistence.st.context", _context_cookies_returning(None)):
+                at = AppTest.from_file(_APP_PATH)
+                at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
+                at = _complete_onboarding_through_screen3(at)
 
     assert not at.exception, f"Onboarding + save raised: {at.exception}"
     assert at.session_state["screen"] == 4
@@ -143,9 +157,10 @@ def test_returning_visit_with_matching_cookie_restores_straight_to_screen4(fake_
     # First visit: onboard and save.
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=no_cookie):
-            at = AppTest.from_file(_APP_PATH)
-            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
-            at = _complete_onboarding_through_screen3(at)
+            with patch("persistence.st.context", _context_cookies_returning(None)):
+                at = AppTest.from_file(_APP_PATH)
+                at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
+                at = _complete_onboarding_through_screen3(at)
     saved_id, saved_row = next(iter(fake_db.items()))
 
     # Second visit: a fresh AppTest instance (new browser session, same
@@ -153,9 +168,10 @@ def test_returning_visit_with_matching_cookie_restores_straight_to_screen4(fake_
     returning_cookie = _cookie_controller_returning(saved_id)
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=returning_cookie):
-            at2 = AppTest.from_file(_APP_PATH)
-            at2.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
-            at2.run(timeout=15)
+            with patch("persistence.st.context", _context_cookies_returning(saved_id)):
+                at2 = AppTest.from_file(_APP_PATH)
+                at2.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
+                at2.run(timeout=15)
 
     assert not at2.exception, f"Returning-visit load raised: {at2.exception}"
     assert at2.session_state["screen"] == 4, (
@@ -171,9 +187,10 @@ def test_unrecognised_cookie_falls_back_to_fresh_onboarding(fake_db):
 
     with patch("persistence.get_supabase_client", return_value=client):
         with patch("persistence.CookieController", return_value=unknown_cookie):
-            at = AppTest.from_file(_APP_PATH)
-            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
-            at.run(timeout=15)
+            with patch("persistence.st.context", _context_cookies_returning("some-device-id-never-saved")):
+                at = AppTest.from_file(_APP_PATH)
+                at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
+                at.run(timeout=15)
 
     assert not at.exception, f"Unmatched-cookie load raised: {at.exception}"
     assert at.session_state["screen"] == 1, (
@@ -192,9 +209,10 @@ def test_supabase_unreachable_on_load_fails_open_to_fresh_onboarding(fake_db):
 
     with patch("persistence.get_supabase_client", return_value=broken_client):
         with patch("persistence.CookieController", return_value=some_cookie):
-            at = AppTest.from_file(_APP_PATH)
-            at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
-            at.run(timeout=15)
+            with patch("persistence.st.context", _context_cookies_returning("device-id-doesnt-matter")):
+                at = AppTest.from_file(_APP_PATH)
+                at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
+                at.run(timeout=15)
 
     assert not at.exception, f"Supabase-down load raised instead of failing open: {at.exception}"
     assert at.session_state["screen"] == 1

@@ -33,9 +33,29 @@ def _reset_session_state():
 
 
 def _mock_cookie_controller(existing_value=None):
+    # existing_value kept as a parameter for call-site compatibility
+    # across the test file, but no longer drives the READ path (that's
+    # st.context.cookies now, mocked separately via _mock_context_
+    # cookies below) - only relevant for tests exercising the WRITE
+    # path, where this mock's .set() is still what's asserted against.
     mock = MagicMock()
     mock.get.return_value = existing_value
     return mock
+
+
+def _mock_context_cookies(existing_value=None, raise_on_get=False):
+    """Mocks st.context.cookies (a dict-like StreamlitCookies object)
+    for the READ path, which persistence.py now reads directly and
+    synchronously - see persistence.py's module docstring for why this
+    replaced the old async CookieController-based read."""
+    mock_cookies = MagicMock()
+    if raise_on_get:
+        mock_cookies.get.side_effect = Exception("cookies unavailable")
+    else:
+        mock_cookies.get.return_value = existing_value
+    mock_context = MagicMock()
+    mock_context.cookies = mock_cookies
+    return mock_context
 
 
 def _mock_supabase_client(select_rows=None, raise_on_select=False, raise_on_upsert=False):
@@ -61,13 +81,14 @@ def _mock_supabase_client(select_rows=None, raise_on_select=False, raise_on_upse
 # ------------------------------------------------------------------
 
 def test_returns_existing_cookie_value_if_present():
-    with patch("persistence.CookieController", return_value=_mock_cookie_controller("existing-id")):
+    with patch("persistence.st.context", _mock_context_cookies("existing-id")):
         assert persistence.get_or_create_device_id() == "existing-id"
 
 
 def test_generates_and_sets_a_new_id_if_no_cookie():
     mock_controller = _mock_cookie_controller(existing_value=None)
-    with patch("persistence.CookieController", return_value=mock_controller):
+    with patch("persistence.st.context", _mock_context_cookies(None)), \
+         patch("persistence._get_cookie_controller", return_value=mock_controller):
         new_id = persistence.get_or_create_device_id()
         assert new_id  # non-empty
         mock_controller.set.assert_called_once()
@@ -77,8 +98,8 @@ def test_generates_and_sets_a_new_id_if_no_cookie():
 
 def test_cookie_read_failure_still_returns_a_usable_id():
     mock_controller = _mock_cookie_controller()
-    mock_controller.get.side_effect = Exception("cookie blocked")
-    with patch("persistence.CookieController", return_value=mock_controller):
+    with patch("persistence.st.context", _mock_context_cookies(raise_on_get=True)), \
+         patch("persistence._get_cookie_controller", return_value=mock_controller):
         new_id = persistence.get_or_create_device_id()
         assert new_id
 
@@ -86,7 +107,8 @@ def test_cookie_read_failure_still_returns_a_usable_id():
 def test_cookie_write_failure_does_not_raise():
     mock_controller = _mock_cookie_controller(existing_value=None)
     mock_controller.set.side_effect = Exception("cookie blocked")
-    with patch("persistence.CookieController", return_value=mock_controller):
+    with patch("persistence.st.context", _mock_context_cookies(None)), \
+         patch("persistence._get_cookie_controller", return_value=mock_controller):
         new_id = persistence.get_or_create_device_id()
         assert new_id  # still returns something usable this visit
 
@@ -103,14 +125,14 @@ def test_restore_returns_false_when_credentials_not_configured():
 
 def test_restore_returns_false_and_does_not_raise_when_supabase_unreachable():
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(raise_on_select=True)):
                 assert persistence.restore_profile_if_available() is False
 
 
 def test_restore_returns_false_when_no_matching_row():
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[])):
                 assert persistence.restore_profile_if_available() is False
 
@@ -118,7 +140,7 @@ def test_restore_returns_false_when_no_matching_row():
 def test_restore_returns_false_when_row_exists_but_has_no_baseline():
     row = {"device_id": "device-1", "raw_text": "hello", "baseline_fingerprint": None}
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is False
 
@@ -132,7 +154,7 @@ def test_restore_populates_session_state_on_a_real_match():
         "starter_baseline": {"hedge_density": 1.2},
     }
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is True
     assert st.session_state["raw_text"] == "I think we should move fast on this."
@@ -148,7 +170,7 @@ def test_restore_populates_voice_profile_summary_when_present():
         "voice_profile_summary": "Writes short, direct sentences. Rarely hedges.",
     }
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is True
     assert st.session_state["voice_profile_summary"] == "Writes short, direct sentences. Rarely hedges."
@@ -165,7 +187,7 @@ def test_restore_omits_voice_profile_summary_key_when_absent():
         "baseline_fingerprint": {"hedge_density": 1.0},
     }
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
                 assert persistence.restore_profile_if_available() is True
     assert "voice_profile_summary" not in st.session_state
@@ -250,7 +272,7 @@ def test_save_includes_none_for_voice_profile_summary_when_not_yet_generated():
 def test_save_failure_does_not_raise():
     st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
     with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
-        with patch("persistence.CookieController", return_value=_mock_cookie_controller("device-1")):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
             with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(raise_on_upsert=True)):
                 persistence.save_profile_if_available()  # must not raise
 
@@ -278,7 +300,8 @@ def test_repeated_calls_within_one_session_do_not_mint_new_ids_each_time():
     controller again once resolved, not by the mock happening to
     become consistent."""
     mock_controller = _mock_cookie_controller(existing_value=None)
-    with patch("persistence.CookieController", return_value=mock_controller):
+    with patch("persistence.st.context", _mock_context_cookies(None)), \
+         patch("persistence._get_cookie_controller", return_value=mock_controller):
         first_id = persistence.get_or_create_device_id()
         st.session_state["_device_id"] = first_id
 
@@ -299,7 +322,8 @@ def test_restore_profile_if_available_reuses_cached_device_id():
     - restore_profile_if_available() itself. A second call within the
     same session must not touch the cookie controller again."""
     mock_controller = _mock_cookie_controller(existing_value=None)
-    with patch("persistence.CookieController", return_value=mock_controller), \
+    with patch("persistence.st.context", _mock_context_cookies(None)), \
+         patch("persistence._get_cookie_controller", return_value=mock_controller), \
          patch("persistence.get_supabase_client", return_value=None):
         persistence.get_or_create_device_id()
         st.session_state["_device_id"] = st.session_state.get("_device_id") or "resolved-id"
@@ -311,3 +335,18 @@ def test_restore_profile_if_available_reuses_cached_device_id():
         persistence.restore_profile_if_available()
 
     assert mock_controller.set.call_count <= 1
+
+
+def test_read_path_never_calls_st_rerun():
+    """The whole point of switching the read to st.context.cookies
+    (26 Aug 2026, live incident): it is populated synchronously from
+    the real HTTP Cookie header on the initial request, so reading it
+    should never need to defer via st.rerun() the way the old async
+    CookieController-based read did. A stray st.rerun() call here
+    would silently reintroduce the exact class of timing bug this
+    rewrite exists to remove."""
+    with patch("persistence.st.context", _mock_context_cookies("existing-id")), \
+         patch("persistence.st.rerun") as mock_rerun:
+        persistence.get_or_create_device_id()
+
+    mock_rerun.assert_not_called()
