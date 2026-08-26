@@ -214,8 +214,16 @@ st.markdown("""
         max-width: 54ch;
     }
 
-    /* "Your Voice" checklist. CSS-only staggered fade/rise, animation-
-       delay set per-card by screen_reveal() in Python. Respects the
+    /* "Your Voice" trait cards (shared by screen_reveal / Screen 2 and
+       screen_my_voice / Screen 5 - same classes, one place to change
+       both). Redesigned from a flat checklist into Grammarly-style
+       insight cards per the 25 Aug 2026 UX audit: this is the
+       product's payoff/reveal moment and its clearest differentiator
+       (evidence-grounded traits, not a generic quiz output), so the
+       trait name now carries real heading weight and the quoted
+       evidence is visually subordinate to it, each in its own
+       card rather than a plain bordered list row. CSS-only staggered
+       fade/rise, animation-delay set per-card in Python. Respects the
        prefers-reduced-motion rule above (degrades to a static list). */
     @keyframes voice-check-in {
         from { opacity: 0; transform: translateY(8px); }
@@ -224,9 +232,12 @@ st.markdown("""
     .voice-check {
         display: flex;
         align-items: flex-start;
-        gap: 0.75rem;
-        padding: 0.7rem 0;
-        border-bottom: 1px solid var(--border);
+        gap: 0.85rem;
+        padding: 1rem 1.1rem;
+        margin-bottom: 0.65rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
         opacity: 0;
         animation: voice-check-in 0.5s ease-out forwards;
     }
@@ -234,29 +245,33 @@ st.markdown("""
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 1.4rem;
-        height: 1.4rem;
+        width: 1.6rem;
+        height: 1.6rem;
         flex-shrink: 0;
-        margin-top: 0.1rem;
+        margin-top: 0.15rem;
         border-radius: 50%;
         background: var(--success-soft);
         color: var(--success);
         font-weight: 700;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         line-height: 1;
     }
     .voice-check-text {
-        font-size: 0.97rem;
+        font-family: var(--font-display);
+        font-size: 1.12rem;
+        font-weight: 600;
         color: var(--ink);
-        font-weight: 500;
-        line-height: 1.5;
+        line-height: 1.32;
+        letter-spacing: -0.005em;
     }
     .voice-check-evidence {
-        font-size: 0.83rem;
+        font-size: 0.85rem;
         color: var(--muted);
         font-style: italic;
-        margin-top: 0.2rem;
-        line-height: 1.5;
+        margin-top: 0.45rem;
+        padding-left: 0.7rem;
+        border-left: 2px solid var(--gold-soft);
+        line-height: 1.55;
     }
 
     .mode-label {
@@ -498,20 +513,49 @@ st.markdown("""
         letter-spacing: 0.06em;
         margin-bottom: 0.5rem;
     }
+    /* Per-row treatment matches the vr-stat badges above it on the
+       same screen (same green/amber/red tokens, same pill shape) -
+       previously this checklist was the one under-styled part of an
+       otherwise color-and-icon-coded report card (25 Aug 2026 UX
+       audit: Content Lock "visually the least trustworthy-looking
+       thing in the product"). No new detection logic, no new colors -
+       reusing .badge / --success / --danger / --warning exactly as
+       the vr-grid above already does. */
     .content-lock-item {
         display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
+        align-items: flex-start;
+        gap: 0.6rem;
+        padding: 0.55rem 0.7rem;
+        margin-bottom: 0.4rem;
+        border-radius: var(--radius-sm);
         font-size: 0.85rem;
         line-height: 1.5;
-        margin-bottom: 0.3rem;
     }
-    .content-lock-item.fail { color: var(--danger); }
-    .content-lock-item.pass { color: var(--ink); }
+    .content-lock-item.pass {
+        background: var(--success-soft);
+        color: var(--success);
+    }
+    .content-lock-item.fail {
+        background: var(--danger-soft);
+        color: var(--danger);
+    }
     .content-lock-mark {
-        font-family: var(--font-mono);
-        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.15rem;
+        height: 1.15rem;
         flex-shrink: 0;
+        margin-top: 0.05rem;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.55);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        font-size: 0.7rem;
+        line-height: 1;
+    }
+    .content-lock-item span:last-child {
+        font-weight: 500;
     }
     .voice-match-table {
         width: 100%;
@@ -1177,6 +1221,25 @@ def screen_paste():
     )
     st.markdown('<div class="headline">AI can write well now. It just doesn\'t write like you.</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub">Paste your draft. Voicova puts your voice back in.</div>', unsafe_allow_html=True)
+
+    # Upfront guidance, shown before the first submission rather than
+    # only as a post-rejection error (25 Aug 2026 UX audit: "the
+    # biggest first-impression tax in the entire flow" — every
+    # comparable onboarding front-loads what good input looks like,
+    # this one made a first-time user fail once to learn it). Reuses
+    # the same wording the fitness gate's own nudge would give for
+    # thin/generic input (voice_engine.py's _score_sample_fitness),
+    # framed as guidance rather than a rejection — same substance,
+    # earlier moment. Only shown pre-submission; once real fitness
+    # feedback exists below, that takes over.
+    if not st.session_state.get("cumulative_words"):
+        st.markdown(
+            '<div class="microcopy" style="margin-bottom:0.6rem;">'
+            'Good input: an email you actually sent, a message to a colleague '
+            'about a real project — names, specifics, your own words. Not a '
+            'formal document or something written to sound professional.</div>',
+            unsafe_allow_html=True,
+        )
 
     text = st.text_area(
         label="Your writing",
@@ -2772,6 +2835,24 @@ def screen_render():
     else:
         st.markdown('<div class="headline">Paste the text to restore.</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub">Paste AI-generated text here. Voicova rewrites it in your voice, using the fingerprint it just built.</div>', unsafe_allow_html=True)
+        # One-time signal that the layout just changed shape — Steps
+        # 1-3 were a centered, chrome-free wizard; this screen
+        # introduces the persistent sidebar for the first time with no
+        # warning otherwise (25 Aug 2026 UX audit: "the seam lands
+        # exactly where a first-time user is most attentive"). A
+        # single first-run note, not a redesign of the shell itself —
+        # the audit calls the wizard-vs-app-shell question a decision
+        # to make deliberately, not a bug to patch around; this closes
+        # the "no transition to signal it" gap without pre-empting
+        # that decision. Session-only flag, so it shows once per visit.
+        if not st.session_state.get("_step4_shell_intro_shown"):
+            st.markdown(
+                '<div class="microcopy" style="margin-top:-0.9rem;margin-bottom:1rem;">'
+                'One thing changes here: your voice now stays loaded in the sidebar, '
+                'so you can come back and write again without redoing onboarding.</div>',
+                unsafe_allow_html=True,
+            )
+            st.session_state["_step4_shell_intro_shown"] = True
 
     # Persistent free-render counter: get_lifetime_render_count() is
     # read-only (does not itself consume a render), same fail-open
