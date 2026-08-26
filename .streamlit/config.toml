@@ -4,13 +4,32 @@
 # Streamlit's default red-tinted theme underneath it. Values mirror
 # the CSS custom properties defined in app.py's <style> block — if
 # either changes, check the other stays in sync.
+#
+# font/codeFont FIXED (26 Aug 2026, UI-quality pass): were both
+# generic Streamlit keywords ("sans serif" / unset), so every native
+# widget (buttons, st.text_area, checkboxes) rendered in the browser's
+# default system sans-serif while every custom HTML block on the same
+# screen (headline, sub, microcopy, voice-check cards) rendered in
+# Inter via the @import in app.py's <style> block — a real, visible
+# typeface mismatch between "app chrome" and "app content" on every
+# single screen, not a one-off. Streamlit's font/codeFont support a
+# "<family>:<google-fonts-css-url>, <fallback>" form (confirmed
+# current as of Streamlit 1.5x+, this app pins 1.61.1) that loads the
+# same Google Font already used elsewhere, with the same graceful
+# fallback if the font service is ever unavailable. headingFont is set
+# too, for the same reason, even though headline text on this app is
+# custom-HTML .headline (Fraunces) rather than a native st.header —
+# cheap insurance against any native heading Streamlit itself renders
+# (e.g. inside st.expander) silently mismatching everything else.
 [theme]
 base = "light"
 primaryColor = "#7A2632"
 backgroundColor = "#FBF9F6"
 secondaryBackgroundColor = "#F3EEE6"
 textColor = "#1C1B29"
-font = "sans serif"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&display=swap, monospace"
 
 [browser]
 gatherUsageStats = false

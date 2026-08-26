@@ -144,6 +144,28 @@ st.markdown("""
         --radius-sm: 6px;
         --radius-md: 10px;
         --radius-lg: 14px;
+        /* Spacing scale, added 26 Aug 2026 UI-quality pass. Same
+           rationale as the color tokens above: 41 separate inline
+           style="margin-top:0.7rem" / "0.8rem" / "1.1rem" etc. calls
+           were scattered across this file with no shared scale behind
+           them, which is exactly the kind of drift a documented token
+           system elsewhere in this file doesn't protect against — the
+           colors were disciplined, the spacing wasn't. An 8px-based
+           scale (4/8/12/16/24/32px) is the same convention Linear and
+           Notion both use; not adopted here as a redesign, just made
+           available so future spacing decisions pick a step on this
+           scale instead of inventing a new rem value each time. Not
+           yet back-filled onto every one of the 41 existing call
+           sites in one pass — that's a real follow-up, deliberately
+           scoped out here to keep this change low-risk and reviewable
+           (see the UI/UX session notes for 26 Aug 2026 for the full
+           list of sites still on ad-hoc values). */
+        --space-1: 0.25rem;
+        --space-2: 0.5rem;
+        --space-3: 0.75rem;
+        --space-4: 1rem;
+        --space-5: 1.5rem;
+        --space-6: 2rem;
         --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
         --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
@@ -650,6 +672,7 @@ st.markdown("""
     div[data-testid="stButton"] button,
     button[data-testid^="stBaseButton"] {
         border-radius: var(--radius-sm);
+        font-family: var(--font-sans);
         font-weight: 600;
         transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
     }
