@@ -84,6 +84,7 @@ def get_or_create_device_id() -> str:
     codebase for identical component-timing races, gives the real
     value one full round trip to arrive before we decide."""
     if "cookies" not in st.session_state and not st.session_state.get("_device_id_cookie_wait"):
+        print("DIAG get_or_create_device_id: deferring one rerun for cookie to arrive", flush=True)
         st.session_state["_device_id_cookie_wait"] = True
         st.rerun()
 
@@ -92,11 +93,15 @@ def get_or_create_device_id() -> str:
         existing = controller.get(_COOKIE_NAME)
     except Exception:
         existing = None
+        print("DIAG get_or_create_device_id: controller.get() raised, treating as no cookie", flush=True)
+
+    print(f"DIAG get_or_create_device_id: cookie read existing={existing!r}", flush=True)
 
     if existing:
         return existing
 
     new_id = str(uuid.uuid4())
+    print(f"DIAG get_or_create_device_id: NO existing cookie found, generating new_id={new_id}", flush=True)
     try:
         controller.set(_COOKIE_NAME, new_id, max_age=60 * 60 * 24 * 365)
     except Exception:
@@ -114,22 +119,27 @@ def restore_profile_if_available() -> bool:
     if st.session_state.get("baseline_fingerprint"):
         # Already have a baseline this session (e.g. mid-flow rerun) —
         # don't overwrite with a stale saved one.
+        print("DIAG restore_profile_if_available: baseline_fingerprint already in session_state, skipping restore", flush=True)
         return False
 
     client = get_supabase_client()
     if client is None:
+        print("DIAG restore_profile_if_available: get_supabase_client() returned None, skipping restore", flush=True)
         return False
 
     device_id = get_or_create_device_id()
     st.session_state["_device_id"] = device_id
+    print(f"DIAG restore_profile_if_available: querying voice_profiles for device_id={device_id}", flush=True)
 
     try:
         result = client.table(_TABLE).select("*").eq("device_id", device_id).limit(1).execute()
-    except Exception:
+    except Exception as e:
+        print(f"DIAG restore_profile_if_available: query RAISED: {e!r}", flush=True)
         log.error("profile_restore_query_failed", exc_info=True)
         return False
 
     rows = result.data if result and result.data else []
+    print(f"DIAG restore_profile_if_available: query returned {len(rows)} row(s) for device_id={device_id}", flush=True)
     if not rows:
         return False
 
@@ -145,7 +155,8 @@ def restore_profile_if_available() -> bool:
         if row.get("voice_profile_summary"):
             st.session_state["voice_profile_summary"] = row["voice_profile_summary"]
         st.session_state["_voice_profile_updated_at"] = row.get("updated_at")
-    except Exception:
+    except Exception as e:
+        print(f"DIAG restore_profile_if_available: apply RAISED: {e!r}", flush=True)
         log.error("profile_restore_apply_failed", exc_info=True)
         return False
 
@@ -153,8 +164,10 @@ def restore_profile_if_available() -> bool:
         # Row existed but had no usable baseline — treat as absent
         # rather than sending someone to Screen 4 with nothing to
         # render against.
+        print("DIAG restore_profile_if_available: row found but baseline_fingerprint empty, treating as absent", flush=True)
         return False
 
+    print("DIAG restore_profile_if_available: SUCCESS, restoring straight to screen 4", flush=True)
     log.info("profile_restored", device_id_present=True)
     return True
 
