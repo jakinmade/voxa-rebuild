@@ -3093,6 +3093,38 @@ _FRAGMENT_EMPHASIS_PATTERN = re.compile(
 # ("- item", no preceding non-space char for the lookbehind to anchor on).
 _SPACED_HYPHEN_DASH_PATTERN = re.compile(r"(?<=\S)\s-\s(?=\S)")
 
+# Ungrammatical sentence-fragment opener: a declarative sentence whose
+# first word is a bare auxiliary/copula verb ("Is exactly what CLEARANCE
+# is built to catch.") has no subject of its own — it isn't a sentence,
+# it's the back half of one that got severed from its front half. This
+# is the deterministic side of the same problem prompts.py's rule 9 was
+# fixed for (27 Aug 2026): that fix narrows what the MODEL is instructed
+# to do, but an instruction is not a guarantee, and this is the one
+# specific failure shape a real render actually produced — the model
+# split a sentence at an appositive/parenthetical comma instead of a
+# coordinating-conjunction one, leaving a subject-less fragment on each
+# side. A genuine question ("Is this the right call?") is excluded by
+# requiring the sentence to end in '.' or '!', not '?' — a bare-auxiliary
+# opener ending in a question mark is ordinary, grammatical English.
+_BARE_AUX_SENTENCE_OPENER = re.compile(
+    r"^(?:Is|Are|Was|Were|Am|Has|Have|Had|Do|Does|Did|Will|Would|Could|"
+    r"Should|Can|Must|Might|May)\b"
+)
+
+
+def _detect_sentence_fragments(text: str) -> list[str]:
+    """Flags sentences that open on a bare auxiliary/copula verb and
+    end in '.' or '!' — see _BARE_AUX_SENTENCE_OPENER's comment for
+    why that combination is a reliable, low-false-positive signal for
+    a sentence severed from its subject, not a style choice. Returns
+    the offending sentences themselves (truncated for display by the
+    caller), same convention as score_ai_tells' other flag lists.
+    """
+    return [
+        s for s in _extract_sentences(text)
+        if s.endswith((".", "!")) and _BARE_AUX_SENTENCE_OPENER.match(s)
+    ]
+
 
 def _classify_register(text: str) -> str:
     """
@@ -3227,6 +3259,7 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
     shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)
+    fragment_hits = _detect_sentence_fragments(text)
 
     register = _classify_register(text)
     analytical_hits = []
@@ -3244,6 +3277,12 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
             f"{spaced_hyphen_hits} spaced hyphen(s) used as a dash substitute "
             f"(the sweep converts em dashes to ' - ' — that's still the tell)"
         )
+    if fragment_hits:
+        flagged.append(
+            f"{len(fragment_hits)} sentence fragment(s) — sentence starts on a "
+            f"bare auxiliary verb with no subject of its own, a sign it was "
+            f"severed from the sentence before it: {'; '.join(fragment_hits[:3])}"
+        )
     # unique_phrases computed once here (not re-derived from the
     # `flagged` display string below), so flagged_phrases is a genuine
     # structured list, not a parse of prose meant for a sentence. The
@@ -3255,13 +3294,18 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     if unique_phrases:
         flagged.append(f"AI-typical phrasing found: {', '.join(unique_phrases[:5])}")
 
-    clean = em_dash_hits == 0 and spaced_hyphen_hits == 0 and len(all_hits) == 0
+    clean = (
+        em_dash_hits == 0 and spaced_hyphen_hits == 0
+        and len(all_hits) == 0 and len(fragment_hits) == 0
+    )
 
     return {
         "clean": clean,
         "em_dash_count": em_dash_hits,
         "spaced_hyphen_count": spaced_hyphen_hits,
         "phrase_hit_count": len(all_hits),
+        "fragment_count": len(fragment_hits),
+        "flagged_fragments": fragment_hits,
         "flagged": flagged,
         "flagged_phrases": unique_phrases,
         "register": register,

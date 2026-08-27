@@ -109,6 +109,61 @@ _FRAGMENT_EMPHASIS_PATTERN = re.compile(
 
 _SPACED_HYPHEN_DASH_PATTERN = re.compile(r"(?<=\S)\s-\s(?=\S)")
 
+# Sentence extraction + ungrammatical-fragment detection, mirrored
+# from voice_engine.py (27 Aug 2026 fix — DELIBERATE, DOCUMENTED
+# DUPLICATION, see this file's header). A declarative sentence whose
+# first word is a bare auxiliary/copula verb ("Is exactly what
+# CLEARANCE is built to catch.") has no subject of its own — a real
+# render produced exactly this by splitting at an appositive comma
+# instead of a coordinating-conjunction one. Excluded from flagging:
+# a bare-auxiliary opener ending in '?' ("Is this the right call?")
+# is ordinary, grammatical English, not a severed fragment.
+_DOTTED_ABBREV = re.compile(r'\b(?:[A-Za-z]\.){2,}')
+_WORD_ABBREV = re.compile(
+    r'\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Rev|Hon|vs|etc|approx|dept|no|vol|pp|'
+    r'Ltd|Inc|Co|Corp|Ave|Blvd|Rd)\.',
+    re.I
+)
+
+
+def _protect_abbreviations(text: str) -> str:
+    """Swaps periods inside known abbreviations for a placeholder so
+    they don't get read as sentence boundaries. Ported verbatim from
+    voice_engine.py."""
+    text = _DOTTED_ABBREV.sub(lambda m: m.group(0).replace('.', '\u0000'), text)
+    text = _WORD_ABBREV.sub(lambda m: m.group(0).replace('.', '\u0000'), text)
+    return text
+
+
+def _extract_sentences(text: str) -> list[str]:
+    """Split into sentences. Returns non-empty sentences only. Ported
+    verbatim from voice_engine.py."""
+    paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
+    normalised = ' '.join(
+        p if p.endswith(('.', '!', '?', ':')) else p + '.'
+        for p in paragraphs
+    )
+    protected = _protect_abbreviations(normalised)
+    sentences = re.split(r"(?<=[.!?])\s+", protected.strip())
+    sentences = [s.replace('\u0000', '.') for s in sentences]
+    return [s.strip() for s in sentences if s.strip() and len(s.split()) >= 2]
+
+
+_BARE_AUX_SENTENCE_OPENER = re.compile(
+    r"^(?:Is|Are|Was|Were|Am|Has|Have|Had|Do|Does|Did|Will|Would|Could|"
+    r"Should|Can|Must|Might|May)\b"
+)
+
+
+def _detect_sentence_fragments(text: str) -> list[str]:
+    """Flags sentences that open on a bare auxiliary/copula verb and
+    end in '.' or '!'. Ported verbatim from voice_engine.py."""
+    return [
+        s for s in _extract_sentences(text)
+        if s.endswith((".", "!")) and _BARE_AUX_SENTENCE_OPENER.match(s)
+    ]
+
+
 # Plausibility shields — first-person lexical-verb hedges that attribute a
 # claim to the writer's own judgement rather than stating it as fact:
 # "I think", "I see it as", "in my view". Documented category, not an ad
@@ -207,6 +262,7 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
     shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)
+    fragment_hits = _detect_sentence_fragments(text)
 
     register = _classify_register(text)
     analytical_hits = []
@@ -224,6 +280,12 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
             f"{spaced_hyphen_hits} spaced hyphen(s) used as a dash substitute "
             f"(the sweep converts em dashes to ' - ' — that's still the tell)"
         )
+    if fragment_hits:
+        flagged.append(
+            f"{len(fragment_hits)} sentence fragment(s) — sentence starts on a "
+            f"bare auxiliary verb with no subject of its own, a sign it was "
+            f"severed from the sentence before it: {'; '.join(fragment_hits[:3])}"
+        )
     # unique_phrases computed once here, not re-derived from `flagged`
     # below — mirrors voice_engine.py's flagged_phrases field, 18 Aug
     # 2026, added the same session this parity gap was found.
@@ -231,13 +293,18 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     if unique_phrases:
         flagged.append(f"AI-typical phrasing found: {', '.join(unique_phrases[:5])}")
 
-    clean = em_dash_hits == 0 and spaced_hyphen_hits == 0 and len(all_hits) == 0
+    clean = (
+        em_dash_hits == 0 and spaced_hyphen_hits == 0
+        and len(all_hits) == 0 and len(fragment_hits) == 0
+    )
 
     return {
         "clean": clean,
         "em_dash_count": em_dash_hits,
         "spaced_hyphen_count": spaced_hyphen_hits,
         "phrase_hit_count": len(all_hits),
+        "fragment_count": len(fragment_hits),
+        "flagged_fragments": fragment_hits,
         "flagged": flagged,
         "flagged_phrases": unique_phrases,
         "register": register,
