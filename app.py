@@ -3341,6 +3341,18 @@ def screen_render():
             st.session_state.platform_format_input = st.session_state.get("platform_format_field")
             st.session_state.render_output = ""
             st.session_state.refinement_used = False
+            # Own request flag, not just render_in_progress (27 Aug 2026):
+            # render_in_progress is a shared "something is rendering right
+            # now" semaphore across all three render-triggering buttons
+            # (this one, Try again, Refine) so they can't race each
+            # other either - but the deferred trigger below needs to
+            # know it was THIS button that asked, not just that some
+            # render is pending, or it fires on every render_in_progress
+            # transition regardless of which button caused it (confirmed
+            # real: Refine's own fix below double-called _run_render
+            # until this flag was added, because this block used to
+            # check render_in_progress alone).
+            st.session_state["_write_requested"] = True
             st.session_state.render_in_progress = True
 
         st.button(
@@ -3351,7 +3363,8 @@ def screen_render():
             render_alert("Paste some text first.", "error")
             st.session_state["render_missing_input"] = False
 
-        if st.session_state.get("render_in_progress"):
+        if st.session_state.get("_write_requested"):
+            st.session_state["_write_requested"] = False
             _run_render(
                 st.session_state.get("render_input_text", ""),
                 render_context=st.session_state.get("render_context_input", ""),
@@ -3409,7 +3422,32 @@ def screen_render():
                 # with screen_pricing()'s copy of the same expander.
                 _render_restore_access_expander(key_prefix="paywall_")
             else:
-                if st.button("Try again", key="retry_render"):
+                # Same double-click race the "Write as me" button was
+                # fixed for (25 Aug 2026 UX audit) — this button was
+                # missed at the time. _run_render was called directly
+                # inside `if st.button(...)`, with no guard against two
+                # fast clicks each landing before the first rerun could
+                # disable the button, each triggering its own full
+                # render and burning a lifetime render credit. Same
+                # fix: guard set/checked INSIDE an on_click callback
+                # (synchronous per click, unlike the disabled= prop
+                # alone), actual render deferred to after the button so
+                # it only ever runs once per genuine click. Reuses the
+                # same render_in_progress flag "Write as me" uses, so
+                # the two buttons can't race each other either.
+                def _start_retry():
+                    if st.session_state.get("render_in_progress"):
+                        return
+                    st.session_state["_retry_requested"] = True
+                    st.session_state.render_in_progress = True
+
+                st.button(
+                    "Try again", key="retry_render",
+                    disabled=st.session_state.get("render_in_progress", False),
+                    on_click=_start_retry,
+                )
+                if st.session_state.get("_retry_requested"):
+                    st.session_state["_retry_requested"] = False
                     last_attempt = st.session_state.get("render_last_attempt", input_text)
                     was_refinement = st.session_state.get("render_last_is_refinement", False)
                     if _run_render(
@@ -3419,6 +3457,7 @@ def screen_render():
                         platform_format=st.session_state.get("platform_format_input"),
                     ) and was_refinement:
                         st.session_state.refinement_used = True
+                    st.session_state.render_in_progress = False
                     st.rerun()
 
         if st.session_state.get("subscription_just_confirmed"):
@@ -3839,27 +3878,47 @@ Show the per-dimension breakdown
                     "More detail (optional)", placeholder="Anything else specific...",
                     height=80, key="refine_freetext",
                 )
-                if st.button("Refine \u2192", use_container_width=True):
-                    st.session_state.refinement_tags = chosen_tags
-                    st.session_state.refinement_freetext = freetext
-                    refinement_note = ", ".join(chosen_tags)
-                    if freetext.strip():
-                        refinement_note = f"{refinement_note}. {freetext.strip()}" if refinement_note else freetext.strip()
-                    refined_input = (
+                # Same double-click race fixed above for "Try again" —
+                # see that comment. Guard captures and stores the
+                # computed refinement request inside the on_click
+                # callback itself (mirrors "Write as me"'s _start_render:
+                # reads the widget values it needs from session_state
+                # by key, since they're already committed there by the
+                # time a callback runs), so the deferred block below
+                # only ever has to read already-finalised values, not
+                # recompute anything a second click could race on.
+                def _start_refine():
+                    if st.session_state.get("render_in_progress"):
+                        return
+                    _tags = st.session_state.get("refine_tags", [])
+                    _freetext = st.session_state.get("refine_freetext", "")
+                    _note = ", ".join(_tags)
+                    if _freetext.strip():
+                        _note = f"{_note}. {_freetext.strip()}" if _note else _freetext.strip()
+                    st.session_state.refinement_tags = _tags
+                    st.session_state.refinement_freetext = _freetext
+                    st.session_state["_refine_input"] = (
                         f"{st.session_state.render_input_text}\n\n"
-                        f"[Refinement requested: {refinement_note}]"
-                    ) if refinement_note else st.session_state.render_input_text
-                    # Only mark the one-time refinement as used if it actually
-                    # succeeded — previously this flag was set unconditionally
-                    # before the call, so a failed render still burned the
-                    # user's one refinement with nothing to show for it.
+                        f"[Refinement requested: {_note}]"
+                    ) if _note else st.session_state.render_input_text
+                    st.session_state["_refine_requested"] = True
+                    st.session_state.render_in_progress = True
+
+                st.button(
+                    "Refine \u2192", use_container_width=True,
+                    disabled=st.session_state.get("render_in_progress", False),
+                    on_click=_start_refine,
+                )
+                if st.session_state.get("_refine_requested"):
+                    st.session_state["_refine_requested"] = False
                     if _run_render(
-                        refined_input, is_refinement=True,
+                        st.session_state.get("_refine_input", ""), is_refinement=True,
                         render_context=st.session_state.get("render_context_input", ""),
                         render_mode=st.session_state.get("render_mode_input", "preserve"),
                         platform_format=st.session_state.get("platform_format_input"),
                     ):
                         st.session_state.refinement_used = True
+                    st.session_state.render_in_progress = False
                     st.rerun()
 
             st.markdown("")

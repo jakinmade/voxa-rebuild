@@ -285,3 +285,103 @@ def test_insufficient_baseline_samples_handled_without_crashing():
             fwd = at.session_state["function_word_delta"]
             assert fwd["delta"] is None
             assert fwd["tier"] == "Insufficient baseline samples"
+
+
+# ---------------------------------------------------------------------
+# Double-click race guard for "Try again" and "Refine →" (27 Aug 2026
+# codebase review): both called _run_render directly inside
+# `if st.button(...)`, with none of the guard the "Write as me" button
+# above was already fixed for on 25 Aug 2026 — a fast double-click on
+# either could fire two concurrent renders, burning two lifetime render
+# credits (or two refinement attempts) on one click. Fixed the same
+# way: guard set/checked inside an on_click callback, actual render
+# deferred to a flag-gated block after the button. Tests mirror the
+# existing Write-as-me tests above exactly, including their stated
+# limitation — AppTest resolves the whole click -> rerun -> render ->
+# clear chain synchronously within one .run() call, so the actual race
+# window can't be observed end-to-end here; what's verified is that
+# the wiring is genuinely present (source inspection) and that a real
+# click still completes correctly through the two-phase mechanism.
+# ---------------------------------------------------------------------
+
+def test_try_again_button_wired_to_disable_on_render_in_progress():
+    import inspect
+    import app as app_module
+    source = inspect.getsource(app_module.screen_render)
+    flat = source.replace(' ', '').replace('\n', '')
+    assert 'key="retry_render",disabled=st.session_state.get("render_in_progress",False),on_click=_start_retry' in flat, (
+        "Expected 'Try again' to be wired to render_in_progress via "
+        "on_click, same guard pattern as 'Write as me'."
+    )
+
+
+def test_refine_button_wired_to_disable_on_render_in_progress():
+    import inspect
+    import app as app_module
+    source = inspect.getsource(app_module.screen_render)
+    flat = source.replace(' ', '').replace('\n', '')
+    assert 'disabled=st.session_state.get("render_in_progress",False),on_click=_start_refine' in flat, (
+        "Expected 'Refine →' to be wired to render_in_progress via "
+        "on_click, same guard pattern as 'Write as me'."
+    )
+
+
+def test_try_again_completes_a_real_render_and_clears_the_flag():
+    """End-to-end: a real click on 'Try again' still results in a
+    completed render (the two-phase mechanism doesn't break the
+    actual retry), and the shared render_in_progress flag is correctly
+    clear afterward — not left stuck, which would permanently disable
+    all three render-triggering buttons."""
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}):
+        with patch("anthropic.Anthropic") as mock_anthropic_cls:
+            mock_client = mock_anthropic_cls.return_value
+            mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
+
+            at = _land_on_screen4_no_render()
+            at.session_state["render_error"] = "Something went wrong."
+            at.session_state["render_last_attempt"] = "Some AI text to rewrite here."
+            at.session_state["render_last_is_refinement"] = False
+            at.run()
+
+            retry_button = next(b for b in at.button if b.key == "retry_render")
+            retry_button.click().run()
+
+            assert not at.exception, f"App raised on retry click: {at.exception}"
+            assert at.session_state["render_output"], "Retry did not complete a render"
+            assert at.session_state["render_in_progress"] is False
+
+
+def test_refine_completes_a_real_render_and_clears_the_flag():
+    """Same end-to-end confirmation for 'Refine →': a real click still
+    completes a render through the deferred two-phase mechanism, marks
+    the one-time refinement as used, and clears render_in_progress."""
+    at = _run_screen4_with_mocked_render()
+    assert at.session_state["render_output"], "Setup render did not complete"
+    assert not at.session_state["refinement_used"]
+
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}):
+        with patch("anthropic.Anthropic") as mock_anthropic_cls:
+            mock_client = mock_anthropic_cls.return_value
+            mock_client.messages.create.return_value = _fake_anthropic_response(
+                "A refined version of the rewrite, in my voice."
+            )
+
+            gate_checkbox = next(
+                (c for c in at.checkbox if "sending this as mine" in c.label), None
+            )
+            if gate_checkbox is not None:
+                gate_checkbox.set_value(True)
+                at.run()
+                confirm_button = next(
+                    b for b in at.button if "Show my rewritten text" in b.label
+                )
+                confirm_button.click().run()
+
+            refine_button = next(
+                b for b in at.button if b.label and "Refine" in b.label
+            )
+            refine_button.click().run()
+
+            assert not at.exception, f"App raised on refine click: {at.exception}"
+            assert at.session_state["refinement_used"] is True
+            assert at.session_state["render_in_progress"] is False
