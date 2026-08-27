@@ -196,6 +196,19 @@ def test_verify_fails_when_metadata_has_no_device_id_at_all():
         assert sub.verify_and_record_subscription("sess_1", "device-1") is False
 
 
+def test_verify_fails_closed_when_the_recording_write_fails():
+    """27 Aug 2026 hardening pass, finding 2a: a genuine, correctly-
+    verified payment whose DB write then fails must not be reported
+    as a success — the exact sequence that used to let a real paying
+    customer be falsely told 'You're subscribed' while the database
+    still said otherwise."""
+    session = _build_session("device-1", status="complete", sub_status="active")
+    with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         _patch_retrieve(session), \
+         patch("stripe_subscription._record_subscription", return_value=False):
+        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+
+
 # ---------------------------------------------------------------------------
 # _record_subscription — fails open and silently, never crashes the
 # success page
@@ -206,22 +219,143 @@ def test_record_subscription_upserts_onto_lifetime_render_cap_table():
     table = MagicMock()
     client.table.return_value = table
     with patch("stripe_subscription.get_supabase_client", return_value=client):
-        sub._record_subscription("device-1", "cus_1", "active")
+        result = sub._record_subscription("device-1", "cus_1", "active")
     client.table.assert_called_once_with("lifetime_render_cap")
     table.upsert.assert_called_once_with({
         "device_id": "device-1",
         "stripe_customer_id": "cus_1",
         "subscription_status": "active",
     })
+    assert result is True
 
 
-def test_record_subscription_does_nothing_when_supabase_not_configured():
+def test_record_subscription_returns_false_when_supabase_not_configured():
     with patch("stripe_subscription.get_supabase_client", return_value=None):
-        sub._record_subscription("device-1", "cus_1", "active")  # must not raise
+        assert sub._record_subscription("device-1", "cus_1", "active") is False
 
 
-def test_record_subscription_swallows_upsert_failure():
+def test_record_subscription_returns_false_on_upsert_failure():
     client = MagicMock()
     client.table.return_value.upsert.return_value.execute.side_effect = Exception("boom")
     with patch("stripe_subscription.get_supabase_client", return_value=client):
-        sub._record_subscription("device-1", "cus_1", "active")  # must not raise
+        assert sub._record_subscription("device-1", "cus_1", "active") is False
+
+
+# ---------------------------------------------------------------------------
+# confirm_subscription_restore — 27 Aug 2026 hardening pass, finding 2c.
+# No prior test coverage existed for this function at all before this
+# pass; all of the below is new, not just the re-verification cases.
+# ---------------------------------------------------------------------------
+
+def _subscription_list_result(has_active: bool):
+    data = []
+    if has_active:
+        data = [stripe.Subscription.construct_from(
+            {"id": "sub_1", "object": "subscription", "status": "active"}, "sk_test_fake",
+        )]
+    result = MagicMock()
+    result.data = data
+    return result
+
+
+def test_restore_confirm_succeeds_when_stripe_still_shows_active():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.Subscription, "list", return_value=_subscription_list_result(True)), \
+         patch("stripe_subscription._record_subscription", return_value=True) as mock_record:
+        result = sub.confirm_subscription_restore("tok_1", "device-2")
+    assert result is True
+    mock_record.assert_called_once_with(
+        device_id="device-2", stripe_customer_id="cus_1", subscription_status="active",
+    )
+
+
+def test_restore_confirm_fails_when_stripe_no_longer_shows_active():
+    """The exact regression this pass fixes: a valid, unexpired token
+    must not resurrect access if the subscription was canceled in the
+    window since the token was issued."""
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.Subscription, "list", return_value=_subscription_list_result(False)), \
+         patch("stripe_subscription._record_subscription") as mock_record:
+        result = sub.confirm_subscription_restore("tok_1", "device-2")
+    assert result is False
+    mock_record.assert_not_called()
+
+
+def test_restore_confirm_fails_on_invalid_token():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+    with patch("stripe_subscription.get_supabase_client", return_value=client):
+        assert sub.confirm_subscription_restore("bad_tok", "device-2") is False
+
+
+def test_restore_confirm_fails_on_expired_token():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2000-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client):
+        assert sub.confirm_subscription_restore("tok_1", "device-2") is False
+
+
+def test_restore_confirm_fails_closed_when_supabase_not_configured():
+    with patch("stripe_subscription.get_supabase_client", return_value=None):
+        assert sub.confirm_subscription_restore("tok_1", "device-2") is False
+
+
+def test_restore_confirm_fails_closed_when_stripe_not_configured():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value=None):
+        assert sub.confirm_subscription_restore("tok_1", "device-2") is False
+
+
+def test_restore_confirm_fails_closed_on_stripe_lookup_error():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.Subscription, "list", side_effect=Exception("boom")):
+        assert sub.confirm_subscription_restore("tok_1", "device-2") is False
+
+
+def test_restore_confirm_fails_closed_when_recording_write_fails():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.Subscription, "list", return_value=_subscription_list_result(True)), \
+         patch("stripe_subscription._record_subscription", return_value=False):
+        assert sub.confirm_subscription_restore("tok_1", "device-2") is False
+
+
+def test_restore_confirm_clears_the_token_only_on_success():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.Subscription, "list", return_value=_subscription_list_result(True)), \
+         patch("stripe_subscription._record_subscription", return_value=True):
+        sub.confirm_subscription_restore("tok_1", "device-2")
+    update_call = client.table.return_value.update
+    update_call.assert_called_once_with({
+        "restore_token": None, "restore_token_expires_at": None,
+    })

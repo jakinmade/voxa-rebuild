@@ -179,7 +179,11 @@ def verify_and_record_subscription(session_id: str, expected_device_id: str) -> 
     open to "yes, subscribed") would mean anyone could type a random
     session_id into the URL and get free access whenever Stripe or
     Supabase hiccups. Same fail-closed reasoning as AQE's
-    verify_stripe_session.
+    verify_stripe_session. This now includes the DB write itself
+    (27 Aug 2026, independent codebase review finding 2a): a genuine
+    payment whose recording write then fails must not be reported as
+    a success — see _record_subscription's own docstring for the
+    exact sequence this closes.
     """
     import stripe
     secret_key = _get_secret("STRIPE_API_KEY", ("stripe", "API_KEY"))
@@ -213,35 +217,53 @@ def verify_and_record_subscription(session_id: str, expected_device_id: str) -> 
         )
         return False
 
-    _record_subscription(
+    write_succeeded = _record_subscription(
         device_id=expected_device_id,
         stripe_customer_id=session.customer,
         subscription_status="active",
     )
+    if not write_succeeded:
+        # A real payment, correctly verified with Stripe, whose
+        # recording write then failed - must not report success to
+        # the caller. The write failure itself was already logged
+        # inside _record_subscription.
+        return False
     return True
 
 
-def _record_subscription(device_id: str, stripe_customer_id: str, subscription_status: str) -> None:
+def _record_subscription(device_id: str, stripe_customer_id: str, subscription_status: str) -> bool:
     """Upserts onto the SAME lifetime_render_cap row lifetime_cap.py
-    already reads/writes for this device - not a new table. Fails
-    open and silently: a write failure here must never crash the
-    success page a real paying customer is looking at. Worst case on
-    a write failure, device_has_active_subscription (lifetime_cap.py)
-    still reads no active subscription on the next render and the
-    person has to contact support - an honest degraded state, not a
-    crash."""
+    already reads/writes for this device - not a new table. Returns
+    True/False so callers can treat a failed write as part of their
+    own success contract, rather than firing-and-forgetting it.
+
+    UPDATE, 27 Aug 2026 hardening pass (independent codebase review,
+    finding 2a): this used to return None unconditionally and log a
+    failure silently, while verify_and_record_subscription returned
+    True right after calling it regardless of whether the write
+    actually landed. That sequence was possible: customer genuinely
+    pays, Stripe verification succeeds, this write fails, the caller
+    still returns True, the UI says "You're subscribed," and the
+    database still says they're not - worse than an honest error,
+    because it actively told a paying customer their entitlement was
+    recorded when it wasn't. Now the write's success is part of the
+    contract every caller checks - see verify_and_record_subscription
+    and confirm_subscription_restore, both updated alongside this.
+    """
     client = get_supabase_client()
     if client is None:
         log.error("record_subscription_unavailable", reason="supabase_not_configured")
-        return
+        return False
     try:
         client.table(_TABLE).upsert({
             "device_id": device_id,
             "stripe_customer_id": stripe_customer_id,
             "subscription_status": subscription_status,
         }).execute()
+        return True
     except Exception:
         log.error("record_subscription_write_failed", reason="supabase_error", exc_info=True)
+        return False
 
 
 def request_subscription_restore(email: str) -> None:
@@ -337,6 +359,22 @@ def confirm_subscription_restore(token: str, device_id: str) -> bool:
     posture as verify_and_record_subscription's own fail-closed
     reasoning. Consuming the token (clearing it after use) makes it
     genuinely single-use, not just single-intended.
+
+    UPDATE, 27 Aug 2026 hardening pass (independent codebase review,
+    finding 2c): now re-checks the subscription's CURRENT status with
+    Stripe before writing "active" — previously this trusted "token is
+    unexpired" as equivalent to "currently entitled," which isn't the
+    same fact. request_subscription_restore only issues a token when
+    Stripe shows an active subscription AT THAT MOMENT, with a
+    15-minute expiry; if the subscription is canceled in the window
+    between the token being issued and the (still-valid) link being
+    clicked, the old code would resurrect access Stripe itself now
+    says shouldn't exist. Narrow window (15 minutes, and only if
+    canceled after the token was already issued) but a real gap, not
+    hypothetical. Also now fails closed if the recording write itself
+    fails, same reasoning as verify_and_record_subscription (2a,
+    same pass) — a restore that can't actually be recorded must not
+    report success or consume the token.
     """
     client = get_supabase_client()
     if client is None:
@@ -363,11 +401,33 @@ def confirm_subscription_restore(token: str, device_id: str) -> bool:
         log.info("restore_confirm_expired_token")
         return False
 
-    _record_subscription(
+    import stripe
+    secret_key = _get_secret("STRIPE_API_KEY", ("stripe", "API_KEY"))
+    if not secret_key:
+        log.error("restore_confirm_unavailable", reason="stripe_not_configured")
+        return False
+    stripe.api_key = secret_key
+    try:
+        subscriptions = stripe.Subscription.list(
+            customer=row["stripe_customer_id"], status="active", limit=1
+        )
+    except Exception:
+        log.error("restore_confirm_failed", reason="stripe_subscription_lookup_error", exc_info=True)
+        return False
+    if not subscriptions.data:
+        # Token was valid and unexpired, but Stripe no longer shows an
+        # active subscription for this customer — canceled sometime
+        # after the token was issued. Do not resurrect it.
+        log.info("restore_confirm_subscription_no_longer_active")
+        return False
+
+    write_succeeded = _record_subscription(
         device_id=device_id,
         stripe_customer_id=row["stripe_customer_id"],
         subscription_status="active",
     )
+    if not write_succeeded:
+        return False
     try:
         client.table(_TABLE).update({
             "restore_token": None,
