@@ -56,12 +56,23 @@ def test_returns_expected_keys():
 def test_does_not_affect_baseline_metrics():
     """
     Guard against future accidental coupling: compute_baseline_metrics
-    must keep returning exactly its original five keys, unaffected by
+    must keep returning its original five reported keys, unaffected by
     compute_sentence_economy's existence.
+
+    UPDATE, 27 Aug 2026: six sufficient-statistic keys were added
+    deliberately (independent codebase review's baseline-merge P0 fix
+    — see _merge_baseline's docstring) so _merge_baseline can combine
+    samples by summing raw counts instead of averaging already-derived
+    metrics, which was mathematically wrong for three of the four.
+    This guard now checks the five original reported keys are still
+    exactly present (unaffected by sentence-economy or anything else
+    coupling in) without asserting the key set is closed, since new,
+    intentional keys are expected to keep appearing here as this
+    baseline gets used for more things.
     """
     text = "This is a test. It has three sentences. Here is the third one."
     baseline = ve.compute_baseline_metrics(text)
-    assert set(baseline.keys()) == {
+    assert {
         "hedge_density", "sentence_length_sd",
         "first_person_ratio", "directive_ratio", "word_count",
-    }
+    }.issubset(baseline.keys())

@@ -68,10 +68,12 @@ def test_returns_expected_keys():
 
 
 def test_does_not_affect_baseline_metrics():
-    """Same coupling guard as test_sentence_economy.py."""
+    """Same coupling guard as test_sentence_economy.py — see that
+    file's version for the 27 Aug 2026 update note on why this checks
+    a subset, not an exact key set, since that date."""
     text = "This is a test. It has three sentences. Here is the third one."
     baseline = ve.compute_baseline_metrics(text)
-    assert set(baseline.keys()) == {
+    assert {
         "hedge_density", "sentence_length_sd",
         "first_person_ratio", "directive_ratio", "word_count",
-    }
+    }.issubset(baseline.keys())

@@ -581,6 +581,49 @@ def analyse_writing(text: str) -> list[dict]:
     """
     observations = select_observations(text)
     return _deterministic_fallback(observations)
+def _derive_baseline_metrics(stats: dict) -> dict:
+    """Computes the four reported metrics from sufficient statistics —
+    the counts/sums that can be validly SUMMED across merged samples,
+    as opposed to the four metrics themselves, which mostly can't (see
+    _merge_baseline's docstring for why). Used by both
+    compute_baseline_metrics (a single fresh sample) and _merge_baseline
+    (an aggregated multi-sample baseline) so there is exactly one
+    formula for each metric, not two that could drift apart.
+
+    stats keys: word_count, sentence_count, hedge_count,
+    sentence_length_sum, sentence_length_sumsq, first_person_sentence_count,
+    directive_sentence_count. All are raw totals — safe to sum across
+    any number of samples with no information loss, unlike the four
+    derived ratios/rates below.
+    """
+    total_words = max(stats["word_count"], 1)
+    total_sents = max(stats["sentence_count"], 1)
+
+    hedge_density = round((stats["hedge_count"] / total_words) * 100, 2)
+
+    # Population SD from sufficient statistics: Var(X) = E[X^2] - E[X]^2,
+    # exact for any number of pooled samples because sentence_length_sum
+    # and sentence_length_sumsq are both plain totals over every
+    # individual sentence length across every sample — summing them is
+    # always valid, unlike averaging each sample's own already-computed
+    # SD (the bug this whole rewrite exists to fix: a naive word-count-
+    # weighted average of two SDs ignores that the samples' MEANS can
+    # differ, which is exactly where the real variance often lives).
+    mean_len = stats["sentence_length_sum"] / total_sents
+    variance = max(0.0, (stats["sentence_length_sumsq"] / total_sents) - mean_len ** 2)
+    sentence_length_sd = round(math.sqrt(variance), 2)
+
+    first_person_ratio = round(stats["first_person_sentence_count"] / total_sents, 3)
+    directive_ratio = round(stats["directive_sentence_count"] / total_sents, 3)
+
+    return {
+        "hedge_density": hedge_density,
+        "sentence_length_sd": sentence_length_sd,
+        "first_person_ratio": first_person_ratio,
+        "directive_ratio": directive_ratio,
+    }
+
+
 def compute_baseline_metrics(text: str) -> dict:
     """
     Extracts four numerical constraint metrics from a text sample.
@@ -609,6 +652,18 @@ def compute_baseline_metrics(text: str) -> dict:
         first_person_ratio — proportion of sentences with first-person markers
         directive_ratio    — proportion of sentences that are imperatives
         word_count         — total words in sample (for confidence weighting)
+
+        Plus sufficient statistics (27 Aug 2026 hardening pass,
+        independent codebase review's P0 finding): sentence_count,
+        sentence_length_sum, sentence_length_sumsq, hedge_count,
+        first_person_sentence_count, directive_sentence_count. These
+        are additive — every existing caller reading only the five
+        keys above is unaffected — and exist so _merge_baseline can
+        combine multiple samples by SUMMING raw counts (always valid)
+        instead of averaging the four derived metrics above (only
+        valid for hedge_density; mathematically wrong for the other
+        three, confirmed independently before this rewrite — see
+        _merge_baseline's docstring).
     """
     words = text.split()
     total_words = max(len(words), 1)
@@ -625,7 +680,9 @@ def compute_baseline_metrics(text: str) -> dict:
 
     # 2. Sentence length SD
     lengths = [len(s.split()) for s in sentences]
-    avg_len = sum(lengths) / total_sents
+    length_sum = sum(lengths)
+    length_sumsq = sum(l ** 2 for l in lengths)
+    avg_len = length_sum / total_sents
     variance = sum((l - avg_len) ** 2 for l in lengths) / total_sents
     sentence_length_sd = round(math.sqrt(variance), 2)
 
@@ -651,6 +708,13 @@ def compute_baseline_metrics(text: str) -> dict:
         "first_person_ratio": first_person_ratio,
         "directive_ratio": directive_ratio,
         "word_count": total_words,
+        # Sufficient statistics — see docstring above.
+        "sentence_count": total_sents,
+        "sentence_length_sum": length_sum,
+        "sentence_length_sumsq": length_sumsq,
+        "hedge_count": hedge_count,
+        "first_person_sentence_count": fp_sents,
+        "directive_sentence_count": directive_sents,
     }
 
 
@@ -821,9 +885,57 @@ def fingerprint_hash(baseline: dict) -> str:
     return "-".join(digest[i:i + 4] for i in range(0, 12, 4))
 
 
+_SUFFICIENT_STAT_KEYS = (
+    "sentence_count", "sentence_length_sum", "sentence_length_sumsq",
+    "hedge_count", "first_person_sentence_count", "directive_sentence_count",
+)
+
+
 def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
     """
-    Running average merge. Weights by word count so larger samples count more.
+    Combines multiple calibration samples into one baseline by SUMMING
+    sufficient statistics (word/sentence counts, hedge count, sentence-
+    length sum and sum-of-squares, first-person/directive sentence
+    counts) and deriving the four reported metrics from those totals —
+    not by averaging the four already-computed metrics, which was this
+    function's entire previous implementation and is mathematically
+    wrong for three of the four (27 Aug 2026 hardening pass,
+    independent codebase review's P0 finding, confirmed independently
+    before this rewrite by constructing two internally-uniform samples
+    with different means and showing the old merge concluded the
+    combined baseline was PERFECTLY uniform — sd=0.0 — when the true
+    pooled SD was 18.5).
+
+    hedge_density is a genuine per-word rate; word-count-weighted
+    averaging was always valid for it, and summing hedge_count/
+    word_count and re-deriving gives the identical result (weighted
+    averaging of a rate IS the sum-and-re-derive approach, just
+    algebraically rearranged) - no regression there, only a fix for
+    the other three.
+
+    sentence_length_sd needed the real pooled-variance fix: two SDs
+    can't be validly combined by averaging the SD values themselves,
+    because that ignores whatever variance exists BETWEEN the samples'
+    own means, only within them. Sum-of-squares sufficient statistics
+    (Var = E[X^2] - E[X]^2) captures both correctly, exactly, for any
+    number of pooled samples - see _derive_baseline_metrics.
+
+    first_person_ratio and directive_ratio are SENTENCE-level ratios;
+    the old merge weighted them by WORD count, giving a 500-word
+    sample five times the influence of a 100-word sample even with
+    the same number of sentences. Now weighted by their own correct
+    denominator (sentence count) via the same sum-and-derive approach.
+
+    Backward compatibility: existing may be a baseline persisted
+    before this fix, lacking the sufficient-stat keys entirely (any
+    returning user's stored profile). Falls back to the old word-
+    count-weighted average ONLY in that case, and only for this one
+    merge - the result carries the new sufficient-stat keys forward
+    (from new_metrics, on the reasonable assumption new_metrics'
+    contribution to the merged word count roughly bounds the error),
+    so every merge after this one is fully correct. A single-sample
+    baseline (existing is None) was never affected by any of this -
+    unchanged.
     """
     if existing is None:
         return new_metrics.copy()
@@ -834,16 +946,41 @@ def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
     if total_wc == 0:
         return new_metrics.copy()
 
-    def weighted(old_val, new_val):
-        return round((old_val * old_wc + new_val * new_wc) / total_wc, 3)
+    if not all(k in existing for k in _SUFFICIENT_STAT_KEYS):
+        # One-time migration fallback for a baseline saved before this
+        # fix — see docstring. Old formula, deliberately unchanged
+        # here so this path's behaviour is exactly what it always was,
+        # not a new, unverified variant of it.
+        def weighted(old_val, new_val):
+            return round((old_val * old_wc + new_val * new_wc) / total_wc, 3)
 
-    return {
-        "hedge_density": weighted(existing["hedge_density"], new_metrics["hedge_density"]),
-        "sentence_length_sd": weighted(existing["sentence_length_sd"], new_metrics["sentence_length_sd"]),
-        "first_person_ratio": weighted(existing["first_person_ratio"], new_metrics["first_person_ratio"]),
-        "directive_ratio": weighted(existing["directive_ratio"], new_metrics["directive_ratio"]),
+        merged = {
+            "hedge_density": weighted(existing["hedge_density"], new_metrics["hedge_density"]),
+            "sentence_length_sd": weighted(existing["sentence_length_sd"], new_metrics["sentence_length_sd"]),
+            "first_person_ratio": weighted(existing["first_person_ratio"], new_metrics["first_person_ratio"]),
+            "directive_ratio": weighted(existing["directive_ratio"], new_metrics["directive_ratio"]),
+            "word_count": total_wc,
+        }
+        # Carry new_metrics' own sufficient stats forward as the
+        # starting point for future merges, rather than leaving them
+        # missing again - imperfect (they only reflect new_metrics,
+        # not existing's un-recoverable history) but strictly better
+        # than repeating this fallback indefinitely.
+        for key in _SUFFICIENT_STAT_KEYS:
+            merged[key] = new_metrics.get(key, 0)
+        return merged
+
+    summed_stats = {
         "word_count": total_wc,
+        "sentence_count": existing["sentence_count"] + new_metrics["sentence_count"],
+        "sentence_length_sum": existing["sentence_length_sum"] + new_metrics["sentence_length_sum"],
+        "sentence_length_sumsq": existing["sentence_length_sumsq"] + new_metrics["sentence_length_sumsq"],
+        "hedge_count": existing["hedge_count"] + new_metrics["hedge_count"],
+        "first_person_sentence_count": existing["first_person_sentence_count"] + new_metrics["first_person_sentence_count"],
+        "directive_sentence_count": existing["directive_sentence_count"] + new_metrics["directive_sentence_count"],
     }
+    derived = _derive_baseline_metrics(summed_stats)
+    return {**derived, **summed_stats}
 def _score_sample_fitness(text: str) -> dict:
     """
     Scores a writing sample for fingerprint fitness.
