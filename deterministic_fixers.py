@@ -1092,6 +1092,15 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
     up any word `before` didn't already have; a fabrication brings
     words that aren't in that budget.
 
+    UPDATE, 27 Aug 2026: the threshold for "actually outnumber" was
+    briefly ">3 new words" rather than ">0" — meant as headroom for
+    ordinary punctuation-driven rewriting picking up a sentence-initial
+    connector, but in practice it let short invented sentences through
+    untouched, which is the exact class of fabrication this check
+    exists to catch. Confirmed measuring the original motivating
+    false-positive above at new_word_count == 0 — >0 was always
+    sufficient to exclude it, no headroom needed. Tightened to >0.
+
     Returns:
       {
         "new_hedges": list[str]  — hedge words/phrases present in
@@ -1132,8 +1141,8 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
         if extra > 0:
             new_hedges.extend([word] * extra)
 
-    before_sentence_count = len(_extract_sentences(before))
-    after_sentence_count = len(_extract_sentences(after))
+    before_sentence_count = len(_extract_sentences(before, min_words=1))
+    after_sentence_count = len(_extract_sentences(after, min_words=1))
     raw_sentence_growth = max(0, after_sentence_count - before_sentence_count)
 
     sentence_growth = 0
@@ -1144,14 +1153,24 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
             max(0, count - before_words.get(word, 0))
             for word, count in after_words.items()
         )
-        # A handful of new words (a sentence-initial "And"/"But" picked
-        # up when a split happens) is normal punctuation-driven
-        # rewriting, not fabrication. Anything past that is new content
-        # riding along with the extra sentence, which is exactly what
-        # this check exists to catch. Contractions are expanded on both
-        # sides first (see _expand_contractions) so "here's" -> "here
-        # is" doesn't itself register as two new words.
-        if new_word_count > 3:
+        # A split that redistributes EXISTING words across more
+        # sentences (a comma-joined clause rewritten as two short
+        # sentences for rhythm) adds zero new words — that's the
+        # false positive this check exists to avoid flagging (see the
+        # docstring's real example, confirmed to measure new_word_count
+        # == 0). Anything past zero is new content riding along with
+        # the extra sentence, which is exactly what this check exists
+        # to catch — including a single short word. Was ">3" until the
+        # independent codebase review (27 Aug 2026) found this let
+        # short invented sentences through untouched: "This is fine."
+        # -> "This is fine. Great." (1 new word) and "...I agree too."
+        # (3 new words) both passed silently under the old threshold,
+        # while only "...I agree with you." (4 words) got caught -
+        # nothing about a fabricated sentence's legitimacy depends on
+        # how many words it happens to be. Contractions are expanded
+        # on both sides first (see _expand_contractions) so "here's"
+        # -> "here is" doesn't itself register as two new words.
+        if new_word_count > 0:
             sentence_growth = raw_sentence_growth
 
     return {

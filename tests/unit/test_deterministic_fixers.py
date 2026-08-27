@@ -627,6 +627,79 @@ def test_sentence_growth_with_new_content_still_flagged():
     assert result["flagged"] is True
 
 
+# ---------------------------------------------------------------------------
+# Regression: 27 Aug 2026 hardening pass, independent codebase review
+# finding #3 + a live recurrence on the same Scott/CLEARANCE content
+# family as the fix above. The >3-new-word threshold this check used
+# (added for the false positive fixed above) let short invented
+# sentences through untouched: "This is fine." -> "This is fine.
+# Great." (1 new word) and "...I agree too." (3 new words) both passed
+# silently; only a 4-word addition ("...I agree with you.") got
+# caught. Nothing about a fabricated sentence's legitimacy depends on
+# how many words it happens to be — tightened to >0, still confirmed
+# not to reintroduce the original false positive above (that case
+# measures new_word_count == 0 exactly, so >0 was always sufficient).
+#
+# A second, deeper issue surfaced fixing the first: single-word
+# insertions ("Great.", "Absolutely.") were invisible to sentence-
+# count diffing entirely, regardless of the word threshold —
+# _extract_sentences' own 2-word minimum (needed by its other
+# callers, rhythm/baseline metrics, where a bare one-word utterance
+# isn't a meaningful data point) silently dropped them before this
+# function ever saw them. Fixed by giving _extract_sentences an
+# optional min_words parameter (default 2, every other caller
+# unaffected) and calling it with min_words=1 here specifically.
+# ---------------------------------------------------------------------------
+
+def test_flags_a_single_word_fabricated_sentence():
+    before = "This is fine."
+    after = "This is fine. Great."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 1
+    assert result["flagged"] is True
+
+
+def test_flags_a_short_multiword_fabricated_sentence_under_the_old_threshold():
+    before = "This is fine."
+    after = "This is fine. I agree too."
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 1
+    assert result["flagged"] is True
+
+
+def test_original_false_positive_still_not_flagged_after_tightening():
+    """The exact case that motivated adding the threshold in the first
+    place (see test_sentence_split_with_same_words_not_flagged_as_growth
+    above) must stay unflagged now that the threshold is >0 instead of
+    >3 — confirms the tightening didn't just trade one gap for
+    another."""
+    before = (
+        'Not "the agent ran," but "here\'s the evidence it did the right '
+        'thing, and here\'s what happens when it didn\'t."'
+    )
+    after = (
+        'Not "the agent ran," but "here is the evidence it did the right '
+        'thing. And here is what happens when it did not."'
+    )
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 0
+    assert result["flagged"] is False
+
+
+def test_extract_sentences_default_still_drops_single_word_sentences():
+    """Confirms the new min_words parameter didn't change the default
+    for every other caller (baseline/rhythm metrics rely on this)."""
+    from voice_engine import _extract_sentences
+    sentences = _extract_sentences("This is fine. Great.")
+    assert sentences == ["This is fine."]
+
+
+def test_extract_sentences_min_words_one_includes_single_word_sentences():
+    from voice_engine import _extract_sentences
+    sentences = _extract_sentences("This is fine. Great.", min_words=1)
+    assert sentences == ["This is fine.", "Great."]
+
+
 def test_heavily_paraphrased_render_reports_raw_delta_not_a_lower_attributed_count():
     """Regression anchor for the 19 Aug 2026 F1 test render: a heavily
     reworded render (synonym substitution in nearly every sentence,

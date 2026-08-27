@@ -104,7 +104,7 @@ def _protect_abbreviations(text: str) -> str:
     return text
 
 
-def _extract_sentences(text: str) -> list[str]:
+def _extract_sentences(text: str, min_words: int = 2) -> list[str]:
     """Split into sentences. Returns non-empty sentences only.
 
     Paragraph breaks are normalised to a single space between
@@ -119,6 +119,18 @@ def _extract_sentences(text: str) -> list[str]:
     artifact shipped straight through to what a person actually saw.
     Confirmed directly against a real render before this was fixed,
     not a hypothetical edge case.
+
+    min_words filters out sub-sentence fragments (default 2) — every
+    existing caller relies on this for rhythm/baseline metrics, where
+    a bare one-word utterance isn't a meaningful data point. Content
+    Lock's fabrication check (deterministic_fixers.py's
+    _check_uncorrected_insertions) is the one caller that needs
+    min_words=1: a genuinely inserted single-word sentence ("Great.",
+    "Absolutely.") is exactly the fabrication that check exists to
+    catch, and with the default filter it's invisible to
+    before/after_sentence_count entirely — not underweighted, not
+    filtered by a threshold, structurally uncountable. Confirmed
+    directly: 27 Aug 2026 hardening pass, independent codebase review.
     """
     paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
     normalised = ' '.join(
@@ -128,7 +140,7 @@ def _extract_sentences(text: str) -> list[str]:
     protected = _protect_abbreviations(normalised)
     sentences = re.split(r"(?<=[.!?])\s+", protected.strip())
     sentences = [s.replace('\u0000', '.') for s in sentences]
-    return [s.strip() for s in sentences if s.strip() and len(s.split()) >= 2]
+    return [s.strip() for s in sentences if s.strip() and len(s.split()) >= min_words]
 def _shortest_sentences(sentences: list[str], n: int = 2) -> list[str]:
     """Returns the n shortest sentences — evidence for compression."""
     return sorted(sentences, key=lambda s: len(s.split()))[:n]
