@@ -127,55 +127,65 @@ def _patch_retrieve(session):
     return patch.object(stripe.checkout.Session, "retrieve", return_value=session)
 
 
-def test_verify_succeeds_for_matching_device_and_active_subscription():
+def test_verify_succeeds_and_returns_the_verified_device_id():
     session = _build_session("device-1", status="complete", sub_status="active")
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session), \
          patch("stripe_subscription._record_subscription") as mock_record:
-        result = sub.verify_and_record_subscription("sess_1", "device-1")
-    assert result is True
+        result = sub.verify_and_record_subscription("sess_1")
+    assert result == "device-1"
     mock_record.assert_called_once_with(
         device_id="device-1", stripe_customer_id="cus_1", subscription_status="active",
     )
 
 
-def test_verify_fails_when_device_id_does_not_match():
-    # Session-binding check, same shape as AQE's expected_storage_key -
-    # a valid paid session for a DIFFERENT device must not grant this
-    # device paid status.
-    session = _build_session("device-999", status="complete", sub_status="active")
+def test_verify_trusts_stripe_metadata_device_id_regardless_of_local_state():
+    """27 Aug 2026 hardening pass, live incident confirmed in
+    production logs: this used to take a caller-supplied
+    expected_device_id and reject anything not matching it. That
+    check was rejecting genuine payments whenever the device cookie
+    hadn't finished writing before the Stripe redirect (routine for a
+    first-time subscriber) - the caller no longer supplies a device
+    to check against at all; whatever Stripe's own session metadata
+    says IS the answer, always, once session.status == 'complete' and
+    the subscription is genuinely active. This test is really just
+    confirming the signature no longer accepts (or needs) a second
+    argument - the trust itself is exercised by the test above."""
+    session = _build_session("device-42", status="complete", sub_status="active")
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session), \
          patch("stripe_subscription._record_subscription") as mock_record:
-        result = sub.verify_and_record_subscription("sess_1", "device-1")
-    assert result is False
-    mock_record.assert_not_called()
+        result = sub.verify_and_record_subscription("sess_1")
+    assert result == "device-42"
+    mock_record.assert_called_once_with(
+        device_id="device-42", stripe_customer_id="cus_1", subscription_status="active",
+    )
 
 
 def test_verify_fails_when_session_not_complete():
     session = _build_session("device-1", status="open", sub_status="active")
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 def test_verify_fails_when_subscription_not_active():
     session = _build_session("device-1", status="complete", sub_status="past_due")
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 def test_verify_fails_when_no_subscription_present():
     session = _build_session("device-1", status="complete", sub_status=None)
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 def test_verify_fails_closed_when_stripe_not_configured():
     with patch("stripe_subscription._get_secret", return_value=None):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 def test_verify_fails_closed_on_retrieve_error():
@@ -184,16 +194,17 @@ def test_verify_fails_closed_on_retrieve_error():
     # subscription's own docstring for why.
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          patch.object(stripe.checkout.Session, "retrieve", side_effect=Exception("boom")):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 def test_verify_fails_when_metadata_has_no_device_id_at_all():
-    # Absent device_id in metadata, not a mismatch - must not be
-    # treated as a wildcard match.
+    # A malformed/foreign session_id, not a device-continuity issue -
+    # our own create_subscription_checkout always sets this field, so
+    # its absence means something else is wrong.
     session = _build_session(None, status="complete", sub_status="active")
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 def test_verify_fails_closed_when_the_recording_write_fails():
@@ -206,7 +217,7 @@ def test_verify_fails_closed_when_the_recording_write_fails():
     with patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
          _patch_retrieve(session), \
          patch("stripe_subscription._record_subscription", return_value=False):
-        assert sub.verify_and_record_subscription("sess_1", "device-1") is False
+        assert sub.verify_and_record_subscription("sess_1") is None
 
 
 # ---------------------------------------------------------------------------

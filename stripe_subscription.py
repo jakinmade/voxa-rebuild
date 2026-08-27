@@ -160,57 +160,83 @@ def create_subscription_checkout(device_id: str, plan: str = "monthly") -> str |
         return None
 
 
-def verify_and_record_subscription(session_id: str, expected_device_id: str) -> bool:
+def verify_and_record_subscription(session_id: str) -> str | None:
     """Confirms a Checkout Session actually resulted in an active
-    subscription for expected_device_id specifically, and if so,
-    upserts stripe_customer_id + subscription_status onto that
-    device's existing lifetime_render_cap row. Returns True only on a
-    genuinely confirmed, correctly-bound active subscription.
+    subscription, and if so, upserts stripe_customer_id +
+    subscription_status onto the RIGHT device's lifetime_render_cap
+    row. Returns the verified device_id on success (not a bare bool)
+    so the caller can re-establish that device_id as this browser's
+    identity — see below for why that's now the caller's job — or
+    None on any failure.
 
-    Binding check mirrors AQE's expected_storage_key pattern: without
-    checking metadata's device_id against the caller's own device_id,
-    a valid paid session_id copied into a different device's URL would
-    grant that device paid status too - a real cross-tenant exposure,
-    not a payment bypass in the narrow sense (a real payment did
-    happen), but access to a subscription nobody on that device paid
-    for.
+    UPDATE, 27 Aug 2026 hardening pass, live incident confirmed in
+    production logs: this used to take expected_device_id as a
+    parameter and reject any mismatch against session metadata's own
+    device_id, mirroring AQE's expected_storage_key pattern — the
+    reasoning being that trusting Stripe's metadata alone, with no
+    check against the caller's current device, would let a copied
+    session_id URL grant a different device someone else's paid
+    status. Real reasoning, wrong fix for a race this session
+    surfaced directly: the device cookie is written by a JS component
+    that needs a moment to actually run in the browser, not a
+    server-set HTTP header. If checkout redirects to Stripe before
+    that write lands (routine for a first-time subscriber — nothing
+    else has needed the cookie yet), the browser genuinely has no
+    cookie when it comes back, a fresh unrelated device_id gets
+    minted, and it can never match what Stripe has on file — a real
+    payment was then permanently rejected by this exact check.
 
-    Fails CLOSED on any error (returns False) - deliberately the
+    The metadata's device_id doesn't need a caller-supplied value to
+    trust it: create_subscription_checkout (this same module) is the
+    ONLY code path that ever writes it, at session-creation time,
+    before Stripe is involved — the payer cannot edit their own
+    session's metadata through anything in the checkout flow. Once
+    session.status == "complete" AND the resulting subscription is
+    genuinely active (both still checked below, unchanged), that
+    metadata IS the correct source of truth for which device this
+    payment belongs to — trusting it is not a new exposure, it's
+    removing a redundant, now-provably-harmful check on top of an
+    already-sufficient one. The caller (app.py's checkout-success
+    handler) now calls persistence.py's set_device_id_cookie with the
+    value this returns, re-establishing the correct identity in this
+    browser regardless of whether the original write ever completed.
+
+    Fails CLOSED on any error (returns None) - deliberately the
     opposite direction from lifetime_cap.py's fail-open render checks.
     A missed verification here means a real paying customer sees an
     error and can retry or contact support; the alternative (failing
     open to "yes, subscribed") would mean anyone could type a random
     session_id into the URL and get free access whenever Stripe or
     Supabase hiccups. Same fail-closed reasoning as AQE's
-    verify_stripe_session. This now includes the DB write itself
-    (27 Aug 2026, independent codebase review finding 2a): a genuine
-    payment whose recording write then fails must not be reported as
-    a success — see _record_subscription's own docstring for the
-    exact sequence this closes.
+    verify_stripe_session. This includes the DB write itself (27 Aug
+    2026, independent codebase review finding 2a): a genuine payment
+    whose recording write then fails must not be reported as a
+    success — see _record_subscription's own docstring for the exact
+    sequence this closes.
     """
     import stripe
     secret_key = _get_secret("STRIPE_API_KEY", ("stripe", "API_KEY"))
     if not secret_key:
         log.error("verify_subscription_unavailable", reason="stripe_not_configured")
-        return False
+        return None
     stripe.api_key = secret_key
 
     try:
         session = stripe.checkout.Session.retrieve(session_id, expand=["subscription"])
     except Exception:
         log.error("verify_subscription_failed", reason="stripe_retrieve_error", exc_info=True)
-        return False
+        return None
 
     session_device_id = _stripe_metadata_get(session.metadata, "device_id")
-    if session_device_id != expected_device_id:
-        log.error(
-            "verify_subscription_device_mismatch",
-            expected=expected_device_id, found=session_device_id,
-        )
-        return False
+    if not session_device_id:
+        # Our own create_subscription_checkout always sets this - its
+        # absence means something is genuinely wrong (a malformed or
+        # foreign session_id), not a device-continuity issue.
+        log.error("verify_subscription_no_device_id_in_metadata")
+        return None
 
     if session.status != "complete":
-        return False
+        return None
 
     subscription = getattr(session, "subscription", None)
     if subscription is None or getattr(subscription, "status", None) != "active":
@@ -218,10 +244,10 @@ def verify_and_record_subscription(session_id: str, expected_device_id: str) -> 
             "verify_subscription_not_active",
             subscription_status=getattr(subscription, "status", None) if subscription else None,
         )
-        return False
+        return None
 
     write_succeeded = _record_subscription(
-        device_id=expected_device_id,
+        device_id=session_device_id,
         stripe_customer_id=session.customer,
         subscription_status="active",
     )
@@ -230,8 +256,8 @@ def verify_and_record_subscription(session_id: str, expected_device_id: str) -> 
         # recording write then failed - must not report success to
         # the caller. The write failure itself was already logged
         # inside _record_subscription.
-        return False
-    return True
+        return None
+    return session_device_id
 
 
 def _record_subscription(device_id: str, stripe_customer_id: str, subscription_status: str) -> bool:

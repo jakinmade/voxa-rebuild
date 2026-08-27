@@ -114,6 +114,52 @@ def test_cookie_write_failure_does_not_raise():
 
 
 # ------------------------------------------------------------------
+# set_device_id_cookie — 27 Aug 2026 hardening pass, live incident:
+# added so a verified device_id from Stripe (which may differ from
+# whatever local cookie/session_state existed before, if the original
+# write raced the checkout redirect) can be forced as this browser's
+# identity, rather than only ever being able to generate a fresh
+# random one.
+# ------------------------------------------------------------------
+
+def test_set_device_id_cookie_writes_the_given_id_not_a_generated_one():
+    mock_controller = _mock_cookie_controller()
+    with patch("persistence._get_cookie_controller", return_value=mock_controller):
+        persistence.set_device_id_cookie("stripe-verified-device-id")
+    mock_controller.set.assert_called_once()
+    assert mock_controller.set.call_args[0][0] == persistence._COOKIE_NAME
+    assert mock_controller.set.call_args[0][1] == "stripe-verified-device-id"
+
+
+def test_set_device_id_cookie_updates_cached_session_state_value():
+    mock_controller = _mock_cookie_controller()
+    with patch("persistence._get_cookie_controller", return_value=mock_controller):
+        persistence.set_device_id_cookie("stripe-verified-device-id")
+    assert st.session_state["_device_id"] == "stripe-verified-device-id"
+
+
+def test_set_device_id_cookie_overwrites_a_different_existing_value():
+    """The actual scenario this exists for: session_state/cookie
+    already has SOME (wrong/unrelated) device_id, and this must
+    replace it with the Stripe-verified one, not defer to what's
+    already there."""
+    st.session_state["_device_id"] = "some-other-unrelated-id"
+    mock_controller = _mock_cookie_controller()
+    with patch("persistence._get_cookie_controller", return_value=mock_controller):
+        persistence.set_device_id_cookie("stripe-verified-device-id")
+    assert st.session_state["_device_id"] == "stripe-verified-device-id"
+    assert mock_controller.set.call_args[0][1] == "stripe-verified-device-id"
+
+
+def test_set_device_id_cookie_write_failure_does_not_raise():
+    mock_controller = _mock_cookie_controller()
+    mock_controller.set.side_effect = Exception("cookie blocked")
+    with patch("persistence._get_cookie_controller", return_value=mock_controller):
+        persistence.set_device_id_cookie("stripe-verified-device-id")  # must not raise
+    assert st.session_state["_device_id"] == "stripe-verified-device-id"
+
+
+# ------------------------------------------------------------------
 # restore_profile_if_available
 # ------------------------------------------------------------------
 

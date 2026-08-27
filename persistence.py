@@ -70,6 +70,54 @@ def _get_cookie_controller() -> CookieController:
     return CookieController()
 
 
+def _write_device_id_cookie(device_id: str) -> None:
+    """Writes device_id to the cookie via the JS component - shared by
+    get_or_create_device_id's own new-id path and by
+    set_device_id_cookie (below), so there is one place that knows the
+    expires/max_age quirk documented inline, not two copies that could
+    drift apart."""
+    try:
+        # BUG FIXED (26 Aug 2026, live incident): streamlit_cookies_
+        # controller's CookieController.set() silently defaults
+        # `expires` to datetime.now()+1 day WHENEVER the caller
+        # doesn't pass expires explicitly - confirmed by reading the
+        # installed package source (__getOptions in
+        # cookie_controller.py), regardless of what max_age is set to.
+        # Pass an explicit, matching expires 365 days out so the two
+        # directives agree instead of silently conflicting.
+        _get_cookie_controller().set(
+            _COOKIE_NAME, device_id,
+            max_age=60 * 60 * 24 * 365,
+            expires=datetime.now(timezone.utc) + timedelta(days=365),
+        )
+    except Exception:
+        log.error("device_cookie_set_failed", exc_info=True)
+
+
+def set_device_id_cookie(device_id: str) -> None:
+    """Forces the device cookie (and this session's cached value) to a
+    SPECIFIC device_id, rather than generating a new one.
+
+    Added 27 Aug 2026 for the Stripe checkout-return race this session
+    surfaced directly, confirmed in production logs: the cookie
+    written by get_or_create_device_id is set via a JS component that
+    needs a moment to actually run in the browser, not a server-set
+    HTTP header. If checkout redirects to Stripe before that write
+    lands, the browser genuinely never has the cookie yet - coming
+    back from Stripe is a fresh page load, st.context.cookies sees
+    nothing, and get_or_create_device_id mints a brand-new, unrelated
+    random device_id with zero connection to the one Stripe actually
+    has on file for that payment (embedded in the Checkout Session's
+    metadata at creation time). verify_and_record_subscription (27
+    Aug 2026 redesign, same pass) now returns the VERIFIED device_id
+    from Stripe's own session metadata instead of a bare bool -
+    app.py's checkout-success handler calls this with that value,
+    re-establishing the correct device identity in this browser
+    regardless of whether the original write ever completed."""
+    st.session_state["_device_id"] = device_id
+    _write_device_id_cookie(device_id)
+
+
 def get_or_create_device_id() -> str:
     """Reads the device cookie via st.context.cookies — synchronous,
     populated from the real HTTP Cookie header on the initial request,
@@ -105,24 +153,7 @@ def get_or_create_device_id() -> str:
     new_id = str(uuid.uuid4())
     print(f"DIAG get_or_create_device_id: NO existing cookie found, generating new_id={new_id}", flush=True)
     st.session_state["_device_id"] = new_id
-
-    try:
-        # BUG FIXED (26 Aug 2026, live incident): streamlit_cookies_
-        # controller's CookieController.set() silently defaults
-        # `expires` to datetime.now()+1 day WHENEVER the caller
-        # doesn't pass expires explicitly - confirmed by reading the
-        # installed package source (__getOptions in
-        # cookie_controller.py), regardless of what max_age is set to.
-        # Pass an explicit, matching expires 365 days out so the two
-        # directives agree instead of silently conflicting.
-        _get_cookie_controller().set(
-            _COOKIE_NAME, new_id,
-            max_age=60 * 60 * 24 * 365,
-            expires=datetime.now(timezone.utc) + timedelta(days=365),
-        )
-    except Exception:
-        log.error("device_cookie_set_failed", exc_info=True)
-
+    _write_device_id_cookie(new_id)
     return new_id
 
 

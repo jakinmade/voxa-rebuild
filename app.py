@@ -69,7 +69,7 @@ from deterministic_fixers import (
     ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
 )
 from logging_config import get_logger
-from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id
+from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id, set_device_id_cookie
 from stripe_subscription import (
     create_subscription_checkout,
     verify_and_record_subscription,
@@ -946,11 +946,24 @@ if restore_profile_if_available():
 # on every subsequent rerun of this same browser tab regardless.
 if st.query_params.get("payment") == "success":
     _checkout_session_id = st.query_params.get("session_id")
-    _device_id_for_checkout = st.session_state.get("_device_id") or get_or_create_device_id()
-    st.session_state["_device_id"] = _device_id_for_checkout
-    if _checkout_session_id and verify_and_record_subscription(
-        _checkout_session_id, _device_id_for_checkout
-    ):
+    # 27 Aug 2026 hardening pass (live incident, production logs
+    # confirmed the cause): _device_id_for_checkout used to be derived
+    # from whatever local cookie/session_state happened to exist
+    # BEFORE trusting Stripe - if the cookie write from before
+    # checkout hadn't landed in the browser yet (a routine race for a
+    # first-time subscriber, not an edge case), this device_id was
+    # freshly minted and unrelated to Stripe's own record, so a
+    # completely genuine payment got rejected as a "device mismatch."
+    # verify_and_record_subscription now returns Stripe's own verified
+    # device_id (or None) instead of taking one in and returning a
+    # bare bool - set_device_id_cookie re-establishes THAT as this
+    # browser's identity, regardless of what existed before.
+    _verified_device_id = (
+        verify_and_record_subscription(_checkout_session_id)
+        if _checkout_session_id else None
+    )
+    if _verified_device_id:
+        set_device_id_cookie(_verified_device_id)
         st.session_state["subscription_just_confirmed"] = True
     else:
         st.session_state["subscription_confirm_failed"] = True
