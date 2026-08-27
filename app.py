@@ -37,6 +37,7 @@ from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from authenticity_report import build_authenticity_report, export_authenticity_report_json, export_authenticity_report_text, export_authenticity_report_pdf
+from voice_dna_card import build_voice_dna_card_png
 from voice_engine import (
     analyse_writing, _analyse_intro,
     compute_baseline_metrics, _merge_baseline,
@@ -4059,6 +4060,23 @@ def screen_my_voice():
             f'{evidence_html}</div></div>',
             unsafe_allow_html=True,
         )
+
+    # Shareable card (27 Aug 2026) — a low-effort, high-reach feature:
+    # nothing in the product before this was shareable, and the data
+    # here (top trait headlines + confidence) is exactly what's
+    # already on screen above, just composed as an image instead of
+    # app UI. Privacy: headlines only, never the evidence quotes shown
+    # above (those are excerpts of the person's own writing) — see
+    # voice_dna_card.py's module docstring for the full reasoning,
+    # same stance authenticity_report.py already takes on the baseline.
+    st.markdown('<div style="margin-top:1.4rem;"></div>', unsafe_allow_html=True)
+    st.download_button(
+        "Share your Voice DNA",
+        data=build_voice_dna_card_png(observations, confidence),
+        file_name="voicova-voice-dna.png",
+        mime="image/png",
+        use_container_width=True,
+    )
 
 
 def screen_check_draft():
