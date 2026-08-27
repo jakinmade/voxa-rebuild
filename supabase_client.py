@@ -51,11 +51,8 @@ def get_supabase_client():
     persistence layer."""
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_KEY")
-    print(f"DIAG get_supabase_client: url_present={bool(url)} key_present={bool(key)} "
-          f"url_val={url!r} key_len={len(key) if key else 0} key_tail={key[-8:] if key else None}",
-          flush=True)
     if not url or not key:
-        print("DIAG get_supabase_client: returning None, url or key missing", flush=True)
+        log.error("supabase_client_unavailable", reason="url_or_key_missing", url_present=bool(url), key_present=bool(key))
         return None
     try:
         from supabase import create_client
@@ -64,9 +61,7 @@ def get_supabase_client():
             url, key,
             options=ClientOptions(postgrest_client_timeout=_POSTGREST_TIMEOUT_SECONDS),
         )
-        print("DIAG get_supabase_client: create_client succeeded", flush=True)
         return client
-    except Exception as e:
-        print(f"DIAG get_supabase_client: EXCEPTION {type(e).__name__}: {e}", flush=True)
+    except Exception:
         log.error("supabase_client_init_failed", exc_info=True)
         return None

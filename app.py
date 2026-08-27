@@ -2059,15 +2059,21 @@ def _run_render(
         log.error("render_failed", reason="api_key_missing", is_refinement=is_refinement)
         return False
 
-    allowed, used, limit = check_and_reserve_render()
-    if not allowed:
-        st.session_state.render_error = (
-            "We've hit today's render limit while VOICOVA is in early testing. "
-            "Please try again tomorrow."
-        )
-        log.error("render_blocked", reason="daily_cap_reached", used=used, limit=limit, is_refinement=is_refinement)
-        return False
-
+    # Order matters here (27 Aug 2026 hardening pass): entitlement is
+    # checked BEFORE the daily spend cap is reserved, not after. Was
+    # the other way round until this fix — check_and_reserve_render()
+    # (render_cap.py) reserves the daily counter optimistically,
+    # before any API call, by its own design ("so a render that fails
+    # partway through still counts"). With the old order, a free user
+    # who'd already used all 15 lifetime renders would still reserve a
+    # daily-cap slot on every retry, even though the lifetime check
+    # right after it would immediately block the render and no API
+    # call would ever happen — someone repeatedly hitting the paywall
+    # could exhaust the site-wide daily budget with zero completions.
+    # Resolving the free-or-lifetime-or-refinement question first, and
+    # only reserving daily spend once a render is actually going to be
+    # attempted, closes that.
+    #
     # Step 4 (Section 5.2 / Section 13): the 15-lifetime-render free
     # tier. Resolved here, once, not just inside this check - the same
     # device_id is reused for the render_history write later in this
@@ -2095,6 +2101,15 @@ def _run_render(
             )
             return False
     st.session_state.render_paywall_hit = False
+
+    allowed, used, limit = check_and_reserve_render()
+    if not allowed:
+        st.session_state.render_error = (
+            "We've hit today's render limit while VOICOVA is in early testing. "
+            "Please try again tomorrow."
+        )
+        log.error("render_blocked", reason="daily_cap_reached", used=used, limit=limit, is_refinement=is_refinement)
+        return False
 
     import anthropic
 
@@ -3731,16 +3746,48 @@ Show the per-dimension breakdown
                 # decodes from HTML entities to the original text. This is
                 # the standard safe pattern for embedding arbitrary text
                 # for JS to consume, not a one-off escaping hack.
+                # Hardening (27 Aug 2026, live report: "copy text
+                # appears not to be working"): navigator.clipboard.
+                # writeText() can reject or simply not exist (older
+                # browsers, some embedded/webview contexts, clipboard
+                # permission denied) and the previous version had no
+                # .catch() at all — a rejection meant the button did
+                # nothing, with zero visible feedback that anything
+                # had gone wrong. Now: try the modern API first: on
+                # success OR on failure, fall back to the classic
+                # select-and-execCommand('copy') approach (works in
+                # far more contexts, including ones without Clipboard
+                # API access at all); if that ALSO fails, show an
+                # explicit "Copy failed" state rather than staying
+                # silent — a failed copy the person can see and work
+                # around (select the text manually) beats one they
+                # can't tell happened at all. Same zero-embedded-
+                # newline construction as before (many small
+                # concatenated f-string pieces, not one multi-line
+                # triple-quoted string) — see the indentation-bug note
+                # above for why that distinction matters here.
                 import html as _html
                 st.markdown(
                     f'<textarea id="{_copy_source_id}" style="display:none">'
                     f'{_html.escape(output)}</textarea>'
                     f'<button id="{_copy_btn_id}" data-label="Copy text" '
-                    f'onclick="navigator.clipboard.writeText('
-                    f'document.getElementById(\'{_copy_source_id}\').value);'
+                    f'onclick="(function(){{'
+                    f'var t=document.getElementById(\'{_copy_source_id}\');'
                     f'var b=document.getElementById(\'{_copy_btn_id}\');'
-                    f'var o=b.dataset.label;b.innerText=\'Copied\';'
-                    f'setTimeout(function(){{b.innerText=o;}},1500);" '
+                    f'var o=b.dataset.label;'
+                    f'function ok(){{b.innerText=\'Copied\';'
+                    f'setTimeout(function(){{b.innerText=o;}},1500);}}'
+                    f'function fail(){{b.innerText=\'Copy failed \u2014 select text below\';'
+                    f'setTimeout(function(){{b.innerText=o;}},2500);}}'
+                    f'function fallback(){{try{{'
+                    f'var d=t.style.display;t.style.display=\'block\';t.select();'
+                    f'var s=document.execCommand(\'copy\');t.style.display=d;'
+                    f'if(s){{ok();}}else{{fail();}}'
+                    f'}}catch(e){{fail();}}}}'
+                    f'if(navigator.clipboard&&navigator.clipboard.writeText){{'
+                    f'navigator.clipboard.writeText(t.value).then(ok).catch(fallback);'
+                    f'}}else{{fallback();}}'
+                    f'}})()" '
                     f'style="font-family: var(--font-sans); font-size: 0.85rem; '
                     f'font-weight: 500; color: var(--accent); '
                     f'background: var(--accent-soft); border: 1px solid var(--border); '

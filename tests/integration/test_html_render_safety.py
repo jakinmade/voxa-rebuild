@@ -205,6 +205,36 @@ def test_copy_button_html_is_well_formed_and_has_no_quote_collision():
         "textarea - this is exactly the quote-collision bug reintroduced."
     )
 
+    # Fallback hardening (27 Aug 2026, live report: "copy text appears
+    # not to be working"): confirms the defensive path is actually
+    # present in the generated markup, not just that the happy path is
+    # well-formed. Can't execute the JS itself from a Python test, but
+    # a missing/wrong function name here is exactly the kind of typo
+    # that would silently defeat the whole fallback while still
+    # passing every other check above (well-formed HTML, no quote
+    # collision) since the fallback code is just more well-formed JS
+    # text either way.
+    onclick_js = onclick_match.group(1)
+    assert "navigator.clipboard&&navigator.clipboard.writeText" in onclick_js, (
+        "Expected a feature-detect guard before calling the Clipboard API."
+    )
+    assert ".catch(fallback)" in onclick_js, (
+        "Expected a .catch() on the Clipboard API call, wired to the "
+        "execCommand fallback - without it, a rejected promise (denied "
+        "permission, unsupported context) fails silently exactly like "
+        "the reported live bug."
+    )
+    assert "document.execCommand('copy')" in onclick_js, (
+        "Expected the classic select-and-execCommand fallback for "
+        "contexts where the Clipboard API is unavailable entirely, not "
+        "only where it exists but rejects."
+    )
+    assert "Copy failed" in onclick_js, (
+        "Expected a visible failure state if both the Clipboard API and "
+        "the execCommand fallback fail - silent failure is the exact "
+        "gap this hardening exists to close."
+    )
+
 
 # ---------------------------------------------------------------------------
 # HTML injection regression tests (added alongside the html.escape() fixes

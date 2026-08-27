@@ -169,3 +169,75 @@ def test_refinement_failure_does_not_release_a_reservation_it_never_made():
         assert not at.exception, f"App raised during failed refinement: {at.exception}"
 
         mock_release.assert_not_called()
+
+
+# ---------------------------------------------------------------------
+# Regression test for the render-cap ordering fix (27 Aug 2026 hardening
+# pass, independent codebase review finding #4): check_and_reserve_
+# lifetime_render is now called BEFORE check_and_reserve_render (the
+# daily spend cap), not after. render_cap.py's own docstring says the
+# daily counter is reserved optimistically, before any API call, "so a
+# render that fails partway through still counts" - with the old
+# ordering, a free user who'd already used all 15 lifetime renders
+# would still reserve a daily-cap slot on every retry attempt, even
+# though the lifetime check right after would immediately block the
+# render with zero API calls made. This locks in the fix: when the
+# lifetime cap denies, the daily cap must never be touched at all.
+# ---------------------------------------------------------------------
+
+def test_lifetime_cap_denial_never_reserves_the_daily_cap():
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}), \
+         patch("anthropic.Anthropic") as mock_anthropic_cls, \
+         patch(
+             "lifetime_cap.check_and_reserve_lifetime_render",
+             return_value=(False, 15, 15),
+         ), \
+         patch("render_cap.check_and_reserve_render") as mock_daily_reserve:
+        mock_client = mock_anthropic_cls.return_value
+        mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
+
+        at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+
+        assert not at.exception, f"App raised on a lifetime-cap-denied render: {at.exception}"
+        assert at.session_state["render_paywall_hit"] is True
+        mock_daily_reserve.assert_not_called()
+
+
+def test_lifetime_cap_allowed_still_reserves_the_daily_cap():
+    """The fix must not accidentally skip the daily reservation for a
+    render that's actually allowed to proceed - only a denial should
+    short-circuit before it."""
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-not-real"}), \
+         patch("anthropic.Anthropic") as mock_anthropic_cls, \
+         patch("render_history.get_supabase_client", return_value=MagicMock()), \
+         patch(
+             "lifetime_cap.check_and_reserve_lifetime_render",
+             return_value=(True, 1, 15),
+         ), \
+         patch(
+             "render_cap.check_and_reserve_render",
+             return_value=(True, 1, 500),
+         ) as mock_daily_reserve:
+        mock_client = mock_anthropic_cls.return_value
+        mock_client.messages.create.return_value = _fake_anthropic_response(FAKE_LLM_OUTPUT)
+
+        at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1
+        at.run()
+        _seed_screen4(at)
+        at.run()
+
+        at.text_area[0].input("Please write a short note about the launch plan.")
+        at.button[0].click()
+        at.run()
+
+        assert not at.exception
+        mock_daily_reserve.assert_called_once()
