@@ -135,3 +135,97 @@ def test_missing_voice_report_fields_become_none_not_a_crash():
     assert report["voice_match_tier"] is None
     assert report["semantic_match"] is None
     assert ar.verify_authenticity_report(report) is True
+
+
+# ---------------------------------------------------------------------
+# export_authenticity_report_pdf (27 Aug 2026) — branded one-pager for
+# the agency/client-deliverable use case. Beyond "it doesn't crash":
+# these extract real text from the generated PDF bytes and check it
+# actually contains the report's values, and specifically regression-
+# guard the color-polarity bug caught during development (Confidence
+# is inverted from Risk — High is good for one, bad for the other; a
+# shared High/Medium/Low->color map gets this backwards for one of
+# them, confirmed by generating and visually inspecting an actual
+# rendered PDF before this test existed).
+# ---------------------------------------------------------------------
+
+def _pdf_text(pdf_bytes: bytes) -> str:
+    from io import BytesIO
+    import pdfplumber
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+
+def test_pdf_export_produces_valid_pdf_bytes():
+    report = _build()
+    pdf_bytes = ar.export_authenticity_report_pdf(report)
+    assert isinstance(pdf_bytes, bytes)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 500
+
+
+def test_pdf_export_contains_the_actual_report_values():
+    report = _build()
+    text = _pdf_text(ar.export_authenticity_report_pdf(report))
+    assert "Good" in text  # voice_match_tier
+    assert "98" in text  # semantic_match
+    assert "Low" in text  # confidence
+    assert "High" in text  # risk
+    assert "Flagged" in text  # ai_tell_clean is False
+    assert "ownership (first person) 66%" in text  # biggest_changes
+    assert report["render_id"] in text
+    assert report["baseline_hash"] in text
+    assert report["integrity_hash"] in text
+
+
+def test_pdf_export_handles_no_biggest_changes():
+    """A clean render with nothing flagged has an empty biggest_changes
+    list — the PDF must render without a 'What changed' section, not
+    crash on an empty list."""
+    report = ar.build_authenticity_report(
+        {**_SAMPLE_VOICE_REPORT, "biggest_changes": []}, _SAMPLE_BASELINE,
+        render_id="r3", created_at="2026-08-18T14:00:00Z",
+        scoring_rules_version="1.1.0",
+    )
+    pdf_bytes = ar.export_authenticity_report_pdf(report)
+    text = _pdf_text(pdf_bytes)
+    assert "WHAT CHANGED" not in text
+
+
+def test_pdf_export_handles_missing_fields_gracefully():
+    """Same missing-fields case as
+    test_missing_voice_report_fields_become_none_not_a_crash above,
+    but for the PDF path specifically — None values must render as
+    'n/a' text, not crash reportlab on a None where it expects a str."""
+    report = ar.build_authenticity_report(
+        {}, _SAMPLE_BASELINE,
+        render_id="r4", created_at="2026-08-18T14:00:00Z",
+        scoring_rules_version="1.1.0",
+    )
+    pdf_bytes = ar.export_authenticity_report_pdf(report)
+    assert pdf_bytes.startswith(b"%PDF-")
+
+
+def test_pdf_export_risk_and_confidence_are_not_the_same_polarity():
+    """Regression guard for the bug caught during development: Risk
+    and Confidence are inverted (High risk is bad, High confidence is
+    good) - a shared tier->color map gets one of them backwards. Can't
+    directly assert on rendered color from extracted text, so this
+    confirms the two color maps genuinely differ for the same key
+    rather than accidentally being the same dict/reference."""
+    assert ar._PDF_RISK_COLOR["High"] != ar._PDF_CONFIDENCE_COLOR["High"]
+    assert ar._PDF_RISK_COLOR["Low"] != ar._PDF_CONFIDENCE_COLOR["Low"]
+    assert ar._PDF_RISK_COLOR["High"] == ar._PDF_DANGER
+    assert ar._PDF_CONFIDENCE_COLOR["High"] == ar._PDF_SUCCESS
+
+
+def test_pdf_export_voice_match_tier_uses_real_tier_values():
+    """Regression guard: voice_match_tier is never 'High'/'Medium'/
+    'Low' in production (see voice_match_label(), voice_engine.py) -
+    it's Strong/Good/Developing/Limited. A color map keyed on the
+    wrong value set silently falls through to a default color for
+    every real render. Confirms all four real values are covered."""
+    for tier in ("Strong", "Good", "Developing", "Limited"):
+        assert tier in ar._PDF_VOICE_MATCH_COLOR, (
+            f"{tier!r} is a real voice_match_tier value with no color mapped"
+        )

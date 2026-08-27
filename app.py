@@ -36,7 +36,7 @@ from render_history import write_render_history, get_render_history
 from review_gate import requires_review, log_review_confirmation
 from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
-from authenticity_report import build_authenticity_report, export_authenticity_report_json, export_authenticity_report_text
+from authenticity_report import build_authenticity_report, export_authenticity_report_json, export_authenticity_report_text, export_authenticity_report_pdf
 from voice_engine import (
     analyse_writing, _analyse_intro,
     compute_baseline_metrics, _merge_baseline,
@@ -3922,7 +3922,7 @@ Show the per-dimension breakdown
                     st.rerun()
 
             st.markdown("")
-            col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+            col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 1])
             with col1:
                 if st.button("Write again", use_container_width=True):
                     st.session_state.render_input_text = ""
@@ -3976,6 +3976,21 @@ Show the per-dimension breakdown
                         data=export_authenticity_report_text(authenticity_report),
                         file_name="voicova-authenticity-report.txt",
                         mime="text/plain",
+                        use_container_width=True,
+                    )
+            with col6:
+                # Branded one-pager (27 Aug 2026), for the agency/client-
+                # deliverable use case — see authenticity_report.py's note
+                # on export_authenticity_report_text for why plain text
+                # alone wasn't judged enough for that case. Same gating,
+                # same source dict as the two exports above; this is a
+                # presentation layer only, no new data.
+                if report and st.session_state.get("render_id"):
+                    st.download_button(
+                        "Download as PDF",
+                        data=export_authenticity_report_pdf(authenticity_report),
+                        file_name="voicova-authenticity-report.pdf",
+                        mime="application/pdf",
                         use_container_width=True,
                     )
 

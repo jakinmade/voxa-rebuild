@@ -34,3 +34,13 @@ streamlit-cookies-controller==0.0.4
 # (metadata.get() vs subscript access) and drifting it here would risk
 # repeating that with a fresh version's behaviour.
 stripe==15.3.0
+
+# Branded PDF export of the authenticity report (authenticity_report.py's
+# export_authenticity_report_pdf, 27 Aug 2026) — reportlab is a runtime
+# dependency (app.py's PDF download button calls it directly); pdfplumber
+# is test-only, used by tests/unit/test_authenticity_report.py to extract
+# and assert on real text from the generated PDF bytes, not just check
+# they don't crash — same "test/dev deps live here too" convention as the
+# packages/ block above.
+reportlab==4.4.10
+pdfplumber==0.11.9
