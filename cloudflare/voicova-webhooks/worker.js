@@ -24,21 +24,54 @@
  * no bundler, so no npm imports. Signature verification is done by
  * hand using the Web Crypto API (HMAC-SHA256), which is what Stripe's
  * own signature scheme actually is under the hood — same result as
- * stripe.webhooks.constructEvent, zero dependencies.
+ * stripe.webhooks.constructEvent, zero dependencies. Reconciliation
+ * fetches (below) use the same no-SDK approach: a plain authenticated
+ * fetch() against Stripe's REST API.
  *
- * EVENTS HANDLED:
- *   - customer.subscription.updated  → writes event.data.object.status
- *     verbatim ("active", "past_due", "canceled", "unpaid", etc.) so
- *     lifetime_cap.py's existing `== "active"` check stays the single
- *     source of truth for what counts as entitled.
- *   - customer.subscription.deleted  → writes "canceled" explicitly
- *     (Stripe already sends status="canceled" on this event too, but
- *     set directly in case that ever changes upstream).
- *   - invoice.payment_failed         → writes "past_due". Does NOT
- *     write "canceled" — a failed invoice on its own doesn't mean
- *     Stripe has cancelled the subscription yet (retries happen
- *     first); customer.subscription.updated will follow if/when
- *     Stripe's own retry schedule gives up and cancels it.
+ * RECONCILIATION, NOT TRUST (27 Aug 2026 redesign — see
+ * docs/stripe-webhook-reconciliation-design.md for the full design
+ * doc; independent codebase review findings 2b/2d/2e): the previous
+ * version of this Worker wrote event.data.object.status (or a
+ * hardcoded "past_due"/"canceled") straight from each event's own
+ * payload. That has three problems, all sharing one root cause —
+ * trusting the event as truth instead of asking Stripe what's
+ * currently true:
+ *   - a webhook delivered before this device's own row exists yet
+ *     (checkout's own write racing this one) would PATCH zero rows
+ *     and Supabase would still report success — the entitlement
+ *     change was silently lost, not just delayed;
+ *   - Stripe does not guarantee event delivery ORDER, so a stale
+ *     event delivered after a newer one could overwrite it, e.g.
+ *     canceled -> active if the active event both happened to be
+ *     generated earlier but delivered later;
+ *   - invoice.payment_failed writing "past_due" unconditionally is a
+ *     policy guess this Worker has no business making — Stripe's own
+ *     retry schedule determines whether a failed payment has actually
+ *     changed the subscription's status yet, and this Worker was
+ *     guessing at that instead of asking.
+ * Fixed by changing what gets WRITTEN, not which events are listened
+ * for: every event type now triggers the same three steps — extract
+ * the Stripe customer ID, fetch that customer's CURRENT subscription
+ * status directly from Stripe's API, write that. Event type only
+ * decides WHEN to reconcile, never WHAT to write — which makes
+ * out-of-order delivery irrelevant (every write reflects reality at
+ * the moment it runs, not a comparison between events) and removes
+ * the need for a separate invoice.payment_failed policy branch
+ * entirely.
+ *
+ * IDEMPOTENCY: once every write reconciles against current Stripe
+ * state, processing the same event twice is harmless by construction
+ * — this is defense-in-depth (skip redundant Stripe API calls on
+ * Stripe's own automatic retries), not a correctness requirement.
+ * stripe_webhook_events (new table, see the 27 Aug 2026 migration)
+ * tracks processed event IDs; a duplicate is acknowledged and
+ * skipped, not reprocessed.
+ *
+ * EVENTS HANDLED (unchanged from before — still the right triggers,
+ * they just no longer supply the value written; see above):
+ *   - customer.subscription.updated
+ *   - customer.subscription.deleted
+ *   - invoice.payment_failed
  * All other event types are acknowledged (200) and ignored — Stripe
  * expects a 200 for any event type it isn't told to filter out
  * server-side, or it will keep retrying.
@@ -52,6 +85,14 @@
  *                             stage — swap to the live-mode secret
  *                             only when stripe_subscription.py's own
  *                             STRIPE_API_KEY is switched to live.
+ *   STRIPE_API_KEY          — NEW as of this redesign: needed to make
+ *                             the reconciliation GET request to
+ *                             Stripe's REST API (previously this
+ *                             Worker never called OUT to Stripe, only
+ *                             verified incoming signatures). Same
+ *                             secret key stripe_subscription.py
+ *                             already uses — test-mode or live-mode
+ *                             to match STRIPE_WEBHOOK_SECRET above.
  *   SUPABASE_URL            — e.g. https://txpsphethknujgqvqdzl.supabase.co
  *   SUPABASE_SERVICE_ROLE_KEY — service-role key, NOT the anon key.
  *                             Required because this bypasses row-level
@@ -62,6 +103,7 @@
  */
 
 const SUPABASE_TABLE = "lifetime_render_cap";
+const SUPABASE_EVENTS_TABLE = "stripe_webhook_events";
 
 export default {
   async fetch(request, env) {
@@ -93,12 +135,18 @@ export default {
     }
 
     try {
+      const alreadySeen = await markEventSeen(env, event.id);
+      if (alreadySeen) {
+        return new Response("ok (duplicate, skipped)", { status: 200 });
+      }
       await handleEvent(event, env);
     } catch (err) {
       // Log-and-500 rather than swallowing: a 500 makes Stripe retry
       // this event on its own backoff schedule, which is the correct
-      // behaviour for a transient Supabase write failure. Swallowing
-      // it here would silently drop a real entitlement change.
+      // behaviour for a transient Supabase/Stripe API failure, AND
+      // for the zero-row-match case below (device row not written yet
+      // by checkout's own path — ask Stripe to try again shortly
+      // rather than silently dropping the entitlement change).
       console.error("voicova_webhook_handler_error", err.message, event?.type);
       return new Response("Internal error", { status: 500 });
     }
@@ -107,29 +155,106 @@ export default {
   },
 };
 
+// Returns true if this event.id has already been processed (skip),
+// false if this is the first time (proceed). Insert-then-check-
+// conflict, not select-then-insert — avoids a race between two
+// concurrent deliveries of the same event both seeing "not yet seen".
+async function markEventSeen(env, eventId) {
+  if (!eventId) {
+    // Malformed event with no id at all - don't block on
+    // idempotency tracking for something this broken; let
+    // handleEvent's own field extraction fail loudly instead if it's
+    // going to.
+    return false;
+  }
+  const url = `${env.SUPABASE_URL}/rest/v1/${SUPABASE_EVENTS_TABLE}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      Prefer: "return=minimal,resolution=ignore-duplicates",
+    },
+    body: JSON.stringify({ event_id: eventId }),
+  });
+  if (!response.ok && response.status !== 409) {
+    const text = await response.text();
+    throw new Error(
+      `Event idempotency write failed (${response.status}): ${text}`
+    );
+  }
+  // Postgrest with resolution=ignore-duplicates returns 201 on a
+  // fresh insert and 200 with an empty body on a duplicate it
+  // silently ignored - 201 means "first time", anything else on this
+  // success path means "already seen".
+  return response.status !== 201;
+}
+
 async function handleEvent(event, env) {
+  const customerId = extractCustomerId(event);
+  if (!customerId) {
+    console.error("voicova_webhook_no_customer_id", event.type);
+    return; // Nothing to reconcile against - not a retryable error.
+  }
+
   switch (event.type) {
-    case "customer.subscription.updated": {
-      const sub = event.data.object;
-      await writeSubscriptionStatus(env, sub.customer, sub.status);
-      break;
-    }
-    case "customer.subscription.deleted": {
-      const sub = event.data.object;
-      await writeSubscriptionStatus(env, sub.customer, "canceled");
-      break;
-    }
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
     case "invoice.payment_failed": {
-      const invoice = event.data.object;
-      // invoice.customer is the Stripe Customer ID directly on the
-      // invoice object - no need to look up the subscription first.
-      await writeSubscriptionStatus(env, invoice.customer, "past_due");
+      // Event type only decides WHEN to reconcile, never WHAT to
+      // write - see the module header for why. All three event types
+      // funnel into the exact same two calls.
+      const currentStatus = await fetchCurrentSubscriptionStatus(env, customerId);
+      await writeSubscriptionStatus(env, customerId, currentStatus);
       break;
     }
     default:
-      // Acknowledged, ignored - see module docstring.
+      // Acknowledged, ignored - see module header.
       break;
   }
+}
+
+// Works for both customer.subscription.* events (customer is on the
+// subscription object directly) and invoice.* events (customer is on
+// the invoice object directly) - same field name, different parent
+// object, so one small helper instead of duplicating this per event
+// type.
+function extractCustomerId(event) {
+  const obj = event?.data?.object;
+  return obj?.customer || null;
+}
+
+// Fetches this customer's current subscription status DIRECTLY from
+// Stripe's API - never trusts the triggering event's own payload
+// fields. "status=all" so a canceled subscription is still returned
+// (not just active ones) - we need to see it either way to write the
+// correct current status.
+async function fetchCurrentSubscriptionStatus(env, stripeCustomerId) {
+  const apiKey = env.STRIPE_API_KEY;
+  if (!apiKey) {
+    throw new Error("STRIPE_API_KEY not configured - cannot reconcile");
+  }
+  const url =
+    `https://api.stripe.com/v1/subscriptions` +
+    `?customer=${encodeURIComponent(stripeCustomerId)}&status=all&limit=1`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Stripe subscription lookup failed (${response.status}): ${text}`
+    );
+  }
+  const body = await response.json();
+  if (!body.data || body.data.length === 0) {
+    // No subscription object exists for this customer at all -
+    // correct status is "canceled" (never had one, or Stripe has
+    // fully removed the record), not left unwritten.
+    return "canceled";
+  }
+  return body.data[0].status;
 }
 
 async function writeSubscriptionStatus(env, stripeCustomerId, status) {
@@ -148,7 +273,11 @@ async function writeSubscriptionStatus(env, stripeCustomerId, status) {
       "Content-Type": "application/json",
       apikey: env.SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      Prefer: "return=minimal",
+      // CHANGED from return=minimal (27 Aug 2026 redesign): need the
+      // affected row(s) back to detect a zero-row match below -
+      // return=minimal made that silently indistinguishable from a
+      // successful one-row update, which was finding 2b.
+      Prefer: "return=representation",
     },
     body: JSON.stringify({ subscription_status: status }),
   });
@@ -157,6 +286,21 @@ async function writeSubscriptionStatus(env, stripeCustomerId, status) {
     const text = await response.text();
     throw new Error(
       `Supabase write failed (${response.status}): ${text}`
+    );
+  }
+
+  const affectedRows = await response.json();
+  if (affectedRows.length === 0) {
+    // The device row doesn't exist yet for this stripe_customer_id -
+    // most likely the checkout page's own write
+    // (stripe_subscription.py's verify_and_record_subscription)
+    // hasn't landed yet. Throwing here is caught by fetch()'s
+    // try/catch above, which returns a 500 - Stripe retries this
+    // event on its own backoff schedule, giving the checkout write
+    // time to land before the next attempt, rather than this Worker
+    // silently succeeding on a write that changed nothing (finding 2b).
+    throw new Error(
+      `No row found for stripe_customer_id=${stripeCustomerId} - retrying`
     );
   }
 }
