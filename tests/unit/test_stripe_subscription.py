@@ -81,7 +81,7 @@ def test_create_checkout_monthly_uses_correct_amount_and_interval():
         assert kwargs["metadata"]["device_id"] == "device-1"
         assert kwargs["metadata"]["plan"] == "monthly"
         line_item = kwargs["line_items"][0]
-        assert line_item["price_data"]["unit_amount"] == 699
+        assert line_item["price_data"]["unit_amount"] == sub._MONTHLY_AMOUNT_PENCE  # TEMP: was hardcoded 699, see revert note in stripe_subscription.py
         assert line_item["price_data"]["recurring"]["interval"] == "month"
 
 
