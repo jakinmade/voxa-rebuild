@@ -191,7 +191,18 @@ def test_try_one_more_sample_panel_now_appears_after_the_output():
     # widget type (markdown, expander, etc), unlike the type-specific
     # lists (at.markdown, at.expander) which each only preserve order
     # within their own type. This is what actually proves the fix.
-    ordered = list(at.main.children.values())
+    # list(at.main) recurses through the full tree (Block.__iter__
+    # yields itself then each child in order, including nested
+    # containers), unlike at.main.children.values() which only sees
+    # this level — needed since the write/render screen now splits
+    # into col_left/col_right (27 Aug 2026 UI-quality pass: wide
+    # split-pane editor, benchmarked against Grammarly/Wordtune/
+    # Sudowrite/Jasper), putting both the output heading and this
+    # panel one level deeper, inside col_right, rather than directly
+    # under at.main. Their relative order to each other is unchanged
+    # by that move — both still execute in the same top-to-bottom
+    # sequence inside col_right — so this still proves the fix.
+    ordered = list(at.main)
     heading_index = next(
         i for i, el in enumerate(ordered)
         if getattr(el, "value", None) and "Your rewritten text" in el.value

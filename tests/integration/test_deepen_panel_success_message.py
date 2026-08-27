@@ -162,10 +162,31 @@ def test_deepen_panel_success_message_survives_the_rerun(monkeypatch):
     at.run(timeout=15)
 
     assert not at.exception
-    success_texts = [s.value for s in at.success]
-    assert any("Added" in s for s in success_texts), (
+    # render_alert() draws success messages via st.markdown on the
+    # app's own palette now, not native st.success (see app.py's
+    # .callout / render_alert — native st.error/warning/success/info
+    # can't be recolored to match the ink/garnet/gold system, so this
+    # replaced all 17 call sites, deepen-success included). The
+    # regression this test guards — st.success() called immediately
+    # before st.rerun() being wiped before it ever reached the screen
+    # — is unchanged and still real for render_alert's st.markdown
+    # call, so this still checks the actual rendered output, just
+    # through the markdown elements render_alert now produces.
+    #
+    # Matches the rendered element's class attribute
+    # (class="callout callout-success", exactly what render_alert()
+    # emits) rather than a bare "callout-success" substring — that
+    # substring alone also appears inside the page's static <style>
+    # block (the .callout-success {...} CSS rule, present on every
+    # run) and would false-positive against that, not an actual
+    # rendered instance.
+    success_markdown = [
+        m.value for m in at.markdown
+        if 'class="callout callout-success"' in (m.value or "")
+    ]
+    assert any("Added" in s for s in success_markdown), (
         f"Expected the success message to survive the rerun and appear "
-        f"on screen, found success elements: {success_texts}"
+        f"on screen, found success callouts: {success_markdown}"
     )
 
 
@@ -180,11 +201,15 @@ def test_deepen_panel_success_message_clears_after_one_display(monkeypatch):
     at.run(timeout=15)
     next(b for b in at.button if b.key == "deepen_submit").click()
     at.run(timeout=15)
-    assert any("Added" in s.value for s in at.success)
+    assert any(
+        "Added" in m.value for m in at.markdown
+        if 'class="callout callout-success"' in (m.value or "")
+    )
 
     # A further, unrelated rerun (session_state mutation + rerun,
     # simulating any subsequent interaction) should not show it again.
     at.run(timeout=15)
-    assert not any("Added" in s.value for s in at.success), (
-        "Expected the success message to have cleared after its first display"
-    )
+    assert not any(
+        "Added" in m.value for m in at.markdown
+        if 'class="callout callout-success"' in (m.value or "")
+    ), "Expected the success message to have cleared after its first display"

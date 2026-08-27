@@ -90,10 +90,37 @@ log = get_logger(__name__)
 # round-tripped through its component yet — so this defaults to
 # collapsed until that's resolved, same fail-open shape as the rest of
 # persistence.py.
+# ---- Page config — must be first ----
+# Sidebar starts expanded for a known-returning user (the flag is set,
+# once, the first time restore_profile_if_available() succeeds in this
+# browser session — see the rerun immediately after that call below)
+# and collapsed for a fresh/new visitor, matching the same
+# onboarding-vs-account-holder split Notion and Gmail use for their own
+# nav. On the very first script execution of a genuinely new tab we
+# don't yet know which case this is — the device cookie hasn't
+# round-tripped through its component yet — so this defaults to
+# collapsed until that's resolved, same fail-open shape as the rest of
+# persistence.py.
+#
+# Layout (27 Aug 2026, UI-quality pass): wide only for screen 4 (the
+# write/render screen) — the one screen that's a working editor, not
+# a linear onboarding step. Benchmarked against Grammarly/Wordtune/
+# Sudowrite/Jasper, all of which put the editor and its output/
+# analysis side by side rather than stacked in a narrow column; every
+# other screen here (landing, paste, calibration, pricing) is
+# correctly a centered intake flow and stays that way. Safe to read
+# st.session_state.screen this early: init_state() (below) only sets
+# the *default* of 0 the first time a brand-new session runs this
+# script; on every later rerun within that session — including the
+# one triggered by go_to(4) — session_state.screen already holds its
+# real value by the time this line executes, since Streamlit persists
+# session_state across reruns and re-executes the whole script from
+# the top on each one.
+_current_screen = st.session_state.get("screen", 0)
 st.set_page_config(
     page_title="Voicova - Communication Identity",
     page_icon="\U0001F535",
-    layout="centered",
+    layout="wide" if _current_screen == 4 else "centered",
     initial_sidebar_state="expanded" if (
         st.session_state.get("_returning_user_sidebar")
         or st.session_state.get("_sidebar_unlocked")
@@ -730,9 +757,67 @@ st.markdown("""
         box-shadow: 0 0 0 1px var(--accent);
     }
 
+    /* Native st.error/warning/success/info render with Streamlit's own
+       fixed internal red/orange/green/blue palette — not exposed via
+       [theme] or any stable per-kind CSS hook in this Streamlit
+       version, so it can't be recolored to match the ink/garnet/gold
+       system used everywhere else on the page. The border-radius line
+       below is the only thing worth keeping for the odd native call
+       still in flight; .callout (with render_alert() in Python) is
+       the real replacement, built on tokens already defined above. */
     div[data-testid="stAlert"] {
         border-radius: var(--radius-sm);
     }
+
+    .callout {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.7rem;
+        padding: 0.85rem 1rem;
+        margin: var(--space-4) 0;
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+        font-size: 0.92rem;
+        line-height: 1.55;
+    }
+    .callout-icon {
+        flex-shrink: 0;
+        width: 1.15rem;
+        height: 1.15rem;
+        margin-top: 0.1rem;
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+    }
+    .callout-error {
+        background: var(--danger-soft);
+        border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+        color: var(--danger);
+    }
+    .callout-error .callout-icon { background: var(--danger); color: var(--canvas); }
+    .callout-warning {
+        background: var(--warning-soft);
+        border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+        color: var(--warning);
+    }
+    .callout-warning .callout-icon { background: var(--warning); color: var(--canvas); }
+    .callout-success {
+        background: var(--success-soft);
+        border-color: color-mix(in srgb, var(--success) 30%, transparent);
+        color: var(--success);
+    }
+    .callout-success .callout-icon { background: var(--success); color: var(--canvas); }
+    .callout-info {
+        background: var(--gold-soft);
+        border-color: color-mix(in srgb, var(--gold) 30%, transparent);
+        color: var(--gold);
+    }
+    .callout-info .callout-icon { background: var(--gold); color: var(--canvas); }
+    .callout-text { color: var(--ink); }
 
     /* Spinner, brand-matched via Streamlit's stSpinner data-testid
        (same public-contract targeting convention as the button rules
@@ -1072,7 +1157,7 @@ def _handle_checkout_plan_request() -> None:
         )
         st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
     else:
-        st.error("Couldn't start checkout. Please try again shortly.")
+        render_alert("Couldn't start checkout. Please try again shortly.", "error")
 
 
 def _render_restore_access_expander(key_prefix: str = "") -> None:
@@ -1090,9 +1175,10 @@ def _render_restore_access_expander(key_prefix: str = "") -> None:
     screen_pricing()'s own pricing_page_* button keys).
     """
     if st.session_state.get("restore_failed"):
-        st.error(
+        render_alert(
             "That link didn't work — it may have expired or already "
-            "been used. Request a new one below."
+            "been used. Request a new one below.",
+            "error",
         )
         st.session_state["restore_failed"] = False
 
@@ -1114,16 +1200,17 @@ def _render_restore_access_expander(key_prefix: str = "") -> None:
                 request_subscription_restore(_restore_email.strip())
                 st.session_state["restore_requested"] = True
             else:
-                st.error("Enter a valid email address.")
+                render_alert("Enter a valid email address.", "error")
         # Always the SAME message whether or not a match was found -
         # request_subscription_restore() never reports back which case
         # it was (see its own docstring: telling an unauthenticated
         # caller "no subscription found" would let anyone probe which
         # emails belong to paying customers).
         if st.session_state.get("restore_requested"):
-            st.success(
+            render_alert(
                 "If that email matches an active subscription, a restore "
-                "link is on its way. It expires in 15 minutes."
+                "link is on its way. It expires in 15 minutes.",
+                "success",
             )
             st.session_state["restore_requested"] = False
 
@@ -1219,6 +1306,32 @@ def progress_dots(current: int, total: int = 4):
         f'<span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--faint);'
         f'letter-spacing:0.04em;margin-left:0.6rem;">'
         f'Step {current} of {total}{" \u00b7 " + step_name if step_name else ""}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+_CALLOUT_ICON = {"error": "!", "warning": "!", "success": "\u2713", "info": "i"}
+
+
+def render_alert(message: str, kind: str = "info"):
+    """
+    Replaces native st.error/warning/success/info, which render with
+    Streamlit's own fixed internal palette (red/orange/green/blue) —
+    not reachable through [theme] or a stable per-kind CSS hook in this
+    Streamlit version, so a native alert can't be recolored to match
+    the ink/garnet/gold system used everywhere else on the page (see
+    the .callout comment in the <style> block). This draws the same
+    message on the existing --danger/--warning/--success/--gold tokens
+    instead, same visual language as .voice-check and .receipt.
+
+    kind: "error" | "warning" | "success" | "info"
+    """
+    icon = _CALLOUT_ICON.get(kind, "i")
+    st.markdown(
+        f'<div class="callout callout-{kind}">'
+        f'<span class="callout-icon">{icon}</span>'
+        f'<span class="callout-text">{_safe_html(message)}</span>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -1341,7 +1454,7 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool 
                 st.session_state.deepen_success_message = "Added. Your fingerprint just got stronger."
                 st.rerun()
             else:
-                st.error("A bit more, at least a sentence or two.")
+                render_alert("A bit more, at least a sentence or two.", "error")
 
 
 # ============================================================
@@ -1417,9 +1530,9 @@ def screen_paste():
     with col1:
         if st.button("Show me my fingerprint \u2192", type="primary", use_container_width=True):
             if not text or not text.strip():
-                st.error("Paste something you wrote first.")
+                render_alert("Paste something you wrote first.", "error")
             elif len(text.split()) < 10:
-                st.error("A bit more. At least a sentence or two.")
+                render_alert("A bit more. At least a sentence or two.", "error")
             else:
                 word_count = len(text.split())
                 st.session_state.cumulative_words += word_count
@@ -1539,7 +1652,7 @@ def _show_deepen_success_if_pending():
     still needs to show even when the panel that produced it is gone.
     """
     if st.session_state.get("deepen_success_message"):
-        st.success(st.session_state.deepen_success_message)
+        render_alert(st.session_state.deepen_success_message, "success")
         st.session_state.deepen_success_message = None
 
 
@@ -1555,7 +1668,7 @@ def screen_reveal():
 
     observations = st.session_state.observations
     if not observations:
-        st.warning("Not enough signal. Paste more of your writing.")
+        render_alert("Not enough signal. Paste more of your writing.", "warning")
         if st.button("\u2190 Try again"):
             go_to(1)
             st.rerun()
@@ -1745,9 +1858,10 @@ def screen_sample2():
         if st.button("Continue \u2192", type="primary", use_container_width=True):
             under_floor = [i for i in REQUIRED_STARTER_INDICES if required_word_counts[i] < SAMPLE2_REQUIRED_MIN_WORDS]
             if under_floor:
-                st.error(
+                render_alert(
                     f"A little more on both, at least {SAMPLE2_REQUIRED_MIN_WORDS} words each "
-                    f"to continue."
+                    f"to continue.",
+                    "error",
                 )
             else:
                 combined = " ".join(c.strip() for c in completions if c.strip())
@@ -3068,6 +3182,19 @@ def _shell_sidebar(current_screen: int):
 
 
 def screen_render():
+    # Wide-layout cap, scoped to this screen only (set_page_config's
+    # layout="wide" for screen 4 removes Streamlit's max-width entirely
+    # — this reinstates a cap, just a wider one than the 700px
+    # intake-flow column, sized for the two-pane editor+report split
+    # below rather than single-column prose). Injected here rather
+    # than the top-level <style> block so it only ever applies while
+    # this function is actually rendering, no body-class JS needed.
+    st.markdown(
+        '<style>.block-container { max-width: 1180px !important; } '
+        '@media (max-width: 900px) { .block-container { max-width: 700px !important; } }'
+        '</style>',
+        unsafe_allow_html=True,
+    )
     if not st.session_state.get("_returning_user_sidebar"):
         progress_dots(4)
     _show_deepen_success_if_pending()
@@ -3167,180 +3294,193 @@ def screen_render():
         )
         platform_format = None if platform_choice == "none" else platform_choice
 
-    input_text = st.text_area(
-        "input", value=st.session_state.get("render_input_text", ""),
-        placeholder="Paste AI-generated text here. An email draft, a LinkedIn post, a proposal section...",
-        height=220, label_visibility="collapsed", key="render_input_field",
-    )
-
-    st.markdown(
-        '<div class="microcopy" style="margin-bottom:0.5rem;">'
-        'Next: a quick authenticity check on the rewrite, then your text.</div>',
-        unsafe_allow_html=True,
-    )
-    render_in_progress = st.session_state.get("render_in_progress", False)
-
-    def _start_render():
-        # Guard INSIDE the callback, not just via the button's disabled=
-        # prop: on_click callbacks run before Streamlit reruns and
-        # re-sends the disabled state to the browser, closing the
-        # round-trip window a fast double-click can land in (confirmed
-        # real in the 25 Aug 2026 UX audit - a double-click burned two
-        # of the 15 lifetime, non-renewing free renders on one
-        # submission). The disabled= prop below still helps for a
-        # slower second click after the first rerun completes; this
-        # guard is what closes the fast-double-click race specifically.
-        if st.session_state.get("render_in_progress"):
-            return
-        _input = st.session_state.get("render_input_field", "")
-        if not _input or not _input.strip():
-            st.session_state["render_missing_input"] = True
-            return
-        st.session_state["render_missing_input"] = False
-        st.session_state.render_input_text = _input
-        st.session_state.render_context_input = st.session_state.get("render_context_field", "")
-        st.session_state.render_mode_input = st.session_state.get("render_mode_field", "preserve")
-        st.session_state.platform_format_input = st.session_state.get("platform_format_field")
-        st.session_state.render_output = ""
-        st.session_state.refinement_used = False
-        st.session_state.render_in_progress = True
-
-    st.button(
-        "Write as me \u2192", type="primary", use_container_width=True,
-        disabled=render_in_progress, on_click=_start_render,
-    )
-    if st.session_state.get("render_missing_input"):
-        st.error("Paste some text first.")
-        st.session_state["render_missing_input"] = False
-
-    if st.session_state.get("render_in_progress"):
-        _run_render(
-            st.session_state.get("render_input_text", ""),
-            render_context=st.session_state.get("render_context_input", ""),
-            render_mode=st.session_state.get("render_mode_input", "preserve"),
-            platform_format=st.session_state.get("platform_format_input"),
+    # Split-pane editor layout (27 Aug 2026, UI-quality pass),
+    # benchmarked against Grammarly/Wordtune/Sudowrite/Jasper: input
+    # and its result sit side by side instead of stacked in one
+    # narrow column, so the Voice Report (this product's actual
+    # differentiator) is visible without scrolling past the editor.
+    # Every st.* call inside col_left/col_right below is completely
+    # unchanged from before this pass — only re-indented one level
+    # to sit inside the `with` block. See set_page_config's comment
+    # for the matching layout="wide" gate on this screen only.
+    col_left, col_right = st.columns([1, 1], gap="large")
+    with col_left:
+        input_text = st.text_area(
+            "input", value=st.session_state.get("render_input_text", ""),
+            placeholder="Paste AI-generated text here. An email draft, a LinkedIn post, a proposal section...",
+            height=220, label_visibility="collapsed", key="render_input_field",
         )
-        st.session_state.render_in_progress = False
-        st.rerun()
 
-    if st.session_state.get("render_error"):
-        st.error(st.session_state.render_error)
-        if st.session_state.get("render_paywall_hit"):
-            # Paywall, not a transient failure - "Try again" would just
-            # hit the same cap again. Two plan buttons, same Session.
-            # create → redirect → Session.retrieve pattern proven on
-            # AQE/CLEARANCE (see stripe_subscription.py's docstring for
-            # why this reuses that pattern rather than building new
-            # Stripe surface for a subscription specifically).
-            #
-            # "Here's what you get" reuses the same _PRICING_TIERS
-            # content as the standalone /pricing screen so the two
-            # can't drift apart.
-            st.markdown(_pricing_tiers_html(compact=True), unsafe_allow_html=True)
-
-            pay_col1, pay_col2 = st.columns(2)
-            with pay_col1:
-                if st.button("Upgrade: £6.99/month", key="upgrade_monthly", use_container_width=True):
-                    st.session_state["_checkout_plan_requested"] = "monthly"
-                    st.rerun()
-            with pay_col2:
-                if st.button("Upgrade: £49/year", key="upgrade_annual", use_container_width=True):
-                    st.session_state["_checkout_plan_requested"] = "annual"
-                    st.rerun()
-
-            # One click, not two: clicking "Upgrade" used to only
-            # reveal a second "Continue to payment →" button that did
-            # the actual navigating, with nothing informative shown in
-            # between. Streamlit still needs a rerun to render the
-            # checkout URL once Stripe returns it, so the click itself
-            # can't literally navigate — but a meta-refresh
-            # auto-redirects the browser the instant that URL exists,
-            # with no second click needed. The manual link below is a
-            # fallback only, for a browser that blocks the
-            # auto-refresh, not a required second step.
-            #
-            # Shared with screen_pricing()'s own Upgrade buttons via
-            # _handle_checkout_plan_request() - one create-session-and-
-            # redirect implementation, not two copies to keep in sync.
-            _handle_checkout_plan_request()
-
-            # This IS the moment a returning subscriber who cleared
-            # cookies is most likely to land - they hit the same free-
-            # tier paywall as someone who never paid, since the app has
-            # no way to know they're a subscriber without this. Shared
-            # with screen_pricing()'s copy of the same expander.
-            _render_restore_access_expander(key_prefix="paywall_")
-        else:
-            if st.button("Try again", key="retry_render"):
-                last_attempt = st.session_state.get("render_last_attempt", input_text)
-                was_refinement = st.session_state.get("render_last_is_refinement", False)
-                if _run_render(
-                    last_attempt, is_refinement=was_refinement,
-                    render_context=st.session_state.get("render_context_input", ""),
-                    render_mode=st.session_state.get("render_mode_input", "preserve"),
-                    platform_format=st.session_state.get("platform_format_input"),
-                ) and was_refinement:
-                    st.session_state.refinement_used = True
-                st.rerun()
-
-    if st.session_state.get("subscription_just_confirmed"):
-        st.success("You're subscribed. Thanks for backing VOICOVA. Write away.")
-        st.session_state.subscription_just_confirmed = False
-    if st.session_state.get("subscription_confirm_failed"):
-        st.error(
-            "We couldn't confirm that payment. If you were charged, "
-            "contact support and we'll sort it out."
-        )
-        st.session_state.subscription_confirm_failed = False
-
-    output = st.session_state.get("render_output", "")
-    if output:
         st.markdown(
-            '<div class="render-output-seam"><span class="tagline">Your writing</span></div>',
+            '<div class="microcopy" style="margin-bottom:0.5rem;">'
+            'Next: a quick authenticity check on the rewrite, then your text.</div>',
             unsafe_allow_html=True,
         )
+        render_in_progress = st.session_state.get("render_in_progress", False)
 
-        import hashlib
-        output_key = "out_" + hashlib.md5(output[:50].encode()).hexdigest()[:8]
+        def _start_render():
+            # Guard INSIDE the callback, not just via the button's disabled=
+            # prop: on_click callbacks run before Streamlit reruns and
+            # re-sends the disabled state to the browser, closing the
+            # round-trip window a fast double-click can land in (confirmed
+            # real in the 25 Aug 2026 UX audit - a double-click burned two
+            # of the 15 lifetime, non-renewing free renders on one
+            # submission). The disabled= prop below still helps for a
+            # slower second click after the first rerun completes; this
+            # guard is what closes the fast-double-click race specifically.
+            if st.session_state.get("render_in_progress"):
+                return
+            _input = st.session_state.get("render_input_field", "")
+            if not _input or not _input.strip():
+                st.session_state["render_missing_input"] = True
+                return
+            st.session_state["render_missing_input"] = False
+            st.session_state.render_input_text = _input
+            st.session_state.render_context_input = st.session_state.get("render_context_field", "")
+            st.session_state.render_mode_input = st.session_state.get("render_mode_field", "preserve")
+            st.session_state.platform_format_input = st.session_state.get("platform_format_field")
+            st.session_state.render_output = ""
+            st.session_state.refinement_used = False
+            st.session_state.render_in_progress = True
 
-        # Review gate — see review_gate.py. Moved the report block ahead
-        # of the text_area (previously rendered after) so the risk/
-        # confidence/AI-tell badges are visible BEFORE any decision about
-        # showing the text, for both the gated and ungated paths - the
-        # ordering itself is part of what makes the gate meaningful,
-        # not just the confirmation click.
-        report = st.session_state.get("voice_report")
-        risk_level = report.get("risk") if report else None
-        hard_fail = report.get("content_integrity_hard_fail") if report else None
-        gated = requires_review(hard_fail)
-        confirm_flag_key = f"reviewed_{output_key}"
-        already_confirmed = st.session_state.get(confirm_flag_key, False)
-        show_output = (not gated) or already_confirmed
+        st.button(
+            "Write as me \u2192", type="primary", use_container_width=True,
+            disabled=render_in_progress, on_click=_start_render,
+        )
+        if st.session_state.get("render_missing_input"):
+            render_alert("Paste some text first.", "error")
+            st.session_state["render_missing_input"] = False
 
-        if report:
-            badge_class = {"Low": "badge-green", "Medium": "badge-amber", "High": "badge-red"}
-            ai_tell_html = (
-                '<span class="badge badge-green">Clean</span>'
-                if report.get("ai_tell_clean", True)
-                else f'<span class="badge badge-red">Flagged</span>: {"; ".join(report.get("ai_tell_flags", []))}'
+        if st.session_state.get("render_in_progress"):
+            _run_render(
+                st.session_state.get("render_input_text", ""),
+                render_context=st.session_state.get("render_context_input", ""),
+                render_mode=st.session_state.get("render_mode_input", "preserve"),
+                platform_format=st.session_state.get("platform_format_input"),
             )
-            risk_tier = report.get("risk", "Low")
-            risk_icon = _RISK_ICON.get(risk_tier, "")
-            confidence_html = _confidence_signal_html(report.get("confidence", "Low"))
-            vm_badge = report.get('voice_match_badge', 'badge-amber')
-            vm_tier = report.get('voice_match_tier', 'Unrated')
-            vm_evidence = report.get('voice_match_evidence', '')
-            content_lock_banner = _build_content_lock_banner_html(
-                report, st.session_state.get("render_insertion_check")
+            st.session_state.render_in_progress = False
+            st.rerun()
+
+        if st.session_state.get("render_error"):
+            render_alert(st.session_state.render_error, "error")
+            if st.session_state.get("render_paywall_hit"):
+                # Paywall, not a transient failure - "Try again" would just
+                # hit the same cap again. Two plan buttons, same Session.
+                # create → redirect → Session.retrieve pattern proven on
+                # AQE/CLEARANCE (see stripe_subscription.py's docstring for
+                # why this reuses that pattern rather than building new
+                # Stripe surface for a subscription specifically).
+                #
+                # "Here's what you get" reuses the same _PRICING_TIERS
+                # content as the standalone /pricing screen so the two
+                # can't drift apart.
+                st.markdown(_pricing_tiers_html(compact=True), unsafe_allow_html=True)
+
+                pay_col1, pay_col2 = st.columns(2)
+                with pay_col1:
+                    if st.button("Upgrade: £6.99/month", key="upgrade_monthly", use_container_width=True):
+                        st.session_state["_checkout_plan_requested"] = "monthly"
+                        st.rerun()
+                with pay_col2:
+                    if st.button("Upgrade: £49/year", key="upgrade_annual", use_container_width=True):
+                        st.session_state["_checkout_plan_requested"] = "annual"
+                        st.rerun()
+
+                # One click, not two: clicking "Upgrade" used to only
+                # reveal a second "Continue to payment →" button that did
+                # the actual navigating, with nothing informative shown in
+                # between. Streamlit still needs a rerun to render the
+                # checkout URL once Stripe returns it, so the click itself
+                # can't literally navigate — but a meta-refresh
+                # auto-redirects the browser the instant that URL exists,
+                # with no second click needed. The manual link below is a
+                # fallback only, for a browser that blocks the
+                # auto-refresh, not a required second step.
+                #
+                # Shared with screen_pricing()'s own Upgrade buttons via
+                # _handle_checkout_plan_request() - one create-session-and-
+                # redirect implementation, not two copies to keep in sync.
+                _handle_checkout_plan_request()
+
+                # This IS the moment a returning subscriber who cleared
+                # cookies is most likely to land - they hit the same free-
+                # tier paywall as someone who never paid, since the app has
+                # no way to know they're a subscriber without this. Shared
+                # with screen_pricing()'s copy of the same expander.
+                _render_restore_access_expander(key_prefix="paywall_")
+            else:
+                if st.button("Try again", key="retry_render"):
+                    last_attempt = st.session_state.get("render_last_attempt", input_text)
+                    was_refinement = st.session_state.get("render_last_is_refinement", False)
+                    if _run_render(
+                        last_attempt, is_refinement=was_refinement,
+                        render_context=st.session_state.get("render_context_input", ""),
+                        render_mode=st.session_state.get("render_mode_input", "preserve"),
+                        platform_format=st.session_state.get("platform_format_input"),
+                    ) and was_refinement:
+                        st.session_state.refinement_used = True
+                    st.rerun()
+
+        if st.session_state.get("subscription_just_confirmed"):
+            render_alert("You're subscribed. Thanks for backing VOICOVA. Write away.", "success")
+            st.session_state.subscription_just_confirmed = False
+        if st.session_state.get("subscription_confirm_failed"):
+            render_alert(
+                "We couldn't confirm that payment. If you were charged, "
+                "contact support and we'll sort it out.",
+                "error",
             )
-            what_changed = _build_what_changed_html(report.get("biggest_changes", []))
-            _metric_gloss = {
-                "consistency": "How closely this render matches how you actually write.",
-                "confidence": "How much of your writing we've seen so far - more samples, higher confidence.",
-                "risk": "How much this render may have drifted from what you actually meant.",
-                "ai_tell": "Whether wording that reads as AI-generated survived into the rewrite.",
-            }
-            st.markdown(f"""
+            st.session_state.subscription_confirm_failed = False
+
+    with col_right:
+        output = st.session_state.get("render_output", "")
+        if output:
+            st.markdown(
+                '<div class="render-output-seam"><span class="tagline">Your writing</span></div>',
+                unsafe_allow_html=True,
+            )
+
+            import hashlib
+            output_key = "out_" + hashlib.md5(output[:50].encode()).hexdigest()[:8]
+
+            # Review gate — see review_gate.py. Moved the report block ahead
+            # of the text_area (previously rendered after) so the risk/
+            # confidence/AI-tell badges are visible BEFORE any decision about
+            # showing the text, for both the gated and ungated paths - the
+            # ordering itself is part of what makes the gate meaningful,
+            # not just the confirmation click.
+            report = st.session_state.get("voice_report")
+            risk_level = report.get("risk") if report else None
+            hard_fail = report.get("content_integrity_hard_fail") if report else None
+            gated = requires_review(hard_fail)
+            confirm_flag_key = f"reviewed_{output_key}"
+            already_confirmed = st.session_state.get(confirm_flag_key, False)
+            show_output = (not gated) or already_confirmed
+
+            if report:
+                badge_class = {"Low": "badge-green", "Medium": "badge-amber", "High": "badge-red"}
+                ai_tell_html = (
+                    '<span class="badge badge-green">Clean</span>'
+                    if report.get("ai_tell_clean", True)
+                    else f'<span class="badge badge-red">Flagged</span>: {"; ".join(report.get("ai_tell_flags", []))}'
+                )
+                risk_tier = report.get("risk", "Low")
+                risk_icon = _RISK_ICON.get(risk_tier, "")
+                confidence_html = _confidence_signal_html(report.get("confidence", "Low"))
+                vm_badge = report.get('voice_match_badge', 'badge-amber')
+                vm_tier = report.get('voice_match_tier', 'Unrated')
+                vm_evidence = report.get('voice_match_evidence', '')
+                content_lock_banner = _build_content_lock_banner_html(
+                    report, st.session_state.get("render_insertion_check")
+                )
+                what_changed = _build_what_changed_html(report.get("biggest_changes", []))
+                _metric_gloss = {
+                    "consistency": "How closely this render matches how you actually write.",
+                    "confidence": "How much of your writing we've seen so far - more samples, higher confidence.",
+                    "risk": "How much this render may have drifted from what you actually meant.",
+                    "ai_tell": "Whether wording that reads as AI-generated survived into the rewrite.",
+                }
+                st.markdown(f"""
 <div class="voice-report">
 {content_lock_banner}
 {what_changed}
@@ -3373,416 +3513,417 @@ Show the per-dimension breakdown
 </details>
 {_build_content_lock_html(report, st.session_state.get("render_insertion_check"))}
 </div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-            # Explicit, always-visible explainer for Confidence vs
-            # Risk: these two badges can land as "Confidence: Low" +
-            # "Risk: High", directly under a green "Content safe"
-            # banner, and a hover title="" tooltip alone is invisible
-            # on touch devices and easy to miss on desktop. Confidence
-            # and Risk measure genuinely different things (sample size
-            # vs meaning drift), and first reaction to seeing both look
-            # bad at once is alarm, not clarity. One persistent line,
-            # not another hover target, fixes that.
-            st.markdown(
-                '<div class="microcopy" style="margin-top:-0.4rem;margin-bottom:0.6rem;">'
-                'Confidence reflects how much of your writing we\'ve seen so far, '
-                'not whether anything\'s wrong. Risk reflects how much this render '
-                'may have drifted from what you meant. They can move independently.'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            # AI-Slop Firewall — outside the raw-HTML block above,
-            # since it needs a real st.button (Streamlit widgets can't
-            # live inside an unsafe_allow_html string). ai_tell_phrases
-            # comes from score_ai_tells' flagged_phrases field, the raw,
-            # individual phrase list, not the
-            # pre-joined "AI-typical phrasing found: X, Y, Z" prose
-            # string ai_tell_flags carries; parsing that string on the
-            # UI side would be fragile against any future wording
-            # change to it.
-            ai_tell_phrases = report.get("ai_tell_phrases", [])
-            if ai_tell_phrases:
-                phrase_chips = "".join(
-                    f'<span class="ai-tell-phrase">{_safe_html(p)}</span>' for p in ai_tell_phrases
-                )
+                # Explicit, always-visible explainer for Confidence vs
+                # Risk: these two badges can land as "Confidence: Low" +
+                # "Risk: High", directly under a green "Content safe"
+                # banner, and a hover title="" tooltip alone is invisible
+                # on touch devices and easy to miss on desktop. Confidence
+                # and Risk measure genuinely different things (sample size
+                # vs meaning drift), and first reaction to seeing both look
+                # bad at once is alarm, not clarity. One persistent line,
+                # not another hover target, fixes that.
                 st.markdown(
-                    f'<div class="ai-tell-block">'
-                    f'<div class="ai-tell-title">AI Tell Check: '
-                    f'{len(ai_tell_phrases)} found</div>'
-                    f'<div class="ai-tell-phrase-list">{phrase_chips}</div>'
-                    f'</div>',
+                    '<div class="microcopy" style="margin-top:-0.4rem;margin-bottom:0.6rem;">'
+                    'Confidence reflects how much of your writing we\'ve seen so far, '
+                    'not whether anything\'s wrong. Risk reflects how much this render '
+                    'may have drifted from what you meant. They can move independently.'
+                    '</div>',
                     unsafe_allow_html=True,
                 )
-                if st.button("Clean it up", key=f"clean_ai_tells_{output_key}"):
-                    _clean_ai_tells_and_rescore()
-                    st.rerun()
 
-            swaps = report.get("attribution_swaps", [])
-            if swaps:
-                st.markdown(
-                    '<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
-                    '\u26a0 Check who gets credit before sending. The rewrite may have swapped '
-                    'whose point this was.</div>',
-                    unsafe_allow_html=True
-                )
-
-            dropped = report.get("dropped_entities", [])
-            if dropped:
-                listed = _safe_html(", ".join(dropped))
-                source_sentence = find_source_sentence(
-                    st.session_state.get("render_input_text", ""), dropped[0]
-                )
-                context_line = (
-                    f' Original: "{_safe_html(source_sentence)}"' if source_sentence else ""
-                )
-                st.markdown(
-                    f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
-                    f'\u26a0 Missing from the rewrite: {listed}. This can mean the rewrite '
-                    f'drifted into different content, not just a different style - read it '
-                    f'in full before sending, don\'t just skim the changes above.{context_line}</div>',
-                    unsafe_allow_html=True
-                )
-                if source_sentence and st.button(
-                    "Restore this sentence", key=f"restore_sentence_{output_key}"
-                ):
-                    st.session_state.render_output = splice_dropped_sentence(
-                        output, source_sentence
+                # AI-Slop Firewall — outside the raw-HTML block above,
+                # since it needs a real st.button (Streamlit widgets can't
+                # live inside an unsafe_allow_html string). ai_tell_phrases
+                # comes from score_ai_tells' flagged_phrases field, the raw,
+                # individual phrase list, not the
+                # pre-joined "AI-typical phrasing found: X, Y, Z" prose
+                # string ai_tell_flags carries; parsing that string on the
+                # UI side would be fragile against any future wording
+                # change to it.
+                ai_tell_phrases = report.get("ai_tell_phrases", [])
+                if ai_tell_phrases:
+                    phrase_chips = "".join(
+                        f'<span class="ai-tell-phrase">{_safe_html(p)}</span>' for p in ai_tell_phrases
                     )
-                    st.rerun()
+                    st.markdown(
+                        f'<div class="ai-tell-block">'
+                        f'<div class="ai-tell-title">AI Tell Check: '
+                        f'{len(ai_tell_phrases)} found</div>'
+                        f'<div class="ai-tell-phrase-list">{phrase_chips}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if st.button("Clean it up", key=f"clean_ai_tells_{output_key}"):
+                        _clean_ai_tells_and_rescore()
+                        st.rerun()
 
-            # Amber, not red — this is a graceful decline, not a
-            # content-integrity failure the person needs to hunt for.
-            # The render still shipped, correctly, just without the
-            # platform restructuring — because the restructuring
-            # attempt introduced wording that couldn't be verified
-            # against the pre-correction text and was discarded rather
-            # than risked. See score_restructure_fidelity in
-            # voice_engine.py for what specifically gets checked.
-            if st.session_state.get("restructure_declined"):
-                st.markdown(
-                    '<div class="microcopy" style="margin-top:0.5rem;color:var(--warning);">'
-                    '\u26a0 Platform formatting was attempted but introduced wording that '
-                    'could not be verified, so it was left out. This is your line-edited '
-                    'version, not restructured for the platform. Voice and content are '
-                    'still correct; only the platform formatting is missing.</div>',
-                    unsafe_allow_html=True
-                )
+                swaps = report.get("attribution_swaps", [])
+                if swaps:
+                    st.markdown(
+                        '<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
+                        '\u26a0 Check who gets credit before sending. The rewrite may have swapped '
+                        'whose point this was.</div>',
+                        unsafe_allow_html=True
+                    )
 
-        if show_output:
-            st.markdown('<div class="tagline">Your rewritten text</div>', unsafe_allow_html=True)
-            swaps_for_highlight = (report or {}).get("attribution_swaps", [])
-            lexical_breaks_for_highlight = (report or {}).get("lexical_fidelity_breaks", [])
-            has_flags = bool(swaps_for_highlight or lexical_breaks_for_highlight)
-            if has_flags:
-                highlighted = highlight_flagged_phrases(
-                    output, swaps_for_highlight, lexical_breaks_for_highlight
-                )
-                # Microcopy adapts to what's actually present - a
-                # render with only a lexical-fidelity note shouldn't
-                # tell the person to check "who said this" when
-                # nothing about attribution changed.
-                if swaps_for_highlight:
-                    note = "Highlighted: credit may have swapped who said this. Hover to see what changed."
+                dropped = report.get("dropped_entities", [])
+                if dropped:
+                    listed = _safe_html(", ".join(dropped))
+                    source_sentence = find_source_sentence(
+                        st.session_state.get("render_input_text", ""), dropped[0]
+                    )
+                    context_line = (
+                        f' Original: "{_safe_html(source_sentence)}"' if source_sentence else ""
+                    )
+                    st.markdown(
+                        f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
+                        f'\u26a0 Missing from the rewrite: {listed}. This can mean the rewrite '
+                        f'drifted into different content, not just a different style - read it '
+                        f'in full before sending, don\'t just skim the changes above.{context_line}</div>',
+                        unsafe_allow_html=True
+                    )
+                    if source_sentence and st.button(
+                        "Restore this sentence", key=f"restore_sentence_{output_key}"
+                    ):
+                        st.session_state.render_output = splice_dropped_sentence(
+                            output, source_sentence
+                        )
+                        st.rerun()
+
+                # Amber, not red — this is a graceful decline, not a
+                # content-integrity failure the person needs to hunt for.
+                # The render still shipped, correctly, just without the
+                # platform restructuring — because the restructuring
+                # attempt introduced wording that couldn't be verified
+                # against the pre-correction text and was discarded rather
+                # than risked. See score_restructure_fidelity in
+                # voice_engine.py for what specifically gets checked.
+                if st.session_state.get("restructure_declined"):
+                    st.markdown(
+                        '<div class="microcopy" style="margin-top:0.5rem;color:var(--warning);">'
+                        '\u26a0 Platform formatting was attempted but introduced wording that '
+                        'could not be verified, so it was left out. This is your line-edited '
+                        'version, not restructured for the platform. Voice and content are '
+                        'still correct; only the platform formatting is missing.</div>',
+                        unsafe_allow_html=True
+                    )
+
+            if show_output:
+                st.markdown('<div class="tagline">Your rewritten text</div>', unsafe_allow_html=True)
+                swaps_for_highlight = (report or {}).get("attribution_swaps", [])
+                lexical_breaks_for_highlight = (report or {}).get("lexical_fidelity_breaks", [])
+                has_flags = bool(swaps_for_highlight or lexical_breaks_for_highlight)
+                if has_flags:
+                    highlighted = highlight_flagged_phrases(
+                        output, swaps_for_highlight, lexical_breaks_for_highlight
+                    )
+                    # Microcopy adapts to what's actually present - a
+                    # render with only a lexical-fidelity note shouldn't
+                    # tell the person to check "who said this" when
+                    # nothing about attribution changed.
+                    if swaps_for_highlight:
+                        note = "Highlighted: credit may have swapped who said this. Hover to see what changed."
+                    else:
+                        note = "Highlighted: a word choice worth a second look. Hover to see why."
+                    st.markdown(
+                        f'<div style="white-space:pre-wrap;line-height:1.6;'
+                        f'background:var(--canvas);border:0.5px solid var(--border);border-radius:10px;'
+                        f'padding:14px 16px;margin-bottom:0.6rem;">{highlighted}</div>'
+                        f'<div class="microcopy">{note}</div>',
+                        unsafe_allow_html=True,
+                    )
+                # Double-render fix: this text_area used to fire
+                # unconditionally, so any render with a flagged phrase
+                # showed the same rewritten text twice — once highlighted
+                # above, once plain here. The plain copy is only needed
+                # when there's nothing highlighted to show it in place of;
+                # when highlighted, the person still needs a copyable
+                # plain-text version, so it now renders collapsed inside
+                # an expander instead of a second full-height block.
+                if has_flags:
+                    with st.expander("Copy plain text"):
+                        st.text_area(
+                            label="output", value=output, height=350,
+                            label_visibility="collapsed", key=output_key,
+                        )
                 else:
-                    note = "Highlighted: a word choice worth a second look. Hover to see why."
-                st.markdown(
-                    f'<div style="white-space:pre-wrap;line-height:1.6;'
-                    f'background:var(--canvas);border:0.5px solid var(--border);border-radius:10px;'
-                    f'padding:14px 16px;margin-bottom:0.6rem;">{highlighted}</div>'
-                    f'<div class="microcopy">{note}</div>',
-                    unsafe_allow_html=True,
-                )
-            # Double-render fix: this text_area used to fire
-            # unconditionally, so any render with a flagged phrase
-            # showed the same rewritten text twice — once highlighted
-            # above, once plain here. The plain copy is only needed
-            # when there's nothing highlighted to show it in place of;
-            # when highlighted, the person still needs a copyable
-            # plain-text version, so it now renders collapsed inside
-            # an expander instead of a second full-height block.
-            if has_flags:
-                with st.expander("Copy plain text"):
                     st.text_area(
                         label="output", value=output, height=350,
                         label_visibility="collapsed", key=output_key,
                     )
-            else:
-                st.text_area(
-                    label="output", value=output, height=350,
-                    label_visibility="collapsed", key=output_key,
-                )
-            st.markdown(
-                '<div class="microcopy">Written as you. Not for you.</div>',
-                unsafe_allow_html=True
-            )
-
-            # Copy-to-clipboard: text is embedded via json.dumps rather
-            # than read from the text_area's DOM node, since
-            # Streamlit's own key-based re-render can detach a plain
-            # <script> from that element between runs; embedding the
-            # value directly is more robust than depending on DOM
-            # lookup timing.
-            _copy_btn_id = f"copybtn_{output_key}"
-            _copy_source_id = f"copysrc_{output_key}"
-            # Zero-indent, single-line HTML deliberately (23 Aug 2026
-            # bug fix): a multi-line f-string here, indented to match
-            # the surrounding Python code, gets treated as an indented
-            # code block by Streamlit's markdown parser and rendered
-            # as literal visible text instead of an actual button —
-            # confirmed live, this exact block was the reported bug.
-            #
-            # Second, independent bug fixed at the same time: the
-            # previous version embedded json.dumps(output) (a
-            # double-quoted JSON string) directly inside a
-            # double-quoted onclick="..." attribute. Any quote
-            # character in the actual rendered text (apostrophes like
-            # "it's", "doesn't" are near-certain in real output) broke
-            # the attribute early and corrupted the whole element,
-            # regardless of the indentation issue. Fixed properly, not
-            # by picking a different quote character (json.dumps only
-            # guarantees escaping ", not ', so single-quoting the
-            # attribute would just move the same collision to the
-            # first apostrophe instead): the text is written into a
-            # hidden textarea via html.escape (escapes both " and '
-            # for safe attribute/content embedding), and the button's
-            # JS reads it back via .value, which the browser correctly
-            # decodes from HTML entities to the original text. This is
-            # the standard safe pattern for embedding arbitrary text
-            # for JS to consume, not a one-off escaping hack.
-            import html as _html
-            st.markdown(
-                f'<textarea id="{_copy_source_id}" style="display:none">'
-                f'{_html.escape(output)}</textarea>'
-                f'<button id="{_copy_btn_id}" data-label="Copy text" '
-                f'onclick="navigator.clipboard.writeText('
-                f'document.getElementById(\'{_copy_source_id}\').value);'
-                f'var b=document.getElementById(\'{_copy_btn_id}\');'
-                f'var o=b.dataset.label;b.innerText=\'Copied\';'
-                f'setTimeout(function(){{b.innerText=o;}},1500);" '
-                f'style="font-family: var(--font-sans); font-size: 0.85rem; '
-                f'font-weight: 500; color: var(--accent); '
-                f'background: var(--accent-soft); border: 1px solid var(--border); '
-                f'border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer; '
-                f'margin-bottom: 0.6rem;">Copy text</button>',
-                unsafe_allow_html=True,
-            )
-
-            # Opt-in firm signal — offered once per session, only after
-            # an actually-gated (Medium/High) render was confirmed.
-            # Low-risk renders never see this at all: the offer only
-            # makes sense right after someone has just demonstrated,
-            # by confirming a review gate, that this is relevant to
-            # them. See firm_signal.py for exactly what is and isn't
-            # stored — domain only, never the email itself.
-            if gated and not st.session_state.get("firm_signal_resolved", False):
-                st.markdown("<hr class='divider'>", unsafe_allow_html=True)
                 st.markdown(
-                    '<div class="microcopy">Optional: if others at your firm use '
-                    'VOICOVA too, sharing your work email helps us show your firm '
-                    'this is already in use. We store only the domain, never your '
-                    'email address, never anything you write.</div>',
-                    unsafe_allow_html=True,
-                )
-                col_a, col_b, col_c = st.columns([2, 1, 1])
-                with col_a:
-                    work_email = st.text_input(
-                        "work email", placeholder="you@yourfirm.com",
-                        label_visibility="collapsed", key="firm_signal_email_input",
-                    )
-                with col_b:
-                    if st.button("Share", key="firm_signal_share_button", use_container_width=True):
-                        domain = extract_domain(work_email)
-                        if domain:
-                            log_firm_signal(
-                                domain=domain, risk=risk_level,
-                                risk_reason=st.session_state.get("risk_reason", ""),
-                                scoring_rules_version=scoring_rules_version(),
-                            )
-                            st.session_state.firm_signal_resolved = True
-                            st.rerun()
-                        else:
-                            st.warning(
-                                "That doesn't look like a work email, or it's a "
-                                "personal provider we don't count as a firm signal."
-                            )
-                with col_c:
-                    if st.button("No thanks", key="firm_signal_dismiss_button", use_container_width=True):
-                        st.session_state.firm_signal_resolved = True
-                        st.rerun()
-        else:
-            _risk_reason_copy = {
-                "ai_tell": "This render still contains a phrase that reads like AI wrote it, not you.",
-                "attribution_swap": "This render may have shifted who said what.",
-                "dropped_entity": "This render dropped a name, date, or detail that was in your original text.",
-                "sentence_growth": "This render added content that wasn't in your original text.",
-                "aggregate_band": "This render drifted further from your voice than usual, across several measures.",
-            }
-            # Specific, not generic: per research on confirmation-copy
-            # anti-patterns, NN/g and Intuit's own content design
-            # guidelines both flag vague "I understand"/"are you sure"
-            # acknowledgments as ineffective - people click through
-            # boilerplate without reading it, and it erodes attention
-            # for warnings that actually matter. risk_reason was
-            # already computed and logged (compute_risk_reason,
-            # review_gate.py) but never shown to the person it's about
-            # - it just sat in analytics. Showing the actual specific
-            # reason, and making the checkbox confirm that specific
-            # thing, is the fix backed by that research, not just a
-            # tone change.
-            reason_text = _risk_reason_copy.get(
-                st.session_state.get("risk_reason", ""),
-                "This render needs a closer look before you send it.",
-            )
-            st.markdown(
-                f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
-                f'\u26a0 {_safe_html(reason_text)} Read the report above before sending.</div>',
-                unsafe_allow_html=True
-            )
-            confirmed_checkbox = st.checkbox(
-                "I've read it, and I'm sending this as mine.",
-                key=f"confirm_checkbox_{output_key}",
-            )
-            if st.button(
-                "Show my rewritten text \u2192", type="primary", use_container_width=True,
-                disabled=not confirmed_checkbox, key=f"confirm_button_{output_key}",
-            ):
-                st.session_state[confirm_flag_key] = True
-                log_review_confirmation(
-                    risk=risk_level,
-                    risk_reason=st.session_state.get("risk_reason", ""),
-                    semantic_match=report.get("semantic_match") if report else None,
-                    scoring_rules_version=scoring_rules_version(),
-                )
-                st.rerun()
-
-        # Positioned after the report+output/gate resolve rather than
-        # wedged between the report warnings and the output text_area
-        # - that ordering put an optional "improve your fingerprint"
-        # upsell ahead of the actual rewritten text the person came
-        # here for, which read as backwards. Runs regardless of
-        # gated/show_output state (still relevant even if output is
-        # hidden pending confirmation).
-        if report:
-            caveat = confidence_caveat(st.session_state.get("dimension_stability"))
-            if caveat:
-                st.markdown(
-                    f'<div class="microcopy" style="margin-top:0.5rem;">{_safe_html(caveat)}</div>',
+                    '<div class="microcopy">Written as you. Not for you.</div>',
                     unsafe_allow_html=True
                 )
-                _deepen_fingerprint_panel(show_caveat_framing=True)
 
-        if show_output and st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
-            st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-            receipt = generate_receipt(st.session_state.session_start, st.session_state.word_count)
-            st.markdown(
-                f'<div class="receipt"><div class="receipt-title">Your render record</div>'
-                f'<div>{_safe_html(receipt["summary"])}</div><br>'
-                f'<div><strong>Session started:</strong> {_safe_html(receipt["session_started"])}</div>'
-                f'<div><strong>Words analysed:</strong> {_safe_html(receipt["words_analysed"])}</div>'
-                f'<div><strong>Rendered:</strong> {_safe_html(receipt["rendered_at"])}</div></div>',
-                unsafe_allow_html=True,
-            )
-
-        # Sample 3 — one refinement, per the v4 spec. Combo: tags + free text.
-        # Gated on show_output too — refining text the person hasn't been
-        # shown yet doesn't make sense, and would let someone route around
-        # the confirmation by refining instead of confirming.
-        if show_output and not st.session_state.refinement_used:
-            st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-            st.markdown('<div class="tag-hint">Not quite right? You get one refinement.</div>', unsafe_allow_html=True)
-            tag_options = ["Too formal", "Too blunt", "Doesn't sound like me", "Too long", "Missing my directness"]
-            chosen_tags = st.multiselect("What's off", tag_options, label_visibility="collapsed", key="refine_tags")
-            freetext = st.text_area(
-                "More detail (optional)", placeholder="Anything else specific...",
-                height=80, key="refine_freetext",
-            )
-            if st.button("Refine \u2192", use_container_width=True):
-                st.session_state.refinement_tags = chosen_tags
-                st.session_state.refinement_freetext = freetext
-                refinement_note = ", ".join(chosen_tags)
-                if freetext.strip():
-                    refinement_note = f"{refinement_note}. {freetext.strip()}" if refinement_note else freetext.strip()
-                refined_input = (
-                    f"{st.session_state.render_input_text}\n\n"
-                    f"[Refinement requested: {refinement_note}]"
-                ) if refinement_note else st.session_state.render_input_text
-                # Only mark the one-time refinement as used if it actually
-                # succeeded — previously this flag was set unconditionally
-                # before the call, so a failed render still burned the
-                # user's one refinement with nothing to show for it.
-                if _run_render(
-                    refined_input, is_refinement=True,
-                    render_context=st.session_state.get("render_context_input", ""),
-                    render_mode=st.session_state.get("render_mode_input", "preserve"),
-                    platform_format=st.session_state.get("platform_format_input"),
-                ):
-                    st.session_state.refinement_used = True
-                st.rerun()
-
-        st.markdown("")
-        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
-        with col1:
-            if st.button("Write again", use_container_width=True):
-                st.session_state.render_input_text = ""
-                st.session_state.render_output = ""
-                st.session_state.refinement_used = False
-                st.rerun()
-        with col2:
-            if st.button("Start over", type="primary", use_container_width=True):
-                reset_all()
-                st.rerun()
-        with col3:
-            st.download_button(
-                "Export your profile",
-                data=export_profile(),
-                file_name="voicova-profile.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-        with col4:
-            # Proof this render matches your baseline — not a bare AI
-            # score, a comparison against a fingerprint built before
-            # this text existed. See authenticity_report.py's docstring
-            # for why that distinction matters (the Pangram/deBoer
-            # case). Only offered once a completed render + report
-            # actually exist — same gating as the Export button above.
-            if report and st.session_state.get("render_id"):
-                authenticity_report = build_authenticity_report(
-                    report,
-                    st.session_state.get("baseline_fingerprint"),
-                    render_id=st.session_state["render_id"],
-                    created_at=st.session_state["render_completed_at"],
-                    scoring_rules_version=scoring_rules_version(),
+                # Copy-to-clipboard: text is embedded via json.dumps rather
+                # than read from the text_area's DOM node, since
+                # Streamlit's own key-based re-render can detach a plain
+                # <script> from that element between runs; embedding the
+                # value directly is more robust than depending on DOM
+                # lookup timing.
+                _copy_btn_id = f"copybtn_{output_key}"
+                _copy_source_id = f"copysrc_{output_key}"
+                # Zero-indent, single-line HTML deliberately (23 Aug 2026
+                # bug fix): a multi-line f-string here, indented to match
+                # the surrounding Python code, gets treated as an indented
+                # code block by Streamlit's markdown parser and rendered
+                # as literal visible text instead of an actual button —
+                # confirmed live, this exact block was the reported bug.
+                #
+                # Second, independent bug fixed at the same time: the
+                # previous version embedded json.dumps(output) (a
+                # double-quoted JSON string) directly inside a
+                # double-quoted onclick="..." attribute. Any quote
+                # character in the actual rendered text (apostrophes like
+                # "it's", "doesn't" are near-certain in real output) broke
+                # the attribute early and corrupted the whole element,
+                # regardless of the indentation issue. Fixed properly, not
+                # by picking a different quote character (json.dumps only
+                # guarantees escaping ", not ', so single-quoting the
+                # attribute would just move the same collision to the
+                # first apostrophe instead): the text is written into a
+                # hidden textarea via html.escape (escapes both " and '
+                # for safe attribute/content embedding), and the button's
+                # JS reads it back via .value, which the browser correctly
+                # decodes from HTML entities to the original text. This is
+                # the standard safe pattern for embedding arbitrary text
+                # for JS to consume, not a one-off escaping hack.
+                import html as _html
+                st.markdown(
+                    f'<textarea id="{_copy_source_id}" style="display:none">'
+                    f'{_html.escape(output)}</textarea>'
+                    f'<button id="{_copy_btn_id}" data-label="Copy text" '
+                    f'onclick="navigator.clipboard.writeText('
+                    f'document.getElementById(\'{_copy_source_id}\').value);'
+                    f'var b=document.getElementById(\'{_copy_btn_id}\');'
+                    f'var o=b.dataset.label;b.innerText=\'Copied\';'
+                    f'setTimeout(function(){{b.innerText=o;}},1500);" '
+                    f'style="font-family: var(--font-sans); font-size: 0.85rem; '
+                    f'font-weight: 500; color: var(--accent); '
+                    f'background: var(--accent-soft); border: 1px solid var(--border); '
+                    f'border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer; '
+                    f'margin-bottom: 0.6rem;">Copy text</button>',
+                    unsafe_allow_html=True,
                 )
+
+                # Opt-in firm signal — offered once per session, only after
+                # an actually-gated (Medium/High) render was confirmed.
+                # Low-risk renders never see this at all: the offer only
+                # makes sense right after someone has just demonstrated,
+                # by confirming a review gate, that this is relevant to
+                # them. See firm_signal.py for exactly what is and isn't
+                # stored — domain only, never the email itself.
+                if gated and not st.session_state.get("firm_signal_resolved", False):
+                    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+                    st.markdown(
+                        '<div class="microcopy">Optional: if others at your firm use '
+                        'VOICOVA too, sharing your work email helps us show your firm '
+                        'this is already in use. We store only the domain, never your '
+                        'email address, never anything you write.</div>',
+                        unsafe_allow_html=True,
+                    )
+                    col_a, col_b, col_c = st.columns([2, 1, 1])
+                    with col_a:
+                        work_email = st.text_input(
+                            "work email", placeholder="you@yourfirm.com",
+                            label_visibility="collapsed", key="firm_signal_email_input",
+                        )
+                    with col_b:
+                        if st.button("Share", key="firm_signal_share_button", use_container_width=True):
+                            domain = extract_domain(work_email)
+                            if domain:
+                                log_firm_signal(
+                                    domain=domain, risk=risk_level,
+                                    risk_reason=st.session_state.get("risk_reason", ""),
+                                    scoring_rules_version=scoring_rules_version(),
+                                )
+                                st.session_state.firm_signal_resolved = True
+                                st.rerun()
+                            else:
+                                render_alert(
+                                    "That doesn't look like a work email, or it's a "
+                                    "personal provider we don't count as a firm signal.",
+                                    "warning",
+                                )
+                    with col_c:
+                        if st.button("No thanks", key="firm_signal_dismiss_button", use_container_width=True):
+                            st.session_state.firm_signal_resolved = True
+                            st.rerun()
+            else:
+                _risk_reason_copy = {
+                    "ai_tell": "This render still contains a phrase that reads like AI wrote it, not you.",
+                    "attribution_swap": "This render may have shifted who said what.",
+                    "dropped_entity": "This render dropped a name, date, or detail that was in your original text.",
+                    "sentence_growth": "This render added content that wasn't in your original text.",
+                    "aggregate_band": "This render drifted further from your voice than usual, across several measures.",
+                }
+                # Specific, not generic: per research on confirmation-copy
+                # anti-patterns, NN/g and Intuit's own content design
+                # guidelines both flag vague "I understand"/"are you sure"
+                # acknowledgments as ineffective - people click through
+                # boilerplate without reading it, and it erodes attention
+                # for warnings that actually matter. risk_reason was
+                # already computed and logged (compute_risk_reason,
+                # review_gate.py) but never shown to the person it's about
+                # - it just sat in analytics. Showing the actual specific
+                # reason, and making the checkbox confirm that specific
+                # thing, is the fix backed by that research, not just a
+                # tone change.
+                reason_text = _risk_reason_copy.get(
+                    st.session_state.get("risk_reason", ""),
+                    "This render needs a closer look before you send it.",
+                )
+                st.markdown(
+                    f'<div class="microcopy" style="margin-top:0.5rem;color:var(--danger);">'
+                    f'\u26a0 {_safe_html(reason_text)} Read the report above before sending.</div>',
+                    unsafe_allow_html=True
+                )
+                confirmed_checkbox = st.checkbox(
+                    "I've read it, and I'm sending this as mine.",
+                    key=f"confirm_checkbox_{output_key}",
+                )
+                if st.button(
+                    "Show my rewritten text \u2192", type="primary", use_container_width=True,
+                    disabled=not confirmed_checkbox, key=f"confirm_button_{output_key}",
+                ):
+                    st.session_state[confirm_flag_key] = True
+                    log_review_confirmation(
+                        risk=risk_level,
+                        risk_reason=st.session_state.get("risk_reason", ""),
+                        semantic_match=report.get("semantic_match") if report else None,
+                        scoring_rules_version=scoring_rules_version(),
+                    )
+                    st.rerun()
+
+            # Positioned after the report+output/gate resolve rather than
+            # wedged between the report warnings and the output text_area
+            # - that ordering put an optional "improve your fingerprint"
+            # upsell ahead of the actual rewritten text the person came
+            # here for, which read as backwards. Runs regardless of
+            # gated/show_output state (still relevant even if output is
+            # hidden pending confirmation).
+            if report:
+                caveat = confidence_caveat(st.session_state.get("dimension_stability"))
+                if caveat:
+                    st.markdown(
+                        f'<div class="microcopy" style="margin-top:0.5rem;">{_safe_html(caveat)}</div>',
+                        unsafe_allow_html=True
+                    )
+                    _deepen_fingerprint_panel(show_caveat_framing=True)
+
+            if show_output and st.session_state.get("intent_mode") == "HELP_ME_UNDERSTAND":
+                st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+                receipt = generate_receipt(st.session_state.session_start, st.session_state.word_count)
+                st.markdown(
+                    f'<div class="receipt"><div class="receipt-title">Your render record</div>'
+                    f'<div>{_safe_html(receipt["summary"])}</div><br>'
+                    f'<div><strong>Session started:</strong> {_safe_html(receipt["session_started"])}</div>'
+                    f'<div><strong>Words analysed:</strong> {_safe_html(receipt["words_analysed"])}</div>'
+                    f'<div><strong>Rendered:</strong> {_safe_html(receipt["rendered_at"])}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+            # Sample 3 — one refinement, per the v4 spec. Combo: tags + free text.
+            # Gated on show_output too — refining text the person hasn't been
+            # shown yet doesn't make sense, and would let someone route around
+            # the confirmation by refining instead of confirming.
+            if show_output and not st.session_state.refinement_used:
+                st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+                st.markdown('<div class="tag-hint">Not quite right? You get one refinement.</div>', unsafe_allow_html=True)
+                tag_options = ["Too formal", "Too blunt", "Doesn't sound like me", "Too long", "Missing my directness"]
+                chosen_tags = st.multiselect("What's off", tag_options, label_visibility="collapsed", key="refine_tags")
+                freetext = st.text_area(
+                    "More detail (optional)", placeholder="Anything else specific...",
+                    height=80, key="refine_freetext",
+                )
+                if st.button("Refine \u2192", use_container_width=True):
+                    st.session_state.refinement_tags = chosen_tags
+                    st.session_state.refinement_freetext = freetext
+                    refinement_note = ", ".join(chosen_tags)
+                    if freetext.strip():
+                        refinement_note = f"{refinement_note}. {freetext.strip()}" if refinement_note else freetext.strip()
+                    refined_input = (
+                        f"{st.session_state.render_input_text}\n\n"
+                        f"[Refinement requested: {refinement_note}]"
+                    ) if refinement_note else st.session_state.render_input_text
+                    # Only mark the one-time refinement as used if it actually
+                    # succeeded — previously this flag was set unconditionally
+                    # before the call, so a failed render still burned the
+                    # user's one refinement with nothing to show for it.
+                    if _run_render(
+                        refined_input, is_refinement=True,
+                        render_context=st.session_state.get("render_context_input", ""),
+                        render_mode=st.session_state.get("render_mode_input", "preserve"),
+                        platform_format=st.session_state.get("platform_format_input"),
+                    ):
+                        st.session_state.refinement_used = True
+                    st.rerun()
+
+            st.markdown("")
+            col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+            with col1:
+                if st.button("Write again", use_container_width=True):
+                    st.session_state.render_input_text = ""
+                    st.session_state.render_output = ""
+                    st.session_state.refinement_used = False
+                    st.rerun()
+            with col2:
+                if st.button("Start over", type="primary", use_container_width=True):
+                    reset_all()
+                    st.rerun()
+            with col3:
                 st.download_button(
-                    "Download the record",
-                    data=export_authenticity_report_json(authenticity_report),
-                    file_name="voicova-authenticity-report.json",
+                    "Export your profile",
+                    data=export_profile(),
+                    file_name="voicova-profile.json",
                     mime="application/json",
                     use_container_width=True,
                 )
-        with col5:
-            # Human-readable export: the JSON exports above are
-            # developer-facing outputs; this is the "show my manager"
-            # version, clean plain text, pasteable straight into an
-            # email or Slack message, no tooling needed to read it.
-            # Same gating as "Download the record" since it's built
-            # from the same authenticity_report dict.
-            if report and st.session_state.get("render_id"):
-                st.download_button(
-                    "Download as text",
-                    data=export_authenticity_report_text(authenticity_report),
-                    file_name="voicova-authenticity-report.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
+            with col4:
+                # Proof this render matches your baseline — not a bare AI
+                # score, a comparison against a fingerprint built before
+                # this text existed. See authenticity_report.py's docstring
+                # for why that distinction matters (the Pangram/deBoer
+                # case). Only offered once a completed render + report
+                # actually exist — same gating as the Export button above.
+                if report and st.session_state.get("render_id"):
+                    authenticity_report = build_authenticity_report(
+                        report,
+                        st.session_state.get("baseline_fingerprint"),
+                        render_id=st.session_state["render_id"],
+                        created_at=st.session_state["render_completed_at"],
+                        scoring_rules_version=scoring_rules_version(),
+                    )
+                    st.download_button(
+                        "Download the record",
+                        data=export_authenticity_report_json(authenticity_report),
+                        file_name="voicova-authenticity-report.json",
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+            with col5:
+                # Human-readable export: the JSON exports above are
+                # developer-facing outputs; this is the "show my manager"
+                # version, clean plain text, pasteable straight into an
+                # email or Slack message, no tooling needed to read it.
+                # Same gating as "Download the record" since it's built
+                # from the same authenticity_report dict.
+                if report and st.session_state.get("render_id"):
+                    st.download_button(
+                        "Download as text",
+                        data=export_authenticity_report_text(authenticity_report),
+                        file_name="voicova-authenticity-report.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
 
-    st.markdown(
-        '<div class="microcopy" style="margin-top:2rem;">Voicova keeps your voice.</div>',
-        unsafe_allow_html=True
-    )
+        st.markdown(
+            '<div class="microcopy" style="margin-top:2rem;">Voicova keeps your voice.</div>',
+            unsafe_allow_html=True
+        )
 
 
 # ============================================================
@@ -3827,7 +3968,7 @@ def screen_my_voice():
 
     observations = st.session_state.get("observations", [])
     if not observations:
-        st.info("No voice profile yet. Paste some of your writing to get started.")
+        render_alert("No voice profile yet. Paste some of your writing to get started.", "info")
         return
 
     st.markdown('<div class="sub" style="margin-top:1.2rem;">What Voicova has learned:</div>', unsafe_allow_html=True)
@@ -3899,7 +4040,7 @@ def screen_check_draft():
             )
 
     if st.session_state.get("check_draft_error"):
-        st.warning(st.session_state.check_draft_error)
+        render_alert(st.session_state.check_draft_error, "warning")
 
     result = st.session_state.get("check_draft_result")
     if not result:
@@ -3987,7 +4128,7 @@ def screen_history():
     history = get_render_history(device_id)
 
     if not history:
-        st.info("No renders yet. Once you write something, it'll show up here.")
+        render_alert("No renders yet. Once you write something, it'll show up here.", "info")
         if st.button("Write your first one \u2192", key="history_empty_cta"):
             go_to(4)
             st.rerun()

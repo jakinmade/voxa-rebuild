@@ -16,6 +16,7 @@ Anthropic API call and the Supabase client (via render_history.
 get_supabase_client) are mocked - zero cost, no real Supabase writes
 or reads from tests.
 """
+import html
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -248,7 +249,14 @@ def test_history_screen_shows_empty_state_with_no_renders():
         at.session_state["_device_id"] = "test-device-1"
         at.run()
         assert not at.exception
-        assert any("No renders yet" in info.value for info in at.info)
+        # render_alert() draws info/error/success via st.markdown on
+        # the app's own palette now, not native st.info/error/success
+        # (see app.py's .callout / render_alert), so this checks the
+        # rendered callout markup rather than the native element type.
+        assert any(
+            "No renders yet" in m.value for m in at.markdown
+            if 'class="callout callout-info"' in (m.value or "")
+        )
 
 
 def test_history_screen_lists_past_renders():
@@ -357,7 +365,10 @@ def test_paywall_shows_upgrade_buttons_not_try_again():
         at.run()
         assert not at.exception
 
-        assert any("used all 15 free renders" in e.value for e in at.error)
+        assert any(
+            "used all 15 free renders" in m.value for m in at.markdown
+            if 'class="callout callout-error"' in (m.value or "")
+        )
         button_keys = [b.key for b in at.button]
         assert "upgrade_monthly" in button_keys
         assert "upgrade_annual" in button_keys
@@ -474,7 +485,10 @@ def test_upgrade_button_shows_error_when_checkout_fails():
         upgrade_button = next(b for b in at.button if b.key == "upgrade_monthly")
         upgrade_button.click().run()
         assert not at.exception
-        assert any("Couldn't start checkout" in e.value for e in at.error)
+        assert any(
+            "Couldn't start checkout" in html.unescape(m.value) for m in at.markdown
+            if 'class="callout callout-error"' in (m.value or "")
+        )
 
 
 def test_checkout_success_query_param_shows_confirmation_banner():
@@ -511,7 +525,10 @@ def test_checkout_success_query_param_shows_confirmation_banner():
         at.query_params["session_id"] = "sess_1"
         at.run()
         assert not at.exception
-        assert any("You're subscribed" in s.value for s in at.success)
+        assert any(
+            "You're subscribed" in html.unescape(m.value) for m in at.markdown
+            if 'class="callout callout-success"' in (m.value or "")
+        )
 
 
 def test_checkout_success_query_param_shows_failure_banner_when_verify_fails():
@@ -528,7 +545,10 @@ def test_checkout_success_query_param_shows_failure_banner_when_verify_fails():
         at.query_params["session_id"] = "sess_1"
         at.run()
         assert not at.exception
-        assert any("couldn't confirm that payment" in e.value for e in at.error)
+        assert any(
+            "couldn't confirm that payment" in html.unescape(m.value) for m in at.markdown
+            if 'class="callout callout-error"' in (m.value or "")
+        )
 
 
 def test_checkout_cancelled_query_param_shows_no_banner():
