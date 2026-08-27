@@ -73,10 +73,7 @@ _TABLE = "lifetime_render_cap"
 
 # Section 5.1: £6.99/month or £49/year. Wedge price, not the ceiling -
 # see that section for why these numbers stay fixed for Tier 1.
-_MONTHLY_AMOUNT_PENCE = 50  # TEMP 27 Aug 2026: cheap real-money test of the
-                            # webhook reconciliation redesign - normally 699.
-                            # MUST be reverted right after the test - see the
-                            # matching commit message for the revert step.
+_MONTHLY_AMOUNT_PENCE = 699
 _ANNUAL_AMOUNT_PENCE = 4900
 
 
