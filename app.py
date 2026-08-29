@@ -2949,18 +2949,18 @@ def _build_content_lock_banner_html(report: dict, insertion_check: dict | None) 
 
     reasons = []
     if dropped:
-        reasons.append(f"Facts dropped: {', '.join(dropped)}")
+        reasons.append(f"Facts dropped: {_safe_html(', '.join(dropped))}")
     if swaps:
         reasons.append("Attribution may have changed. Check before sending.")
     if sentence_growth:
-        reasons.append(_sentence_growth_label(sentence_growth))
+        reasons.append(_safe_html(_sentence_growth_label(sentence_growth)))
     if new_hedges:
-        reasons.append(f"New hedging added: {', '.join(new_hedges)}")
+        reasons.append(f"New hedging added: {_safe_html(', '.join(new_hedges))}")
 
     note_html = ""
     if lexical_breaks:
         note_lines = "".join(
-            f'<div class="content-lock-banner-note">\u26a0 Worth a look: {b}</div>'
+            f'<div class="content-lock-banner-note">\u26a0 Worth a look: {_safe_html(b)}</div>'
             for b in lexical_breaks
         )
         note_html = note_lines
@@ -3020,13 +3020,13 @@ def _build_content_lock_html(report: dict, insertion_check: dict | None) -> str:
 
     checks = [
         (not dropped, "Facts preserved",
-         f"{len(dropped)} dropped: {', '.join(dropped)}" if dropped else None),
+         f"{len(dropped)} dropped: {_safe_html(', '.join(dropped))}" if dropped else None),
         (not swaps, "Attribution preserved",
          "Whose point this was may have changed. Check before sending." if swaps else None),
         (sentence_growth == 0, "No sentences invented",
-         _sentence_growth_label(sentence_growth) if sentence_growth else None),
+         _safe_html(_sentence_growth_label(sentence_growth)) if sentence_growth else None),
         (not new_hedges, "No new hedging introduced",
-         f"Added: {', '.join(new_hedges)}" if new_hedges else None),
+         f"Added: {_safe_html(', '.join(new_hedges))}" if new_hedges else None),
     ]
 
     rows = []
@@ -3641,14 +3641,14 @@ def screen_render():
                 ai_tell_html = (
                     '<span class="badge badge-green">Clean</span>'
                     if report.get("ai_tell_clean", True)
-                    else f'<span class="badge badge-red">Flagged</span>: {"; ".join(report.get("ai_tell_flags", []))}'
+                    else f'<span class="badge badge-red">Flagged</span>: {_safe_html("; ".join(report.get("ai_tell_flags", [])))}'
                 )
                 risk_tier = report.get("risk", "Low")
                 risk_icon = _RISK_ICON.get(risk_tier, "")
                 confidence_html = _confidence_signal_html(report.get("confidence", "Low"))
                 vm_badge = report.get('voice_match_badge', 'badge-amber')
                 vm_tier = report.get('voice_match_tier', 'Unrated')
-                vm_evidence = report.get('voice_match_evidence', '')
+                vm_evidence = _safe_html(report.get('voice_match_evidence', ''))
                 content_lock_banner = _build_content_lock_banner_html(
                     report, st.session_state.get("render_insertion_check")
                 )

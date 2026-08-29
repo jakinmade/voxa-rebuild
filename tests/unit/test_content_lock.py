@@ -260,3 +260,69 @@ def test_checklist_uses_shared_sentence_growth_label():
     html = _build_content_lock_html(report, {"sentence_growth": 2, "new_hedges": []})
     assert "Added 2 new sentences not in the original" in html
     assert "sentence(s)" not in html
+
+
+# ---------------------------------------------------------------------------
+# HTML escaping (29 Aug 2026) — dropped_entities, new_hedges, and
+# lexical_fidelity_breaks are model/user-derived free text, not fixed
+# vocabulary, so they can legitimately contain '<', '>', '&', or quotes
+# straight out of whatever the person pasted. Every one of these values
+# is interpolated into an f-string rendered via
+# st.markdown(..., unsafe_allow_html=True), which does not sanitise
+# anything itself — an unescaped value here doesn't just mis-render,
+# it can silently swallow or corrupt the rest of the report card's
+# markup. These lock in that _safe_html() is applied at every one of
+# those interpolation points, matching the pattern already used
+# elsewhere in this file (e.g. the AI-tell phrase chips).
+# ---------------------------------------------------------------------------
+
+def test_checklist_escapes_html_in_dropped_entities():
+    report = {"dropped_entities": ["<script>alert(1)</script>"], "attribution_swaps": []}
+    html = _build_content_lock_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_checklist_escapes_html_in_new_hedges():
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_html(report, {"sentence_growth": 0, "new_hedges": ["<b>maybe</b>"]})
+    assert "<b>maybe</b>" not in html
+    assert "&lt;b&gt;maybe&lt;/b&gt;" in html
+
+
+def test_banner_escapes_html_in_dropped_entities():
+    report = {"dropped_entities": ["Q3 <revenue>"], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "Q3 <revenue>" not in html
+    assert "Q3 &lt;revenue&gt;" in html
+
+
+def test_banner_escapes_html_in_new_hedges():
+    report = {"dropped_entities": [], "attribution_swaps": []}
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": ["<i>perhaps</i>"]})
+    assert "<i>perhaps</i>" not in html
+    assert "&lt;i&gt;perhaps&lt;/i&gt;" in html
+
+
+def test_banner_escapes_html_in_lexical_fidelity_breaks():
+    report = {
+        "dropped_entities": [], "attribution_swaps": [],
+        "lexical_fidelity_breaks": ["'if' became '<mark>whether</mark>'"],
+    }
+    html = _build_content_lock_banner_html(report, {"sentence_growth": 0, "new_hedges": []})
+    assert "<mark>whether</mark>" not in html
+    assert "&lt;mark&gt;whether&lt;/mark&gt;" in html
+
+
+def test_ai_tell_flags_escaped_in_report_card():
+    """The ai_tell_html badge line, built inline in the render screen
+    (not one of the _build_* helpers), was the one call site missed
+    when _safe_html was first introduced elsewhere in this file — it
+    joined ai_tell_flags straight into the f-string. Reproduces that
+    join and confirms it's now escaped the same way as every other
+    dynamic value in the report card."""
+    from app import _safe_html
+    flags = ["used <em>drift</em> unnaturally"]
+    ai_tell_html = f'<span class="badge badge-red">Flagged</span>: {_safe_html("; ".join(flags))}'
+    assert "<em>drift</em>" not in ai_tell_html
+    assert "&lt;em&gt;drift&lt;/em&gt;" in ai_tell_html
