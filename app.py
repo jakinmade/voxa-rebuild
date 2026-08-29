@@ -1029,6 +1029,7 @@ _PRICING_TIERS = (
             "15 renders, lifetime",
             "Full voice fingerprint + Content Lock",
             "AI-tell check on every render",
+            "Unlimited draft checks, no render used",
             "No account, no card required",
         ],
     },
@@ -1090,19 +1091,23 @@ def screen_landing():
         'Your voice. Still yours.</div>',
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="headline">AI can write well now. It just doesn\'t write like you.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">AI can write like you now. The question is whether it actually did.</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="sub">Paste your draft. Voicova rewrites it so it sounds like you '
-        'wrote it, not like a chatbot did.</div>',
+        'wrote it, not like a chatbot did. Or paste anything, from anywhere, and check '
+        'whether it still sounds like you.</div>',
         unsafe_allow_html=True,
     )
 
-    # How it works — three steps, no jargon. Cross-referenced against
+    # How it works — four steps, no jargon. Cross-referenced against
     # Noren's own landing page (closest direct competitor) — their
     # structure is a single positioning line, a concrete before/after,
-    # a trust/ownership note, one CTA. Same shape here.
+    # a trust/ownership note, one CTA. Same shape here. Fourth step
+    # (Check) added 29 Aug 2026 alongside the headline/sub update -
+    # Check a Draft was previously invisible on this page despite
+    # being an elevated, second-in-nav feature inside the app itself.
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-    step_col1, step_col2, step_col3 = st.columns(3)
+    step_col1, step_col2, step_col3, step_col4 = st.columns(4)
     with step_col1:
         st.markdown(
             '<div class="microcopy"><strong>1. Paste</strong><br>'
@@ -1119,6 +1124,12 @@ def screen_landing():
         st.markdown(
             '<div class="microcopy"><strong>3. Write</strong><br>'
             'Paste any AI draft. Get it back sounding like you.</div>',
+            unsafe_allow_html=True,
+        )
+    with step_col4:
+        st.markdown(
+            '<div class="microcopy"><strong>4. Check</strong><br>'
+            'Paste anything, from anywhere. See if it still sounds like you.</div>',
             unsafe_allow_html=True,
         )
 
