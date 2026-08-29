@@ -63,3 +63,74 @@ def test_back_to_write_nav_returns_to_screen_4():
     at.run()
     assert not at.exception, f"Nav back to Write raised: {at.exception}"
     assert at.session_state["screen"] == 4
+
+
+def test_my_voice_shows_voice_profile_download_button():
+    """Voice Profile Markdown export (29 Aug 2026) - same screen, same
+    download_button pattern as the existing 'Share your Voice DNA'
+    button just above it."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+
+    download_labels = [b.label for b in at.download_button]
+    assert "Download Voice Profile" in download_labels
+    assert "Share your Voice DNA" in download_labels
+
+
+def test_check_a_draft_is_second_in_shell_nav_not_last():
+    """Positioning fix, 29 Aug 2026: 'Check a draft' used to be last
+    (least visible) in the persistent shell sidebar; moved to second,
+    right after Write. Locks in the order so it can't silently drift
+    back."""
+    from app import _SHELL_SCREENS
+    screen_ids_in_order = [screen_id for screen_id, _ in _SHELL_SCREENS]
+    assert screen_ids_in_order[1] == 8, (
+        f"Expected 'Check a draft' (screen 8) second in nav order, got: {_SHELL_SCREENS}"
+    )
+    assert screen_ids_in_order[-1] != 8
+
+
+def test_check_a_draft_headline_leads_with_check_anything():
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.session_state["screen"] = 8
+    at.run()
+    assert not at.exception
+    body = " ".join(m.value for m in at.markdown)
+    assert "Check anything." in body
+
+
+def test_my_voice_shows_stability_table_when_available():
+    """Voice History (29 Aug 2026) - surfaces dimension_stability
+    directly on screen, not just in the downloadable Voice Profile
+    doc."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.session_state["dimension_stability"] = {
+        "dimensions": {
+            "hedge_density": "stable",
+            "sentence_length_sd": "volatile",
+            "first_person_ratio": "stable",
+            "directive_ratio": "insufficient_data",
+        },
+        "stable_count": 2, "volatile_count": 1, "sample_count": 2,
+    }
+    at.run()
+    assert not at.exception
+
+    body = " ".join(m.value for m in at.markdown)
+    assert "Stability across your last 2 samples" in body
+    assert "Hedging" in body
+    assert "Sentence rhythm" in body
+    assert "Varies by register" in body
+
+
+def test_my_voice_hides_stability_table_when_no_stability_data():
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+    body = " ".join(m.value for m in at.markdown)
+    assert "Stability across your last" not in body

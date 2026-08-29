@@ -720,3 +720,67 @@ def test_length_nudge_hidden_when_no_platform_format():
     at.run()
     assert not at.exception
     assert not any("characters</span>" in html.unescape(m.value) for m in at.markdown)
+
+
+# ---------------------------------------------------------------------------
+# "Learn from my edit" (29 Aug 2026) — an edited render output becomes a new
+# fingerprint sample, via the shared _add_writing_sample_to_fingerprint
+# helper also used by the deepen-fingerprint panel. Only the user's own
+# edited text is ever used, never the raw AI output.
+# ---------------------------------------------------------------------------
+
+def _seed_rendered_output(at: AppTest, output_text: str):
+    import hashlib
+    _seed_screen4(at)
+    at.session_state["render_output"] = output_text
+    at.session_state["voice_report"] = None
+    at.session_state["render_id"] = None
+    output_key = "out_" + hashlib.md5(output_text[:50].encode()).hexdigest()[:8]
+    return output_key
+
+
+def test_learn_from_edit_button_hidden_when_output_unedited():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    output_text = "This is the original rendered text, untouched."
+    _seed_rendered_output(at, output_text)
+    at.run()
+    assert not at.exception
+    assert not any(b.key and b.key.startswith("learn_from_edit_") for b in at.button)
+
+
+def test_learn_from_edit_button_shown_and_adds_sample_when_edited():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    output_text = "This is the original rendered text, untouched."
+    output_key = _seed_rendered_output(at, output_text)
+    at.run()
+    assert not at.exception
+
+    edited_text = (
+        "This is my own edited version of the rendered text, changed "
+        "enough that it reads differently from the original output."
+    )
+    at.text_area(key=output_key).set_value(edited_text)
+    at.run()
+
+    learn_button = next(
+        (b for b in at.button if b.key == f"learn_from_edit_{output_key}"), None
+    )
+    assert learn_button is not None, "Expected the Learn from my edit button once edited"
+
+    before_docs = at.session_state["cumulative_docs"]
+    before_samples = len(at.session_state["fingerprint_sample_texts"])
+
+    learn_button.click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["cumulative_docs"] == before_docs + 1
+    assert len(at.session_state["fingerprint_sample_texts"]) == before_samples + 1
+    assert at.session_state["fingerprint_sample_texts"][-1] == edited_text
+    assert any(
+        "strengthen your voice" in html.unescape(m.value) for m in at.markdown
+        if 'class="callout callout-success"' in (m.value or "")
+    )

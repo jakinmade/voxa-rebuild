@@ -1437,6 +1437,73 @@ def render_alert(message: str, kind: str = "info"):
     )
 
 
+def _add_writing_sample_to_fingerprint(text: str) -> None:
+    """
+    The complete "strengthen the baseline with one more genuine
+    writing sample" sequence — extracted 29 Aug 2026 from inside
+    _deepen_fingerprint_panel (below) so a second call site (Learn
+    from my edit, screen_render) can reuse the exact same steps
+    rather than a re-typed copy that could quietly drift out of sync.
+    Pure extraction, not a rewrite - every line here previously lived
+    directly inside the deepen panel's button handler, unchanged.
+
+    Merges the sample into the blended baseline, the per-register
+    stability check, cumulative word/doc counters, and the observed-
+    traits list; if a Voice Report is already on screen, refreshes its
+    Confidence badge and function-word Delta in place; persists the
+    strengthened profile via save_profile_if_available() (a safe
+    no-op if no baseline exists yet).
+    """
+    new_metrics = compute_baseline_metrics(text)
+    st.session_state.baseline_fingerprint = _merge_baseline(
+        st.session_state.get("baseline_fingerprint"), new_metrics
+    )
+    st.session_state.cumulative_words += len(text.split())
+    st.session_state.cumulative_docs += 1
+    extra_obs = analyse_writing(text)
+    existing = st.session_state.observations
+    existing_headlines = {o["headline"] for o in existing}
+    for obs in extra_obs:
+        if obs["headline"] not in existing_headlines:
+            existing.append(obs)
+            existing_headlines.add(obs["headline"])
+    existing.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
+    st.session_state.observations = existing[:5]
+
+    samples = st.session_state.get("fingerprint_samples", [])
+    samples.append(new_metrics)
+    st.session_state.fingerprint_samples = samples
+    st.session_state.dimension_stability = compute_dimension_stability(samples)
+
+    sample_texts = st.session_state.get("fingerprint_sample_texts", [])
+    sample_texts.append(text)
+    st.session_state.fingerprint_sample_texts = sample_texts
+
+    report = st.session_state.get("voice_report")
+    if report:
+        new_confidence = compute_confidence(
+            st.session_state.get("sample_fitness"),
+            st.session_state.get("baseline_fingerprint"),
+            len(st.session_state.get("observations", [])),
+            st.session_state.get("dimension_stability"),
+        )
+        report["confidence"] = new_confidence
+        st.session_state.confidence = new_confidence
+
+        render_output = st.session_state.get("render_output")
+        if render_output:
+            updated_sample_texts = st.session_state.get("fingerprint_sample_texts", [])
+            new_burrows_delta = compute_burrows_delta(updated_sample_texts, render_output)
+            st.session_state.function_word_delta = new_burrows_delta
+            report["function_word_delta"] = new_burrows_delta.get("delta")
+            report["function_word_delta_tier"] = new_burrows_delta.get("tier")
+            report["function_word_biggest_divergences"] = new_burrows_delta.get("biggest_divergences", [])
+
+        st.session_state.voice_report = report
+
+    save_profile_if_available()
+
+
 def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool = False):
     """
     Visible from first use, not gated behind anything — per the v4 spec's
@@ -1472,76 +1539,7 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool 
         )
         if st.button("Add to my fingerprint", key="deepen_submit"):
             if extra and len(extra.split()) >= 10:
-                new_metrics = compute_baseline_metrics(extra)
-                st.session_state.baseline_fingerprint = _merge_baseline(
-                    st.session_state.get("baseline_fingerprint"), new_metrics
-                )
-                st.session_state.cumulative_words += len(extra.split())
-                st.session_state.cumulative_docs += 1
-                extra_obs = analyse_writing(extra)
-                existing = st.session_state.observations
-                existing_headlines = {o["headline"] for o in existing}
-                for obs in extra_obs:
-                    if obs["headline"] not in existing_headlines:
-                        existing.append(obs)
-                        existing_headlines.add(obs["headline"])
-                existing.sort(key=lambda o: o.get("signal", 0.5), reverse=True)
-                st.session_state.observations = existing[:5]
-
-                # Feed the stability check too - previously this panel
-                # only touched the blended baseline, so a sample added
-                # here could never actually move the Confidence badge
-                # or resolve the caveat that sent someone here in the
-                # first place.
-                samples = st.session_state.get("fingerprint_samples", [])
-                samples.append(new_metrics)
-                st.session_state.fingerprint_samples = samples
-                st.session_state.dimension_stability = compute_dimension_stability(samples)
-
-                sample_texts = st.session_state.get("fingerprint_sample_texts", [])
-                sample_texts.append(extra)
-                st.session_state.fingerprint_sample_texts = sample_texts
-
-                # If a Voice Report is already on screen (Screen 4),
-                # refresh its Confidence badge in place - the rewritten
-                # text itself doesn't change, only how much to trust the
-                # baseline it was measured against.
-                report = st.session_state.get("voice_report")
-                if report:
-                    new_confidence = compute_confidence(
-                        st.session_state.get("sample_fitness"),
-                        st.session_state.get("baseline_fingerprint"),
-                        len(st.session_state.get("observations", [])),
-                        st.session_state.get("dimension_stability"),
-                    )
-                    report["confidence"] = new_confidence
-                    st.session_state.confidence = new_confidence
-
-                    # Same reasoning as the Confidence refresh above: the
-                    # rewritten text on screen doesn't change, but the
-                    # extra sample gives function-word Delta a better
-                    # (or its first) reference distribution to score
-                    # against. Re-run it in place rather than leaving a
-                    # stale or "Insufficient baseline samples" reading on
-                    # screen after the user just fixed exactly that.
-                    render_output = st.session_state.get("render_output")
-                    if render_output:
-                        updated_sample_texts = st.session_state.get("fingerprint_sample_texts", [])
-                        new_burrows_delta = compute_burrows_delta(updated_sample_texts, render_output)
-                        st.session_state.function_word_delta = new_burrows_delta
-                        report["function_word_delta"] = new_burrows_delta.get("delta")
-                        report["function_word_delta_tier"] = new_burrows_delta.get("tier")
-                        report["function_word_biggest_divergences"] = new_burrows_delta.get("biggest_divergences", [])
-
-                    st.session_state.voice_report = report
-
-                # Keeps the saved profile in sync with a strengthened
-                # fingerprint. Safe to call even when no baseline exists
-                # yet (e.g. reached from Screen 2, before Screen 3) —
-                # save_profile_if_available() no-ops silently in that
-                # case, same fail-open design as everywhere else in
-                # persistence.py.
-                save_profile_if_available()
+                _add_writing_sample_to_fingerprint(extra)
 
                 # Same pattern already used for render_error: a bare
                 # st.success() call here is wiped by the st.rerun()
@@ -3204,7 +3202,7 @@ _SHELL_NAV_KEYS = {
     (8, 5): "nav_to_my_voice_from_check",
     (8, 6): "nav_to_history_from_check",
 }
-_SHELL_SCREENS = [(4, "Write"), (5, "My Voice"), (6, "Past renders"), (8, "Check a draft")]
+_SHELL_SCREENS = [(4, "Write"), (8, "Check a draft"), (5, "My Voice"), (6, "Past renders")]
 
 
 def _shell_sidebar(current_screen: int):
@@ -3952,6 +3950,34 @@ Show the per-dimension breakdown
                     unsafe_allow_html=True,
                 )
 
+                # Learn from my edit — added 29 Aug 2026. If the person
+                # edited the text inside the text_area above (Streamlit
+                # auto-syncs its live value into st.session_state under
+                # output_key, no extra wiring needed), their edited
+                # version becomes a new fingerprint sample. Deliberately
+                # only the user's own final, edited text — never the raw
+                # AI output the render started from — per the same
+                # evidence-not-instruction discipline as the Voice
+                # Profile document above: the fingerprint only ever
+                # grows from something the person actually wrote or
+                # confirmed, never from an unverified AI guess.
+                # Reuses _add_writing_sample_to_fingerprint (the exact
+                # sequence _deepen_fingerprint_panel already used) - no
+                # new merge logic. Hidden when the box is unedited;
+                # "learning" from the untouched AI output would defeat
+                # the whole point.
+                _edited_output = st.session_state.get(output_key, output)
+                if _edited_output.strip() and _edited_output.strip() != output.strip():
+                    if st.button(
+                        "Use my edit to strengthen my voice",
+                        key=f"learn_from_edit_{output_key}", use_container_width=True,
+                    ):
+                        _add_writing_sample_to_fingerprint(_edited_output)
+                        render_alert(
+                            "Added. Your edit now helps strengthen your voice baseline.",
+                            "success",
+                        )
+
                 # Opt-in firm signal — offered once per session, only after
                 # an actually-gated (Medium/High) render was confirmed.
                 # Low-risk renders never see this at all: the offer only
@@ -4214,6 +4240,101 @@ Show the per-dimension breakdown
 _MY_VOICE_CONFIDENCE_BADGE = {"High": "badge-green", "Medium": "badge-amber", "Low": "badge-red"}
 
 
+def build_voice_profile_markdown(
+    observations: list[dict],
+    confidence: str | None,
+    baseline_fingerprint: dict | None,
+    dimension_stability: dict | None,
+    cumulative_words: int,
+    cumulative_docs: int,
+    updated_at: str | None,
+) -> str:
+    """
+    Readable, exportable Voice Profile — reformats data already
+    computed and already shown on screen_my_voice into a portable
+    Markdown document, same underlying data export_profile() (JSON,
+    storage.py) already exposes, no new extraction or detection
+    logic. Deliberately not editable: the whole point of this
+    document is that every line traces back to a measurement, not an
+    instruction the person typed in - see the closing note in the
+    document itself.
+
+    Dimension labels reused from _VOICE_MATCH_LABELS (already defined
+    above for the render-time Voice Report table) rather than a new
+    mapping, so the same four dimension names read identically
+    wherever they appear in the product.
+    """
+    lines = [
+        "# Your Voice Profile",
+        "",
+        "*What VOICOVA has actually learned about how you write — a measured baseline, not an instruction.*",
+        "",
+    ]
+
+    meta_lines = []
+    if confidence:
+        meta_lines.append(f"**Confidence:** {confidence}")
+    if cumulative_words:
+        doc_word = "document" if cumulative_docs == 1 else "documents"
+        meta_lines.append(f"**Built from:** {cumulative_words} words across {cumulative_docs} {doc_word}")
+    if updated_at:
+        meta_lines.append(f"**Last updated:** {updated_at}")
+    meta_lines.append(f"**Scoring rules version:** {scoring_rules_version()}")
+    lines.extend(meta_lines)
+    lines.append("")
+
+    if observations:
+        lines.append("## What's held steady across your writing")
+        lines.append("")
+        for obs in observations:
+            quote_match = re.search(r'"([^"]{10,})"', obs.get("body", ""))
+            lines.append(f"- **{obs['headline']}**")
+            if quote_match:
+                lines.append(f"  > \"{quote_match.group(1)}\"")
+        lines.append("")
+
+    if dimension_stability and dimension_stability.get("dimensions"):
+        lines.append("## Stability across registers")
+        lines.append("")
+        lines.append(
+            "How much each dimension held steady across your different writing samples, "
+            "versus swinging with the situation:"
+        )
+        lines.append("")
+        lines.append("| Dimension | Reading |")
+        lines.append("|---|---|")
+        _stability_label = {
+            "stable": "Stable — likely genuine",
+            "volatile": "Varies by register",
+            "insufficient_data": "Not enough samples yet",
+        }
+        for dim, verdict in dimension_stability["dimensions"].items():
+            label = _VOICE_MATCH_LABELS.get(dim, dim)
+            lines.append(f"| {label} | {_stability_label.get(verdict, verdict)} |")
+        lines.append("")
+
+    if baseline_fingerprint:
+        lines.append("## Baseline metrics")
+        lines.append("")
+        lines.append("| Dimension | Measured value |")
+        lines.append("|---|---|")
+        for dim, label in _VOICE_MATCH_LABELS.items():
+            if dim in baseline_fingerprint:
+                lines.append(f"| {label} | {baseline_fingerprint[dim]} |")
+        lines.append("")
+
+    lines.append("---")
+    lines.append(
+        "This document is a snapshot of a measured baseline, not a set of "
+        "instructions — nothing here can be edited to change how VOICOVA "
+        "renders. Every render is checked against this baseline afterward, "
+        "not just written toward it; see the Voice Report on any render "
+        "for that check."
+    )
+
+    return "\n".join(lines)
+
+
 def screen_my_voice():
     """
     Standing voice dashboard, not a one-time onboarding artefact —
@@ -4264,6 +4385,51 @@ def screen_my_voice():
             unsafe_allow_html=True,
         )
 
+    # Voice History (29 Aug 2026) — surfaces dimension_stability
+    # directly on this screen, not just inside the downloadable Voice
+    # Profile document above. Same data, already computed at
+    # onboarding and after every "deepen"/"learn from my edit" sample
+    # (compute_dimension_stability, voice_engine.py) - no new
+    # detection. Reuses the exact .voice-match-table HTML/CSS shape
+    # already built for the render-time function-word breakdown table
+    # (screen_render's Voice Report), not a new table style.
+    stability = st.session_state.get("dimension_stability")
+    if stability and stability.get("dimensions"):
+        sample_count = stability.get("sample_count", 0)
+        st.markdown(
+            f'<div class="sub" style="margin-top:1.4rem;">Stability across your last '
+            f'{sample_count} samples:</div>',
+            unsafe_allow_html=True,
+        )
+        _stability_verdict_label = {
+            "stable": "Stable", "volatile": "Varies by register", "insufficient_data": "Not enough data",
+        }
+        _stability_verdict_badge = {
+            "stable": "badge-green", "volatile": "badge-amber", "insufficient_data": "badge-amber",
+        }
+        rows = []
+        for dim, verdict in stability["dimensions"].items():
+            label = _VOICE_MATCH_LABELS.get(dim, dim)
+            badge = _stability_verdict_badge.get(verdict, "badge-amber")
+            reading = _stability_verdict_label.get(verdict, verdict)
+            rows.append(
+                f"<tr><td>{label}</td>"
+                f'<td class="vm-verdict"><span class="badge {badge}">{reading}</span></td></tr>'
+            )
+        st.markdown(
+            '<table class="voice-match-table">'
+            '<thead><tr><th>Dimension</th><th class="vm-verdict">Reading</th></tr></thead>'
+            f"<tbody>{''.join(rows)}</tbody>"
+            "</table>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="microcopy" style="margin-top:0.4rem;">"Stable" means this trait held '
+            'steady across your different writing samples \u2014 likely genuine, not just what one '
+            'situation pulled out of you.</div>',
+            unsafe_allow_html=True,
+        )
+
     # Shareable card (27 Aug 2026) — a low-effort, high-reach feature:
     # nothing in the product before this was shareable, and the data
     # here (top trait headlines + confidence) is exactly what's
@@ -4278,6 +4444,28 @@ def screen_my_voice():
         data=build_voice_dna_card_png(observations, confidence),
         file_name="voicova-voice-dna.png",
         mime="image/png",
+        use_container_width=True,
+    )
+
+    # Voice Profile (Markdown) — the readable, exportable document
+    # version of everything shown on this screen, added 29 Aug 2026.
+    # Same data already computed for this screen (observations,
+    # confidence) plus baseline_fingerprint/dimension_stability
+    # (already computed at onboarding/every render, just not
+    # displayed here before now) - no new detection or extraction.
+    st.download_button(
+        "Download Voice Profile",
+        data=build_voice_profile_markdown(
+            observations=observations,
+            confidence=confidence,
+            baseline_fingerprint=st.session_state.get("baseline_fingerprint"),
+            dimension_stability=st.session_state.get("dimension_stability"),
+            cumulative_words=st.session_state.get("cumulative_words", 0),
+            cumulative_docs=st.session_state.get("cumulative_docs", 0),
+            updated_at=st.session_state.get("_voice_profile_updated_at"),
+        ),
+        file_name="voicova-voice-profile.md",
+        mime="text/markdown",
         use_container_width=True,
     )
 
@@ -4299,7 +4487,7 @@ def screen_check_draft():
     if st.session_state.get("baseline_fingerprint"):
         _shell_sidebar(8)
 
-    st.markdown('<div class="headline">Check a draft.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">Check anything.</div>', unsafe_allow_html=True)
 
     if not st.session_state.get("baseline_fingerprint"):
         st.markdown(
@@ -4387,6 +4575,23 @@ def screen_check_draft():
             f'</div></div></div>',
             unsafe_allow_html=True,
         )
+
+    # Fix it — routes a REVIEW-verdict draft into the existing render
+    # pipeline, added 29 Aug 2026. Deliberately does NOT auto-render:
+    # sets render_input_text (the exact session_state key the Write
+    # screen's paste box already reads to pre-fill itself - same
+    # mechanism, no new wiring) and hands off to screen 4, where the
+    # person clicks "Write as me" themselves, same as any other
+    # render - a real render credit is only ever spent on an explicit
+    # click, same rule as everywhere else in the product. No new
+    # scoring, no new model call path: this is the exact same
+    # _run_render the Write screen already uses.
+    if verdict == "REVIEW":
+        st.markdown("")
+        if st.button("Fix it \u2192", type="primary", key="check_draft_fix_it", use_container_width=True):
+            st.session_state["render_input_text"] = draft_text
+            go_to(4)
+            st.rerun()
 
 
 def screen_history():
