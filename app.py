@@ -964,10 +964,12 @@ if st.query_params.get("payment") == "success":
     )
     if _verified_device_id:
         set_device_id_cookie(_verified_device_id)
-        st.session_state["subscription_just_confirmed"] = True
+        go_to(9)
+        st.query_params.clear()
+        st.rerun()
     else:
         st.session_state["subscription_confirm_failed"] = True
-    st.query_params.clear()
+        st.query_params.clear()
 elif st.query_params.get("payment") == "cancelled":
     st.query_params.clear()
 
@@ -982,10 +984,12 @@ if st.query_params.get("restore"):
     _device_id_for_restore = st.session_state.get("_device_id") or get_or_create_device_id()
     st.session_state["_device_id"] = _device_id_for_restore
     if confirm_subscription_restore(_restore_token, _device_id_for_restore):
-        st.session_state["subscription_just_confirmed"] = True
+        go_to(9)
+        st.query_params.clear()
+        st.rerun()
     else:
         st.session_state["restore_failed"] = True
-    st.query_params.clear()
+        st.query_params.clear()
 
 
 # ============================================================
@@ -1270,6 +1274,32 @@ def screen_pricing():
     st.markdown("")
     if st.button("\u2190 Back", use_container_width=True):
         go_to(0 if not st.session_state.get("baseline_fingerprint") else 4)
+        st.rerun()
+
+
+def screen_confirmed():
+    """Dedicated post-payment landing screen (screen 9). Replaces the
+    old approach of dropping a small inline render_alert() on top of
+    whatever screen the paywall happened to trigger checkout from -
+    that banner was easy to miss even when the backend had correctly
+    recorded the subscription. This is the same numbered-screen +
+    go_to() pattern every other step in the product already uses, not
+    a new navigation mechanism. Reached only after Stripe verification
+    has already succeeded (app.py's payment=success and restore query
+    param handlers both call go_to(9) only on a verified device_id) -
+    this screen itself does no verification, it just confirms what
+    already happened.
+    """
+    st.markdown('<div class="tagline">VOICOVA</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">You\'re subscribed.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub">Thanks for backing VOICOVA. Renders are unlimited while your '
+        'subscription is active. Stripe has emailed you a receipt.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
+    if st.button("Start writing \u2192", key="confirmed_start_writing", use_container_width=True):
+        go_to(4)
         st.rerun()
 
 
@@ -3489,9 +3519,6 @@ def screen_render():
                     st.session_state.render_in_progress = False
                     st.rerun()
 
-        if st.session_state.get("subscription_just_confirmed"):
-            render_alert("You're subscribed. Thanks for backing VOICOVA. Write away.", "success")
-            st.session_state.subscription_just_confirmed = False
         if st.session_state.get("subscription_confirm_failed"):
             render_alert(
                 "We couldn't confirm that payment. If you were charged, "
@@ -4344,6 +4371,8 @@ elif screen == 7:
     screen_pricing()
 elif screen == 8:
     screen_check_draft()
+elif screen == 9:
+    screen_confirmed()
 else:
     go_to(1)
     st.rerun()

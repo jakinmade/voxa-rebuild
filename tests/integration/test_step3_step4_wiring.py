@@ -491,7 +491,7 @@ def test_upgrade_button_shows_error_when_checkout_fails():
         )
 
 
-def test_checkout_success_query_param_shows_confirmation_banner():
+def test_checkout_success_query_param_lands_on_confirmation_screen():
     import stripe
     session = stripe.checkout.Session.construct_from(
         {
@@ -512,22 +512,50 @@ def test_checkout_success_query_param_shows_confirmation_banner():
         at = AppTest.from_file(_APP_PATH)
         at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
         at.run()
-        # The banner lives on screen_render (screen 4) - in production
-        # this is exactly where a returning device lands, because
-        # restore_profile_if_available() (which runs before this
-        # query-param handling) already sent it to screen 4 before the
-        # checkout redirect ever fires. Seeded here for the same
-        # reason, not as a workaround - a fresh screen-1 session would
-        # never have hit the paywall this checkout came from.
+        # In production this fires from wherever the paywall triggered
+        # checkout (typically screen 4) - seeded here the same way,
+        # not as a workaround. The handler itself now redirects to the
+        # dedicated confirmation screen (9) on success, rather than
+        # dropping a banner on top of whatever screen was current.
         at.session_state["screen"] = 4
         at.session_state["baseline_fingerprint"] = {}
         at.query_params["payment"] = "success"
         at.query_params["session_id"] = "sess_1"
         at.run()
         assert not at.exception
+        assert at.session_state["screen"] == 9
         assert any(
             "You're subscribed" in html.unescape(m.value) for m in at.markdown
-            if 'class="callout callout-success"' in (m.value or "")
+            if 'class="headline"' in (m.value or "")
+        )
+
+
+def test_restore_success_query_param_lands_on_confirmation_screen():
+    import stripe
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1", "restore_token_expires_at": "2099-01-01T00:00:00+00:00"}
+    ]
+    active_subscription_result = MagicMock()
+    active_subscription_result.data = [
+        stripe.Subscription.construct_from(
+            {"id": "sub_1", "object": "subscription", "status": "active"}, "sk_test_fake",
+        )
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.Subscription, "list", return_value=active_subscription_result), \
+         patch("persistence.get_or_create_device_id", return_value="test-device-1"):
+        at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1  # skip landing screen (screen 0) in tests
+        at.run()
+        at.query_params["restore"] = "tok_1"
+        at.run()
+        assert not at.exception
+        assert at.session_state["screen"] == 9
+        assert any(
+            "You're subscribed" in html.unescape(m.value) for m in at.markdown
+            if 'class="headline"' in (m.value or "")
         )
 
 
