@@ -75,6 +75,7 @@ from stripe_subscription import (
     verify_and_record_subscription,
     request_subscription_restore,
     confirm_subscription_restore,
+    create_billing_portal_session,
 )
 from lifetime_cap import get_lifetime_render_count, device_has_active_subscription
 
@@ -1176,6 +1177,40 @@ def _handle_checkout_plan_request() -> None:
         st.link_button("Continue to payment \u2192", checkout_url, use_container_width=True)
     else:
         render_alert("Couldn't start checkout. Please try again shortly.", "error")
+
+
+def _handle_manage_subscription_request() -> None:
+    """Same create-session-and-redirect shape as
+    _handle_checkout_plan_request(), just for Stripe's Customer
+    Portal instead of Checkout Session - one click ("Manage
+    subscription") sets _manage_subscription_requested, this creates
+    the portal session on the immediately following rerun and meta-
+    refreshes to it. Cancel, plan change, card update, and invoices
+    are all Stripe's own hosted portal UI from here - not a custom
+    cancel flow VOICOVA builds and maintains itself, the same "reuse
+    a proven pattern, don't invent one" approach as everything else
+    in this module.
+    """
+    if not st.session_state.pop("_manage_subscription_requested", False):
+        return
+    device_id_for_portal = st.session_state.get("_device_id") or get_or_create_device_id()
+    st.session_state["_device_id"] = device_id_for_portal
+    portal_url = create_billing_portal_session(device_id_for_portal)
+    if portal_url:
+        st.markdown(
+            f'<meta http-equiv="refresh" content="0;url={_safe_html(portal_url)}">',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="microcopy">Redirecting to your subscription settings...</div>',
+            unsafe_allow_html=True,
+        )
+        st.link_button("Manage subscription \u2192", portal_url, use_container_width=True)
+    else:
+        render_alert(
+            "Couldn't open subscription settings. Please try again shortly.",
+            "error",
+        )
 
 
 def _render_restore_access_expander(key_prefix: str = "") -> None:
@@ -3238,6 +3273,24 @@ def _shell_sidebar(current_screen: int):
             ):
                 go_to(7)
                 st.rerun()
+        else:
+            # Frictionless cancel path for an active subscriber - same
+            # sidebar real estate the free-tier upgrade chip occupies,
+            # just the subscribed-state equivalent. One click into
+            # Stripe's own Customer Portal, where cancelling is a
+            # native, unassisted action - VOICOVA doesn't gate or
+            # intercept it with its own confirmation flow.
+            st.markdown(
+                '<div class="sidebar-usage-chip">Subscribed \u2014 unlimited renders.</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Manage subscription \u2192",
+                key=f"shell_manage_subscription_from_{current_screen}", use_container_width=True,
+            ):
+                st.session_state["_manage_subscription_requested"] = True
+                st.rerun()
+            _handle_manage_subscription_request()
 
 
 def screen_render():

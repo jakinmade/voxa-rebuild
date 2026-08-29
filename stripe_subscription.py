@@ -157,6 +157,64 @@ def create_subscription_checkout(device_id: str, plan: str = "monthly") -> str |
         return None
 
 
+def create_billing_portal_session(device_id: str) -> str | None:
+    """Returns a URL to Stripe's own hosted Customer Portal for this
+    device's subscriber - cancel, change plan, update card, see past
+    invoices, all handled by Stripe, not a custom cancel flow VOICOVA
+    has to build and maintain. Standard, proven pattern for exactly
+    this (same idea already noted as the eventual fix for restore-by-
+    email in this module's own docstring above) - not new surface,
+    just the first place this module actually calls it.
+
+    Device-only lookup, same as every other identity check in this
+    module: reads stripe_customer_id off the SAME lifetime_render_cap
+    row _record_subscription already writes, no new table. Fails
+    closed (None) on any missing piece - no Supabase, no matching
+    row, no customer_id, no Stripe key, or the API call itself
+    failing - same posture as verify_and_record_subscription. The
+    caller shows a plain error on None, same as a failed checkout
+    session create.
+    """
+    client = get_supabase_client()
+    if client is None:
+        log.error("billing_portal_unavailable", reason="supabase_not_configured")
+        return None
+    try:
+        result = (
+            client.table(_TABLE)
+            .select("stripe_customer_id")
+            .eq("device_id", device_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        log.error("billing_portal_lookup_failed", reason="supabase_error", exc_info=True)
+        return None
+
+    if not result.data or not result.data[0].get("stripe_customer_id"):
+        log.info("billing_portal_no_customer_for_device")
+        return None
+    customer_id = result.data[0]["stripe_customer_id"]
+
+    import stripe
+    secret_key = _get_secret("STRIPE_API_KEY", ("stripe", "API_KEY"))
+    if not secret_key:
+        log.error("billing_portal_unavailable", reason="stripe_not_configured")
+        return None
+    stripe.api_key = secret_key
+
+    app_url = _get_secret("VOICOVA_APP_URL", ("VOICOVA_APP_URL",), "http://localhost:8501")
+    try:
+        portal_session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=app_url,
+        )
+        return portal_session.url
+    except Exception:
+        log.error("billing_portal_create_failed", reason="stripe_error", exc_info=True)
+        return None
+
+
 def verify_and_record_subscription(session_id: str) -> str | None:
     """Confirms a Checkout Session actually resulted in an active
     subscription, and if so, upserts stripe_customer_id +

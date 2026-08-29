@@ -370,3 +370,58 @@ def test_restore_confirm_clears_the_token_only_on_success():
     update_call.assert_called_once_with({
         "restore_token": None, "restore_token_expires_at": None,
     })
+
+
+# ---------------------------------------------------------------------------
+# create_billing_portal_session — frictionless cancel, same device-only
+# lookup pattern as the rest of this module, fails closed on any missing
+# piece rather than guessing.
+# ---------------------------------------------------------------------------
+
+def test_billing_portal_session_returns_url_for_known_customer():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1"}
+    ]
+    portal_session = MagicMock()
+    portal_session.url = "https://billing.stripe.com/session/test_1"
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.billing_portal.Session, "create", return_value=portal_session) as mock_create:
+        result = sub.create_billing_portal_session("device-1")
+    assert result == "https://billing.stripe.com/session/test_1"
+    mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["customer"] == "cus_1"
+
+
+def test_billing_portal_session_none_when_device_has_no_customer_id():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+    with patch("stripe_subscription.get_supabase_client", return_value=client):
+        assert sub.create_billing_portal_session("device-1") is None
+
+
+def test_billing_portal_session_none_when_supabase_unavailable():
+    with patch("stripe_subscription.get_supabase_client", return_value=None):
+        assert sub.create_billing_portal_session("device-1") is None
+
+
+def test_billing_portal_session_none_when_stripe_not_configured():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value=None):
+        assert sub.create_billing_portal_session("device-1") is None
+
+
+def test_billing_portal_session_none_on_stripe_error():
+    client = MagicMock()
+    client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"stripe_customer_id": "cus_1"}
+    ]
+    with patch("stripe_subscription.get_supabase_client", return_value=client), \
+         patch("stripe_subscription._get_secret", return_value="sk_test_fake"), \
+         patch.object(stripe.billing_portal.Session, "create", side_effect=Exception("boom")):
+        assert sub.create_billing_portal_session("device-1") is None

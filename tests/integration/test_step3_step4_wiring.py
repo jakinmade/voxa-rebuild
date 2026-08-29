@@ -590,3 +590,58 @@ def test_checkout_cancelled_query_param_shows_no_banner():
     assert not at.exception
     assert not any("subscribed" in s.value for s in at.success)
     assert not any("confirm that payment" in e.value for e in at.error)
+
+
+def test_active_subscriber_sees_manage_subscription_not_upgrade():
+    """Shell sidebar shows the frictionless cancel path (Stripe
+    Customer Portal) for an active subscriber, not the free-tier
+    upgrade chip."""
+    with patch("lifetime_cap.device_has_active_subscription", return_value=True):
+        at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1
+        at.run()
+        _seed_screen4(at)
+        at.run()
+        assert not at.exception
+        assert any(
+            b.key == "shell_manage_subscription_from_4" for b in at.button
+        )
+        assert not any(
+            b.key == "shell_upgrade_from_4" for b in at.button
+        )
+
+
+def test_manage_subscription_button_redirects_to_billing_portal():
+    portal_url = "https://billing.stripe.com/session/test_1"
+    with patch("lifetime_cap.device_has_active_subscription", return_value=True), \
+         patch("stripe_subscription.create_billing_portal_session", return_value=portal_url) as mock_portal:
+        at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1
+        at.run()
+        _seed_screen4(at)
+        at.run()
+        manage_btn = next(b for b in at.button if b.key == "shell_manage_subscription_from_4")
+        manage_btn.click().run()
+        assert not at.exception
+        mock_portal.assert_called_once_with("test-device-1")
+        assert any(
+            "Redirecting to your subscription settings" in html.unescape(m.value)
+            for m in at.markdown
+        )
+
+
+def test_manage_subscription_shows_error_when_portal_unavailable():
+    with patch("lifetime_cap.device_has_active_subscription", return_value=True), \
+         patch("stripe_subscription.create_billing_portal_session", return_value=None):
+        at = AppTest.from_file(_APP_PATH)
+        at.session_state["screen"] = 1
+        at.run()
+        _seed_screen4(at)
+        at.run()
+        manage_btn = next(b for b in at.button if b.key == "shell_manage_subscription_from_4")
+        manage_btn.click().run()
+        assert not at.exception
+        assert any(
+            "Couldn't open subscription settings" in html.unescape(m.value) for m in at.markdown
+            if 'class="callout callout-error"' in (m.value or "")
+        )
