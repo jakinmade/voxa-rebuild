@@ -32,8 +32,12 @@ make install-deps  # Install runtime dependencies
 
 ```bash
 pip install -r requirements.txt
-uvicorn voxa_api.main:app --reload
+streamlit run app.py
 ```
+(`voxa_api`/`uvicorn` was the original FastAPI mounting layer — removed
+August 2026, unreachable from production. The live app is the Streamlit
+entrypoint above; rendering lives in `prompts.py`/`voice_engine.py` at
+the repo root, not in `packages/`.)
 
 ## Environment variables
 
@@ -65,10 +69,8 @@ packages/
   voxa-core/          Shared entities, enums, bootstrap, defaults
   voxa-humanisation/  Layer 1 — Humanisation Engine
   voxa-profile/       Layer 2 — Canonical Voice Profile
-  voxa-rendering/     Layer 3 — Voice Rendering Engine (LLM boundary)
   voxa-calibration/   Layer 4 — Calibration Engine (change vector)
   voxa-governance/    Layer 5 — Voice Governance Engine
-  voxa-api/           FastAPI + repositories + middleware
 config/
   change_vector_patterns_v1.yaml
 tests/

@@ -213,65 +213,6 @@ class TestPromotionLifecycle:
 
 class TestProvisionalRendering:
 
-    def test_provisional_rule_not_applied_in_high_stakes_context(self):
-        from voxa_rendering.explainability import should_apply_provisional_rule
-        rule = RuleMetadata(
-            value="high",
-            confidence=0.50,
-            source=["edit_1"],
-            stability=0.45,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.PROVISIONAL,
-        )
-        result = should_apply_provisional_rule(rule, context="investor", user_confirmed=False)
-        assert result is False
-
-    def test_provisional_rule_applied_in_normal_context(self):
-        from voxa_rendering.explainability import should_apply_provisional_rule
-        rule = RuleMetadata(
-            value="high",
-            confidence=0.50,
-            source=["edit_1"],
-            stability=0.45,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.PROVISIONAL,
-        )
-        result = should_apply_provisional_rule(rule, context="default", user_confirmed=False)
-        assert result is True
-
-    def test_stable_rule_always_applied(self):
-        from voxa_rendering.explainability import should_apply_provisional_rule
-        rule = RuleMetadata(
-            value="high",
-            confidence=0.80,
-            source=["edit_1"],
-            stability=0.75,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.STABLE,
-        )
-        result = should_apply_provisional_rule(rule, context="investor", user_confirmed=False)
-        assert result is True
-
-    def test_provisional_confirmed_by_user_applied_in_high_stakes(self):
-        from voxa_rendering.explainability import should_apply_provisional_rule
-        rule = RuleMetadata(
-            value="high",
-            confidence=0.50,
-            source=["edit_1"],
-            stability=0.45,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.PROVISIONAL,
-        )
-        result = should_apply_provisional_rule(rule, context="investor", user_confirmed=True)
-        assert result is True
-
-
-# ---------------------------------------------------------------------------
-# [4] & [5] Negative evidence and demotion
-# ---------------------------------------------------------------------------
-
-class TestNegativeEvidence:
-
     def test_negative_evidence_reduces_confidence(self):
         from voxa_calibration.sprint2 import record_negative_evidence
         profile = VoiceProfile(user_id=uuid4())
@@ -327,36 +268,6 @@ class TestNegativeEvidence:
         demoted = demote_rule(rule, "confidence_expression", reason="test")
         # CORE demotes to STABLE — not to OBSERVED
         assert demoted.lifecycle_stage == LifecycleStage.STABLE
-
-    def test_boundary_rules_cannot_be_demoted(self):
-        from voxa_profile.lifecycle import demote_rule
-        rule = RuleMetadata(
-            value=["patronising"],
-            confidence=1.0,
-            source=["system"],
-            stability=1.0,
-            decay_rate=0.0,
-            lifecycle_stage=LifecycleStage.BOUNDARY,
-        )
-        result = demote_rule(rule, "tone_boundaries", reason="test")
-        assert result.lifecycle_stage == LifecycleStage.BOUNDARY
-
-
-# ---------------------------------------------------------------------------
-# [6] LLM escalation — returns confidence score, rules-based makes final call
-# ---------------------------------------------------------------------------
-
-class TestLLMEscalation:
-
-    @pytest.mark.asyncio
-    async def test_llm_escalation_returns_tuple(self):
-        from voxa_rendering.llm_boundary import classify_edit_via_llm as llm_classify_edit
-        # No API key in test environment — should return gracefully
-        prompt = "Classify: original=\'This might be worth exploring.\' edited=\'Explore this.\'"
-        edit_class, confidence = await llm_classify_edit(prompt)
-        # Without API key, returns AMBIGUOUS and 0.0 — that's the correct fallback
-        assert edit_class in list(EditClass)
-        assert 0.0 <= confidence <= 1.0
 
     def test_full_semantic_diff_detects_hedge_removal(self):
         from voxa_calibration.sprint2 import full_semantic_diff

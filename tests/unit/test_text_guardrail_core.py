@@ -1,14 +1,15 @@
 """
-Tests for voxa_core.text_guardrail — the canonical guardrail sweep for
-the packages/ ecosystem (voxa-rendering, voxa-api).
+Tests for voxa_core.text_guardrail — the canonical guardrail sweep.
 
-Root cause this exists to catch: an August 2026 audit found four
-independent copies of this guardrail at four different levels of
-completeness (app.py: 12/12 steps + verification; voxa_rendering/
-cleaner.py: 2/12, no verification; voxa_api/recalibrate.py: ~4/12,
-stale, no verification; voxa_api/rewrite.py: 0/12, no verification).
-Any consumer hitting the FastAPI layer instead of the Streamlit app got
-materially worse output with no warning, because nothing checked.
+Root cause this exists to catch: an August 2026 audit found duplicate,
+divergent copies of this guardrail at different levels of completeness
+across the codebase (app.py: 12/12 steps + verification; a since-removed
+FastAPI layer's copies were materially worse, at 0-4/12 with no
+verification, and shipped no warning to any caller reaching them).
+The FastAPI layer and its package (packages/voxa-api, packages/
+voxa-rendering) were confirmed unreachable from the live Streamlit app
+and removed entirely; this guardrail module and its tests remain because
+app.py itself still uses it.
 
 This file has two jobs:
   1. Prove the ported voxa_core.text_guardrail module produces byte-

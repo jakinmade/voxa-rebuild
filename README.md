@@ -15,11 +15,13 @@ packages/
   voxa-core/          # Shared data entities, schemas, base types
   voxa-humanisation/  # Layer 1 — Humanisation Engine
   voxa-profile/       # Layer 2 — Canonical Voice Profile
-  voxa-rendering/     # Layer 3 — Voice Rendering Engine
   voxa-calibration/   # Layer 4 — Calibration Engine
   voxa-governance/    # Layer 5 — Voice Governance Engine
-  voxa-api/           # FastAPI — mounts all layers, exposes endpoints
 ```
+Rendering (Layer 3) and the FastAPI mounting layer (voxa-rendering,
+voxa-api) were removed August 2026 — confirmed unreachable from the
+live Streamlit app (`app.py`, which uses `prompts.py`/`voice_engine.py`
+directly). See CONTRIBUTING.md for the live rendering path.
 
 ## Architecture Principles
 

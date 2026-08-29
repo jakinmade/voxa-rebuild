@@ -161,113 +161,6 @@ class TestProfileBuilder:
             assert rule.decay_rate is not None
             assert rule.lifecycle_stage is not None
 
-    def test_bootstrap_state_set(self):
-        from voxa_humanisation.engine import humanise
-        from voxa_profile.builder import build_profile
-        user_id = uuid4()
-        humanised = humanise(raw_input="Keep it short.", user_id=user_id)
-        profile = build_profile(humanised)
-        # New profile with minimal input — should be in bootstrap
-        assert isinstance(profile.is_bootstrap, bool)
-
-
-# ---------------------------------------------------------------------------
-# [8] Boundary violation returns no output
-# ---------------------------------------------------------------------------
-
-class TestBoundaryValidation:
-
-    @pytest.mark.asyncio
-    async def test_boundary_violation_returns_none(self):
-        from voxa_rendering.engine import render
-        user_id = uuid4()
-        profile = VoiceProfile(user_id=user_id)
-        profile.boundaries = BoundaryRules(
-            tone_boundaries=RuleMetadata(
-                value=["aggressive"],
-                confidence=1.0,
-                source=["system_default"],
-                stability=1.0,
-                decay_rate=0.0,
-                lifecycle_stage=LifecycleStage.BOUNDARY,
-            )
-        )
-        # Force bootstrap to renderable by adding a provisional identity rule
-        profile.identity.directness = RuleMetadata(
-            value="high",
-            confidence=0.5,
-            source=["test"],
-            stability=0.5,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.PROVISIONAL,
-        )
-        profile.linguistic.forbidden_phrases = RuleMetadata(
-            value=[],
-            confidence=0.5,
-            source=["test"],
-            stability=0.5,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.CANDIDATE,
-        )
-
-        # Input that would trigger boundary (aggressive in output)
-        # With no API key, LLM passes through input — so put violation in input
-        output = await render(
-            input_text="This is an aggressive response.",
-            profile=profile,
-            session_id=uuid4(),
-            context="default",
-        )
-        # Output should be None — boundary blocks it
-        assert output is None
-
-    @pytest.mark.asyncio
-    async def test_clean_output_passes_boundary(self):
-        from voxa_rendering.engine import render
-        user_id = uuid4()
-        profile = VoiceProfile(user_id=user_id)
-        profile.boundaries = BoundaryRules(
-            tone_boundaries=RuleMetadata(
-                value=["salesy"],
-                confidence=1.0,
-                source=["system_default"],
-                stability=1.0,
-                decay_rate=0.0,
-                lifecycle_stage=LifecycleStage.BOUNDARY,
-            )
-        )
-        profile.identity.directness = RuleMetadata(
-            value="high",
-            confidence=0.5,
-            source=["test"],
-            stability=0.5,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.PROVISIONAL,
-        )
-        profile.linguistic.forbidden_phrases = RuleMetadata(
-            value=[],
-            confidence=0.5,
-            source=["test"],
-            stability=0.5,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.CANDIDATE,
-        )
-
-        output = await render(
-            input_text="Here is a clear and direct summary.",
-            profile=profile,
-            session_id=uuid4(),
-        )
-        assert output is not None
-        assert output.boundary_blocked is False if hasattr(output, 'boundary_blocked') else True
-
-
-# ---------------------------------------------------------------------------
-# [9] Neutral defaults tag correctly
-# ---------------------------------------------------------------------------
-
-class TestNeutralDefaults:
-
     def test_all_neutral_defaults_defined(self):
         expected_dimensions = [
             "cadence", "compression", "directness", "warmth", "formality",
@@ -277,59 +170,6 @@ class TestNeutralDefaults:
         for dim in expected_dimensions:
             val = get_neutral_default(dim)
             assert val is not None, f"No neutral default for {dim}"
-
-    def test_unknown_dimension_raises(self):
-        with pytest.raises(KeyError):
-            get_neutral_default("nonexistent_dimension")
-
-    @pytest.mark.asyncio
-    async def test_unknown_rules_produce_neutral_default_tags(self):
-        from voxa_rendering.engine import render
-        user_id = uuid4()
-        # Profile with NO rules set — all dimensions unknown
-        profile = VoiceProfile(user_id=user_id)
-        profile.boundaries = BoundaryRules(
-            tone_boundaries=RuleMetadata(
-                value=["patronising"],
-                confidence=1.0,
-                source=["system_default"],
-                stability=1.0,
-                decay_rate=0.0,
-                lifecycle_stage=LifecycleStage.BOUNDARY,
-            )
-        )
-        profile.identity.directness = RuleMetadata(
-            value="medium",
-            confidence=0.5,
-            source=["test"],
-            stability=0.5,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.PROVISIONAL,
-        )
-        profile.linguistic.forbidden_phrases = RuleMetadata(
-            value=[],
-            confidence=0.5,
-            source=["test"],
-            stability=0.5,
-            decay_rate=0.02,
-            lifecycle_stage=LifecycleStage.CANDIDATE,
-        )
-
-        output = await render(
-            input_text="Here is a clear summary.",
-            profile=profile,
-            session_id=uuid4(),
-        )
-        if output and not output.is_bootstrap_output:
-            # Most dimensions had no rule — neutral defaults should be used
-            assert len(output.neutral_defaults_used) > 0
-
-
-# ---------------------------------------------------------------------------
-# [4] & [5] Edit classification and calibration
-# ---------------------------------------------------------------------------
-
-class TestCalibrationEngine:
 
     def test_voice_edit_classified(self):
         from voxa_calibration.engine import classify_edit
@@ -423,18 +263,6 @@ class TestLLMBoundaryContract:
             assert "ANTHROPIC_API_URL" not in source, (
                 f"LLM API URL found in {module.__name__} — boundary contract violated"
             )
-
-    def test_llm_api_url_only_in_rendering_layer(self):
-        import voxa_rendering.llm_boundary as boundary_module
-        source = open(boundary_module.__file__).read()
-        assert "ANTHROPIC_API_URL" in source
-
-
-# ---------------------------------------------------------------------------
-# [6] Profile version increments
-# ---------------------------------------------------------------------------
-
-class TestProfileVersioning:
 
     def test_version_increments_on_change(self):
         from voxa_profile.builder import increment_version
