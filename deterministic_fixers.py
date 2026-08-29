@@ -24,6 +24,7 @@ rejected as a meaning-risk, same standard as the ones that shipped.
 
 import re
 from collections import Counter
+import difflib
 from voice_engine import _extract_sentences, _imperative_pattern, _HEDGE_PATTERN
 
 # Single source of truth, imported from voice_engine.py rather than
@@ -1101,6 +1102,40 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
     false-positive above at new_word_count == 0 — >0 was always
     sufficient to exclude it, no headroom needed. Tightened to >0.
 
+    UPDATE, 29 Aug 2026: the word-budget check above was whole-
+    document (Counter diff over ALL words in `before` vs `after`),
+    which meant a single unrelated, genuinely legitimate word added
+    ANYWHERE in a long render — e.g. a sentence-initial "Timing feels
+    right..." corrected to "The timing feels right..." — pushed
+    new_word_count above 0 for the entire document, which then made
+    every OTHER split in that same render register as sentence_growth
+    too, even splits that individually redistributed existing words
+    with zero net addition. Confirmed against a real render: a
+    CLEARANCE follow-up email had one such incidental "The" plus three
+    genuinely word-neutral comma-to-period splits elsewhere: the old
+    whole-document check flagged all three splits as "sentences
+    invented" purely because of the unrelated "The".
+
+    Fixed by scoping the word-budget check to the specific block of
+    sentences a real diff (difflib.SequenceMatcher over normalised
+    sentence text) identifies as changed, rather than the whole
+    document. Sentences that align unchanged elsewhere never enter the
+    budget check at all, so an incidental word added in one place can
+    no longer contaminate the verdict on an unrelated split. This is
+    NOT the per-sentence word-overlap attribution that was tried and
+    reverted before (see test_heavily_paraphrased_render_reports_raw_
+    delta_not_a_lower_attributed_count) — that approach tried to
+    guess WHICH single sentence among many was fabricated using
+    word-overlap, which synonym substitution defeats. This only asks
+    "did the sentence *count* change in this diff block, and if so,
+    did real new words come with it" — heavy paraphrasing with no
+    count change in a block never enters the growth count at all
+    (same as before), and where no sentence in the document aligns
+    unchanged (as in that heavily-paraphrased test case), the whole
+    document collapses to one block and this behaves identically to
+    the old whole-document check — confirmed that test still reports
+    the same raw delta.
+
     Returns:
       {
         "new_hedges": list[str]  — hedge words/phrases present in
@@ -1141,37 +1176,85 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
         if extra > 0:
             new_hedges.extend([word] * extra)
 
-    before_sentence_count = len(_extract_sentences(before, min_words=1))
-    after_sentence_count = len(_extract_sentences(after, min_words=1))
-    raw_sentence_growth = max(0, after_sentence_count - before_sentence_count)
+    before_sentences = _extract_sentences(before, min_words=1)
+    after_sentences = _extract_sentences(after, min_words=1)
+
+    def _normalise_for_alignment(sentence: str) -> str:
+        # Sentence-boundary alignment only, not the word-budget check
+        # itself — punctuation differences (comma vs period, an em
+        # dash) must not by themselves stop two sentences from
+        # aligning as the same content, or every ordinary split would
+        # get its own spurious block. Contractions expanded so
+        # "here's"/"here is" align too.
+        sentence = _expand_contractions(sentence)
+        sentence = re.sub(r"[^a-z0-9\s]", "", sentence)
+        return re.sub(r"\s+", " ", sentence).strip()
+
+    before_norm = [_normalise_for_alignment(s) for s in before_sentences]
+    after_norm = [_normalise_for_alignment(s) for s in after_sentences]
+
+    matcher = difflib.SequenceMatcher(None, before_norm, after_norm, autojunk=False)
+
+    def _peel_off_near_identical(before_idxs, after_idxs, threshold=0.85):
+        # A non-equal opcode block can contain MORE than one
+        # independent edit glued together — e.g. a same-count edit
+        # (a word added mid-sentence) sitting right next to a genuine
+        # split, with no unchanged sentence between them to act as an
+        # alignment anchor. difflib has nothing to anchor on there, so
+        # it returns the whole span as one block, which would make the
+        # same-count edit's words count toward the split's word
+        # budget. Confirmed against a real render: "Timing feels..."
+        # -> "The timing feels..." (one word added, sentence count
+        # unchanged) sat directly next to a genuine word-neutral split
+        # with no anchor sentence between them; without this pass the
+        # single added word validated the unrelated split as
+        # "fabrication".
+        #
+        # This peels off near-identical (fuzzy-matched) sentence pairs
+        # from the two sides first — these are ordinary same-sentence
+        # edits, not splits — leaving only the genuine residue (an
+        # actual count change) for the word-budget check below. Fuzzy,
+        # not exact, because these pairs are exactly the ones that
+        # DIDN'T already match exactly (that's why they're in a
+        # non-equal opcode at all) — a swapped or added word is
+        # expected here.
+        before_idxs = list(before_idxs)
+        after_idxs = list(after_idxs)
+        used_after = set()
+        leftover_before = []
+        for bi in before_idxs:
+            best_aj, best_ratio = None, 0.0
+            for aj in after_idxs:
+                if aj in used_after:
+                    continue
+                ratio = difflib.SequenceMatcher(None, before_norm[bi], after_norm[aj]).ratio()
+                if ratio > best_ratio:
+                    best_ratio, best_aj = ratio, aj
+            if best_aj is not None and best_ratio >= threshold:
+                used_after.add(best_aj)
+            else:
+                leftover_before.append(bi)
+        leftover_after = [aj for aj in after_idxs if aj not in used_after]
+        return leftover_before, leftover_after
 
     sentence_growth = 0
-    if raw_sentence_growth > 0:
-        before_words = Counter(re.findall(r"[a-z]+", _expand_contractions(before)))
-        after_words = Counter(re.findall(r"[a-z]+", _expand_contractions(after)))
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        before_idxs, after_idxs = _peel_off_near_identical(range(i1, i2), range(j1, j2))
+        local_growth = max(0, len(after_idxs) - len(before_idxs))
+        if local_growth == 0:
+            continue
+        before_block = " ".join(before_sentences[i] for i in before_idxs)
+        after_block = " ".join(after_sentences[j] for j in after_idxs)
+        before_words = Counter(re.findall(r"[a-z]+", _expand_contractions(before_block)))
+        after_words = Counter(re.findall(r"[a-z]+", _expand_contractions(after_block)))
         new_word_count = sum(
             max(0, count - before_words.get(word, 0))
             for word, count in after_words.items()
         )
-        # A split that redistributes EXISTING words across more
-        # sentences (a comma-joined clause rewritten as two short
-        # sentences for rhythm) adds zero new words — that's the
-        # false positive this check exists to avoid flagging (see the
-        # docstring's real example, confirmed to measure new_word_count
-        # == 0). Anything past zero is new content riding along with
-        # the extra sentence, which is exactly what this check exists
-        # to catch — including a single short word. Was ">3" until the
-        # independent codebase review (27 Aug 2026) found this let
-        # short invented sentences through untouched: "This is fine."
-        # -> "This is fine. Great." (1 new word) and "...I agree too."
-        # (3 new words) both passed silently under the old threshold,
-        # while only "...I agree with you." (4 words) got caught -
-        # nothing about a fabricated sentence's legitimacy depends on
-        # how many words it happens to be. Contractions are expanded
-        # on both sides first (see _expand_contractions) so "here's"
-        # -> "here is" doesn't itself register as two new words.
         if new_word_count > 0:
-            sentence_growth = raw_sentence_growth
+            sentence_growth += local_growth
 
     return {
         "new_hedges": new_hedges,

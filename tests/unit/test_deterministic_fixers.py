@@ -613,6 +613,74 @@ def test_sentence_split_with_same_words_not_flagged_as_growth():
     assert result["flagged"] is False
 
 
+# ---------------------------------------------------------------------------
+# Regression: 29 Aug 2026 — same Scott/CLEARANCE follow-up family, live
+# multi-paragraph Elevate render. Three genuinely word-neutral splits
+# (comma-to-period, same words each side) plus one unrelated, entirely
+# legitimate single-word addition elsewhere in the render ("Timing
+# feels..." -> "The timing feels..."). The whole-document word-budget
+# check this function used before scoped its new_word_count to the
+# ENTIRE before/after text, so that one incidental "The" — nothing to
+# do with any of the three splits — pushed new_word_count above 0 for
+# the whole document and made all three splits register as
+# sentence_growth, none of which had actually grown. Confirms the
+# per-block scoping (see function docstring) keeps an unrelated
+# legitimate edit from contaminating the verdict on a genuinely
+# word-neutral split elsewhere in the same render.
+# ---------------------------------------------------------------------------
+
+def test_unrelated_word_addition_does_not_taint_word_neutral_splits_elsewhere():
+    before = (
+        "Timing feels right off the back of your Workflow Agent Manager "
+        "post. It's the deterministic proof layer underneath the "
+        "governance moat point from our earlier thread: not \"the agent "
+        "ran,\" but \"here's the evidence it did the right thing, and "
+        "here's what happens when it didn't.\"\n"
+        "Built out for US Financial Services specifically, SEC, FINRA, "
+        "SR 11-7, the state AI laws now live. Report in minutes, no "
+        "build required on your side.\n"
+        "If it holds up, it's the concrete proof point Matt was pushing "
+        "for on that thread, something you could put in front of a "
+        "portfolio company this week, not a framework to workshop."
+    )
+    after = (
+        "The timing feels right off the back of your Workflow Agent "
+        "Manager post. It is the deterministic proof layer underneath "
+        "the governance moat point from our earlier thread. Not \"the "
+        "agent ran,\" but \"here's the evidence it did the right thing, "
+        "and here's what happens when it did not.\"\n"
+        "Built out for US Financial Services specifically. SEC, FINRA, "
+        "SR 11-7, the state AI laws now live. Report in minutes. No "
+        "build required on your side.\n"
+        "If it holds up, it is the concrete proof point Matt was "
+        "pushing for on that thread. Something you could put in front "
+        "of a portfolio company this week, not a framework to workshop."
+    )
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 0
+    assert result["flagged"] is False
+
+
+def test_genuine_fabrication_still_flagged_alongside_an_unrelated_split():
+    """The block-scoping fix must not go too far the other way — a
+    real fabricated sentence sitting in the SAME render as an unrelated
+    word-neutral split must still be caught."""
+    before = (
+        "Not \"the agent ran,\" but \"here's the evidence it did the "
+        "right thing, and here's what happens when it didn't.\"\n"
+        "Report in minutes, no build required on your side."
+    )
+    after = (
+        "Not \"the agent ran,\" but \"here's the evidence it did the "
+        "right thing. And here's what happens when it did not.\"\n"
+        "Report in minutes, no build required on your side. Curious "
+        "whether that framing lands for you."
+    )
+    result = df._check_uncorrected_insertions(before, after)
+    assert result["sentence_growth"] == 1
+    assert result["flagged"] is True
+
+
 def test_sentence_growth_with_new_content_still_flagged():
     """The split-detection tolerance must not swallow real fabrication
     that happens to also change a comma to a period."""
