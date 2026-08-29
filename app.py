@@ -448,8 +448,20 @@ st.markdown("""
         flex-wrap: wrap;
         margin-bottom: 1rem;
     }
+    /* flex-shrink: 0 (29 Aug 2026 fix, confirmed live): without it,
+       a narrow viewport could squeeze a .vr-stat block below the
+       width its own badge value needed, and with no white-space:
+       nowrap on .badge either, the browser would wrap the value text
+       - including mid-word ("Developing" splitting across two
+       lines). flex-wrap on .vr-grid above already exists specifically
+       to push whole stat blocks to a new row when space runs out;
+       this makes that the only thing that happens under pressure,
+       rather than individual badges also being allowed to compress
+       and wrap internally. Same defensive pattern this file already
+       uses on .content-lock-mark for the same reason. */
     .vr-stat {
         min-width: 100px;
+        flex-shrink: 0;
     }
     .vr-stat-label {
         font-family: var(--font-mono);
@@ -475,6 +487,16 @@ st.markdown("""
         font-size: 0.8rem;
         font-weight: 600;
         font-family: var(--font-mono);
+        /* 29 Aug 2026 fix, confirmed live: badges (Voice consistency,
+           Risk, AI-tell check) hold single short words or two-word
+           phrases and are never meant to wrap - but without this,
+           a badge squeezed narrower than its own text (e.g. inside
+           a .vr-stat block under viewport pressure) would wrap that
+           text, including mid-word ("Developing" -> "Develop" /
+           "ing" across two lines inside the pill shape). See
+           .vr-stat's own flex-shrink: 0 fix, same incident, the
+           row-level companion to this. */
+        white-space: nowrap;
     }
     .badge::before {
         content: "";
