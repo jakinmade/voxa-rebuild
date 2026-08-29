@@ -1136,6 +1136,24 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
     the old whole-document check — confirmed that test still reports
     the same raw delta.
 
+    KNOWN LIMITATION: this scoping only helps when difflib's sentence-
+    level alignment can actually find an anchor (an unchanged sentence)
+    between two independent edits. If two unrelated edits sit directly
+    adjacent with no anchor between them, difflib has nothing to split
+    on and merges them into one block, so an incidental word added by
+    one edit can still contaminate an unrelated split's verdict in
+    that specific adjacency. A same-session attempt at a further fix
+    (greedily pairing off near-identical sentences before the
+    word-budget check) was tried and reverted: it fixed the invented
+    adjacency case it was written for, but broke a second REAL live
+    render (see git history, 29 Aug 2026) by fuzzy-matching one half
+    of a genuine split to the wrong sentence, stranding the other half
+    and miscounting it as fabricated content. Reverted in favour of
+    this simpler version, which is the one actually confirmed correct
+    against both real reported false positives. Left as a known gap
+    rather than shipping an unverified fix for a scenario not yet
+    confirmed to occur in real renders.
+
     Returns:
       {
         "new_hedges": list[str]  — hedge words/phrases present in
@@ -1195,58 +1213,15 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
 
     matcher = difflib.SequenceMatcher(None, before_norm, after_norm, autojunk=False)
 
-    def _peel_off_near_identical(before_idxs, after_idxs, threshold=0.85):
-        # A non-equal opcode block can contain MORE than one
-        # independent edit glued together — e.g. a same-count edit
-        # (a word added mid-sentence) sitting right next to a genuine
-        # split, with no unchanged sentence between them to act as an
-        # alignment anchor. difflib has nothing to anchor on there, so
-        # it returns the whole span as one block, which would make the
-        # same-count edit's words count toward the split's word
-        # budget. Confirmed against a real render: "Timing feels..."
-        # -> "The timing feels..." (one word added, sentence count
-        # unchanged) sat directly next to a genuine word-neutral split
-        # with no anchor sentence between them; without this pass the
-        # single added word validated the unrelated split as
-        # "fabrication".
-        #
-        # This peels off near-identical (fuzzy-matched) sentence pairs
-        # from the two sides first — these are ordinary same-sentence
-        # edits, not splits — leaving only the genuine residue (an
-        # actual count change) for the word-budget check below. Fuzzy,
-        # not exact, because these pairs are exactly the ones that
-        # DIDN'T already match exactly (that's why they're in a
-        # non-equal opcode at all) — a swapped or added word is
-        # expected here.
-        before_idxs = list(before_idxs)
-        after_idxs = list(after_idxs)
-        used_after = set()
-        leftover_before = []
-        for bi in before_idxs:
-            best_aj, best_ratio = None, 0.0
-            for aj in after_idxs:
-                if aj in used_after:
-                    continue
-                ratio = difflib.SequenceMatcher(None, before_norm[bi], after_norm[aj]).ratio()
-                if ratio > best_ratio:
-                    best_ratio, best_aj = ratio, aj
-            if best_aj is not None and best_ratio >= threshold:
-                used_after.add(best_aj)
-            else:
-                leftover_before.append(bi)
-        leftover_after = [aj for aj in after_idxs if aj not in used_after]
-        return leftover_before, leftover_after
-
     sentence_growth = 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
-        before_idxs, after_idxs = _peel_off_near_identical(range(i1, i2), range(j1, j2))
-        local_growth = max(0, len(after_idxs) - len(before_idxs))
+        local_growth = max(0, (j2 - j1) - (i2 - i1))
         if local_growth == 0:
             continue
-        before_block = " ".join(before_sentences[i] for i in before_idxs)
-        after_block = " ".join(after_sentences[j] for j in after_idxs)
+        before_block = " ".join(before_sentences[i1:i2])
+        after_block = " ".join(after_sentences[j1:j2])
         before_words = Counter(re.findall(r"[a-z]+", _expand_contractions(before_block)))
         after_words = Counter(re.findall(r"[a-z]+", _expand_contractions(after_block)))
         new_word_count = sum(
