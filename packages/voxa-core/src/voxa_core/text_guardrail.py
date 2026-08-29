@@ -785,4 +785,26 @@ def sweep(text: str, keep_contractions: bool = False) -> str:
     text = re.sub(r'([.!?])"[.!?]', r'\1"', text)
     text = re.sub(r" ([,.!?])", r"\1", text)
 
+    # 12. Opening-salutation comma restoration — mirrors the fix in
+    # prompts.py's sweep (root, live Railway product), added 29 Aug
+    # 2026. See that function's inline comment for the full rationale:
+    # _grammar_fix_pass's own "DO NOT TOUCH" instruction tells the
+    # model the salutation's terminal punctuation is a fixed comma,
+    # never a full stop, but that instruction isn't always obeyed -
+    # confirmed live and recurring. This restores the comma
+    # deterministically when the very start of the text matches one
+    # of the two salutation shapes: a greeting word plus name
+    # ("Hi/Hey/Hello/Dear Name") or a bare name alone on the first
+    # line ("John."). Anchored to the absolute start of the text so
+    # this never fires on an unrelated sentence elsewhere in the
+    # render.
+    text = re.sub(
+        r"^((?:Hi|Hey|Hello|Dear)\s+[A-Z][A-Za-z'\-]*(?:\s+[A-Z][A-Za-z'\-]*){0,2})\.(?=\s|$)",
+        r"\1,", text, count=1,
+    )
+    text = re.sub(
+        r"^([A-Z][A-Za-z'\-]{1,20})\.(?=\s*\n)",
+        r"\1,", text, count=1,
+    )
+
     return text

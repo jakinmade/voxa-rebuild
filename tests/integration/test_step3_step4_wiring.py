@@ -645,3 +645,78 @@ def test_manage_subscription_shows_error_when_portal_unavailable():
             "Couldn't open subscription settings" in html.unescape(m.value) for m in at.markdown
             if 'class="callout callout-error"' in (m.value or "")
         )
+
+
+# ---------------------------------------------------------------------------
+# Social-format character-length nudge (29 Aug 2026) — a soft, informational
+# indicator only shown for platform_format="social", against LinkedIn's
+# researched 1,200-1,600 engagement sweet spot and 3,000 hard cap.
+# ---------------------------------------------------------------------------
+
+def _seed_output(at: AppTest, output_text: str, platform_format: str | None = "social"):
+    at.session_state["screen"] = 4
+    at.session_state["baseline_fingerprint"] = {}
+    at.session_state["render_output"] = output_text
+    at.session_state["voice_report"] = None
+    at.session_state["render_id"] = None
+    at.session_state["_device_id"] = "test-device-1"
+    at.session_state["platform_format_input"] = platform_format
+
+
+def test_length_nudge_shows_sweet_spot_for_social_format_in_range():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    _seed_output(at, "x" * 1400, platform_format="social")
+    at.run()
+    assert not at.exception
+    assert any(
+        "sweet spot for engagement" in html.unescape(m.value) for m in at.markdown
+        if "1,400 characters" in html.unescape(m.value)
+    )
+
+
+def test_length_nudge_warns_over_sweet_spot_but_under_cap():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    _seed_output(at, "x" * 2000, platform_format="social")
+    at.run()
+    assert not at.exception
+    assert any(
+        "badge-amber" in html.unescape(m.value) and "longer than" in html.unescape(m.value)
+        for m in at.markdown
+    )
+
+
+def test_length_nudge_warns_over_hard_cap():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    _seed_output(at, "x" * 3200, platform_format="social")
+    at.run()
+    assert not at.exception
+    assert any(
+        "badge-red" in html.unescape(m.value) and "cut off" in html.unescape(m.value)
+        for m in at.markdown
+    )
+
+
+def test_length_nudge_hidden_for_non_social_format():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    _seed_output(at, "x" * 2000, platform_format="email")
+    at.run()
+    assert not at.exception
+    assert not any("characters</span>" in html.unescape(m.value) for m in at.markdown)
+
+
+def test_length_nudge_hidden_when_no_platform_format():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    _seed_output(at, "x" * 2000, platform_format=None)
+    at.run()
+    assert not at.exception
+    assert not any("characters</span>" in html.unescape(m.value) for m in at.markdown)

@@ -3801,6 +3801,47 @@ Show the per-dimension breakdown
                         label="output", value=output, height=350,
                         label_visibility="collapsed", key=output_key,
                     )
+
+                # Character-length nudge, social platform format only.
+                # Research-backed thresholds (checked, not guessed, 29
+                # Aug 2026): LinkedIn's hard cap is 3,000 characters,
+                # but the actual engagement sweet spot converged on
+                # across every current source checked is 1,200-1,600 -
+                # well short of the cap. Nothing in the render pipeline
+                # targets or enforces a length for social-format
+                # output, so this is a soft, informational nudge, not
+                # a hard cutoff or truncation - the render itself is
+                # never altered by this, only the person's own
+                # decision about whether to trim before posting.
+                if st.session_state.get("platform_format_input") == "social":
+                    _char_count = len(output)
+                    if _char_count > 3000:
+                        _len_badge, _len_note = (
+                            "badge-red",
+                            "over LinkedIn's 3,000-character limit — it will be cut off",
+                        )
+                    elif _char_count > 1600:
+                        _len_badge, _len_note = (
+                            "badge-amber",
+                            "longer than the 1,200–1,600 sweet spot for engagement",
+                        )
+                    elif _char_count < 1200:
+                        _len_badge, _len_note = (
+                            "badge-green",
+                            "within LinkedIn's 3,000-character limit",
+                        )
+                    else:
+                        _len_badge, _len_note = (
+                            "badge-green",
+                            "in the 1,200–1,600 sweet spot for engagement",
+                        )
+                    st.markdown(
+                        f'<div class="microcopy" style="margin-top:0.3rem;">'
+                        f'<span class="badge {_len_badge}">{_char_count:,} characters</span> '
+                        f'{_len_note}</div>',
+                        unsafe_allow_html=True,
+                    )
+
                 st.markdown(
                     '<div class="microcopy">Written as you. Not for you.</div>',
                     unsafe_allow_html=True

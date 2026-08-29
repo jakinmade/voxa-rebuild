@@ -1330,6 +1330,39 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     # that function's scope.
     text = re.sub(r" ([,.!?])", r"\1", text)
 
+    # 13. Opening-salutation comma restoration — same category as step
+    # 12 above (a rule the prompt states explicitly but the
+    # non-deterministic _grammar_fix_pass doesn't always obey).
+    # _grammar_fix_pass's own system prompt (rule 7, "DO NOT TOUCH")
+    # tells it the salutation's terminal punctuation is a fixed comma
+    # and to never convert it to a full stop - but an LLM instruction
+    # is not a guarantee, and this has been confirmed live to still
+    # happen intermittently ("Hi John," -> "Hi John."), reported
+    # recurring and unpredictable rather than tied to one input shape.
+    # A prompt-level "never" cannot be verified from inside the
+    # prompt; only code running after generation can actually enforce
+    # it, so this restores the comma unconditionally when the very
+    # start of the render matches one of the two salutation shapes
+    # rule 7 covers: a greeting word plus name ("Hi/Hey/Hello/Dear
+    # Name") or a bare name standing alone as the first line ("John.").
+    # Anchored to the absolute start of the text (^) so this can never
+    # fire on an unrelated sentence elsewhere in the render - a
+    # genuine sentence starting "Hi Sarah." or a lone name as its own
+    # line is not a real English construction outside a greeting, and
+    # the bare-name form additionally requires a line break right
+    # after it (not just a following capital letter) since a name
+    # alone at the very start of a sentence ("John really impressed
+    # everyone.") is a real, unrelated construction the newline
+    # requirement correctly leaves untouched.
+    text = re.sub(
+        r"^((?:Hi|Hey|Hello|Dear)\s+[A-Z][A-Za-z'\-]*(?:\s+[A-Z][A-Za-z'\-]*){0,2})\.(?=\s|$)",
+        r"\1,", text, count=1,
+    )
+    text = re.sub(
+        r"^([A-Z][A-Za-z'\-]{1,20})\.(?=\s*\n)",
+        r"\1,", text, count=1,
+    )
+
     return text
 def _grammar_fix_pass(text: str, client) -> str:
     """

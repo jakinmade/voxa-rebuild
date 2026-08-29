@@ -200,7 +200,14 @@ def test_sweep_is_deterministic():
 # ---------------------------------------------------------------------
 
 def test_orphan_comma_period_collapsed():
-    assert sweep("Hi Josh,.") == "Hi Josh."
+    # UPDATED 29 Aug 2026: "Hi Josh,." used to collapse only as far as
+    # "Hi Josh." (orphan ",." cleanup alone). Now that the salutation-
+    # comma-restoration step (mirrors prompts.py's sweep step 12) runs
+    # after it, the correct final output restores the comma - this
+    # was the actual bug the whole feature existed to catch, and this
+    # exact input is the historically-confirmed live case that
+    # originally motivated the ",." cleanup in the first place.
+    assert sweep("Hi Josh,.") == "Hi Josh,"
 
 
 def test_orphan_comma_period_mid_sentence():
