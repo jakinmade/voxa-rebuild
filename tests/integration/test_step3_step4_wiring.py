@@ -784,3 +784,69 @@ def test_learn_from_edit_button_shown_and_adds_sample_when_edited():
         "strengthen your voice" in html.unescape(m.value) for m in at.markdown
         if 'class="callout callout-success"' in (m.value or "")
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-register compounding baseline (30 Aug 2026) — Learn-from-edit, driven
+# through the real UI, must feed the per-format baseline when the edited
+# render targeted a specific platform_format, and must NOT create one when
+# it didn't (regression check on the additive design).
+# ---------------------------------------------------------------------------
+
+def test_learn_from_edit_populates_per_format_baseline_when_platform_format_set():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    output_text = "This is the original rendered text, untouched."
+    output_key = _seed_rendered_output(at, output_text)
+    at.session_state["platform_format_input"] = "email"
+    at.run()
+
+    edited_text = (
+        "This is my own edited version of the rendered text, changed "
+        "enough that it reads differently from the original output."
+    )
+    at.text_area(key=output_key).set_value(edited_text)
+    at.run()
+
+    learn_button = next(
+        (b for b in at.button if b.key == f"learn_from_edit_{output_key}"), None
+    )
+    assert learn_button is not None
+    learn_button.click()
+    at.run()
+    assert not at.exception
+
+    assert "baseline_fingerprints_by_format" in at.session_state
+    by_format = at.session_state["baseline_fingerprints_by_format"]
+    assert "email" in by_format
+    assert by_format["email"]["word_count"] == len(edited_text.split())
+    # The existing blended baseline must still reflect the sample too —
+    # this feature is additive, not a replacement.
+    assert at.session_state["baseline_fingerprint"]["word_count"] >= len(edited_text.split())
+
+
+def test_learn_from_edit_creates_no_per_format_baseline_when_platform_format_unset():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    output_text = "This is the original rendered text, untouched."
+    output_key = _seed_rendered_output(at, output_text)
+    at.session_state["platform_format_input"] = None
+    at.run()
+
+    edited_text = (
+        "This is my own edited version of the rendered text, changed "
+        "enough that it reads differently from the original output."
+    )
+    at.text_area(key=output_key).set_value(edited_text)
+    at.run()
+
+    learn_button = next(
+        (b for b in at.button if b.key == f"learn_from_edit_{output_key}"), None
+    )
+    assert learn_button is not None
+    learn_button.click()
+    at.run()
+    assert not at.exception
+    assert "baseline_fingerprints_by_format" not in at.session_state

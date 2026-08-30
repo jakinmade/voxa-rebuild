@@ -197,6 +197,12 @@ def restore_profile_if_available() -> bool:
         st.session_state["sample2_completions"] = row.get("sample2_completions") or ["", "", "", ""]
         st.session_state["baseline_fingerprint"] = row.get("baseline_fingerprint")
         st.session_state["starter_baseline"] = row.get("starter_baseline")
+        # Optional (30 Aug 2026) — same safe pattern as voice_profile_summary
+        # below: a row saved before this feature existed simply won't have
+        # it, and the app falls back to the single blended baseline exactly
+        # as it always has.
+        if row.get("baseline_fingerprints_by_format"):
+            st.session_state["baseline_fingerprints_by_format"] = row["baseline_fingerprints_by_format"]
         # Optional — a row saved before this feature existed simply
         # won't have it, and a render proceeds exactly as it did
         # before (anchor sentences and numeric targets alone).
@@ -244,6 +250,7 @@ def save_profile_if_available() -> None:
         "baseline_fingerprint": baseline,
         "starter_baseline": st.session_state.get("starter_baseline"),
         "voice_profile_summary": st.session_state.get("voice_profile_summary"),
+        "baseline_fingerprints_by_format": st.session_state.get("baseline_fingerprints_by_format"),
         # Explicit, not left to the column's DEFAULT now() — that
         # default only fires on INSERT. This table is written via
         # upsert, and an upsert that hits the existing-row path is an
