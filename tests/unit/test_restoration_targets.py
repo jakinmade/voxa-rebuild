@@ -56,8 +56,27 @@ def test_includes_word_count_and_confidence_note():
     assert "Based on 500 words" in result
 
 
-def test_ends_with_the_specification_framing_line():
+def test_provisional_baseline_gets_softer_framing_not_hard_specification():
+    """
+    Fix (30 Aug 2026, voice drift audit finding 4): a thin/provisional
+    baseline (word_count < 800) was previously handed to the model
+    with the same "treat as specifications" certainty as an
+    established one, with no signal that the numbers came from a
+    small sample. _baseline()'s default word_count=500 is provisional.
+    """
     result = _build_restoration_targets(_baseline())
+    assert "provisional baseline" in result
+    assert "provisional estimates from a small sample" in result
+    assert "strong direction, not exact numbers to hit" in result
+    assert "Treat these as specifications you are being measured against" not in result
+
+
+def test_established_baseline_keeps_the_original_specification_framing():
+    """Confidence >= 800 words is 'established' - the original hard
+    framing must still fire unchanged for genuinely confident baselines,
+    the fix only softens the provisional case."""
+    result = _build_restoration_targets(_baseline(word_count=900))
+    assert "established baseline" in result
     assert "Treat these as specifications you are being measured against, not style suggestions." in result
 
 

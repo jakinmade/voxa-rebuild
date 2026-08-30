@@ -375,9 +375,15 @@ def _build_restoration_targets(
         )
 
     lines.append(f"  {confidence_note}")
-    lines.append(
-        "  Treat these as specifications you are being measured against, not style suggestions."
-    )
+    if confidence == "established":
+        lines.append(
+            "  Treat these as specifications you are being measured against, not style suggestions."
+        )
+    else:
+        lines.append(
+            "  These are provisional estimates from a small sample — treat them as a strong "
+            "direction, not exact numbers to hit. Prioritise sounding natural over matching a rate precisely."
+        )
 
     return "\n".join(lines)
 def _build_system_prompt(
@@ -390,6 +396,7 @@ def _build_system_prompt(
     render_context: str = "",
     voice_profile_summary: str = "",
     platform_format: str | None = None,
+    locale: str = "uk",
 ) -> str:
     """
     Builds the full system prompt.
@@ -428,9 +435,9 @@ def _build_system_prompt(
 
     base_rules = (
         "ABSOLUTE RULES — never break these:\n"
-        "1. No em dashes. Rewrite the sentence without one — split it into two sentences or "
-        "join with a comma. Do not substitute a hyphen or spaced hyphen for a dash; that reads "
-        "as the same tell.\n"
+        "1. Em dashes: follow the PUNCTUATION line above — if it says no em dashes in their "
+        "writing, do not introduce any (split into two sentences or join with a comma, never "
+        "a hyphen substitute); if it says they use some, match that frequency, don't ban them.\n"
         "2. No verbose openers: no 'it is important to note', no 'in today's landscape', "
         "no 'it goes without saying', no 'with that in mind', no 'to that end'.\n"
         "3. No filler transitions: no 'furthermore', no 'moreover', no 'in conclusion', "
@@ -438,7 +445,7 @@ def _build_system_prompt(
         "4. No corporate filler: no 'leveraging', no 'synergies', no 'holistic', "
         "no 'transformative', no 'robust', no 'cutting-edge'.\n"
         "5. No preamble. No explanation. Return only the rewritten text.\n"
-        "6. UK English throughout.\n"
+        f"6. {'UK' if locale == 'uk' else 'US'} English throughout.\n"
         "7. Every paragraph in the input gets a paragraph in the output. Do not compress into a summary.\n"
         f"8. Output must be at least {word_count_input} words. The input is {word_count_input} words. "
         "Match or exceed it. If you run short, add specificity and texture to points already in the "
@@ -1364,7 +1371,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     )
 
     return text
-def _grammar_fix_pass(text: str, client) -> str:
+def _grammar_fix_pass(text: str, client, locale: str = "uk") -> str:
     """
     Second Claude call — grammar errors only.
     Brief: find and fix grammar errors. Do not rewrite. Do not change voice.
@@ -1396,8 +1403,9 @@ def _grammar_fix_pass(text: str, client) -> str:
     widens what counts as a fixable error, never what's off-limits
     (voice, register, word choice, names, UK spelling).
     """
+    locale_label = "UK" if locale == "uk" else "US"
     system = (
-        "You are a precise grammar checker for UK English. Fix errors only. Never rewrite.\n\n"
+        f"You are a precise grammar checker for {locale_label} English. Fix errors only. Never rewrite.\n\n"
         "FIX THESE — this list is not exhaustive, but check every category below on every pass:\n"
         "1. Adverb/adjective confusion: 'move quicker' → 'move more quickly', "
         "'runs faster' is fine (manner adverb), 'move quicker' is not.\n"
@@ -1433,11 +1441,16 @@ def _grammar_fix_pass(text: str, client) -> str:
         "actually ungrammatical, not merely informal, unusual, or a matter of taste.\n"
         "\n"
         "DO NOT TOUCH:\n"
+        # NOTE: collective-noun agreement ("England are" vs "England is") is genuine UK/US
+        # grammar divergence, not spelling — this DO-NOT-TOUCH item is only correct for
+        # locale == "uk". Left as-is for US locale for now since flipping it needs its own
+        # verification pass, not a blind swap; flag before enabling true US grammar support.
         "1. Collective nouns with plural verbs ('England are', 'the team are', 'Labour are') — correct in UK English.\n"
         "2. Sentence fragments used deliberately for rhythm ('Football in fragments.', 'Not a disaster.').\n"
         "3. Any word choice, sentence structure, or punctuation that is grammatically valid.\n"
         "4. Register, tone, or voice — change nothing that is not a clear error.\n"
-        "5. UK spellings — do not Americanise anything.\n"
+        f"5. {locale_label} spellings — do not "
+        f"{'Americanise' if locale == 'uk' else 'convert to UK spelling'} anything.\n"
         "6. Names, proper nouns, numbers, dates, and any other factual detail. Never substitute, "
         "correct, or 'fix' a name — including the opening salutation name — even if it looks unusual "
         "or you think a different name is more likely. If a name looks like it might contain a typo, "

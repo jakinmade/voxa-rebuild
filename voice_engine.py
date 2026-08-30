@@ -232,6 +232,7 @@ class Observation:
     dimension_hint: str         # Internal - not shown to user
     evidence_quotes: list[str]  # Actual words from the paste
     data: dict                  # Metrics used downstream
+    is_backfilled: bool = False # True if padded in below MIN_SIGNAL to reach the 3-minimum
 def score_conclusion_position(sentences: list[str], text: str) -> Observation:
     """Does the point come first or last?"""
     if not sentences:
@@ -444,6 +445,8 @@ def select_observations(text: str) -> list[Observation]:
     if len(selected) < 3:
         below = [o for o in all_obs if o not in selected]
         below.sort(key=lambda o: o.signal_strength, reverse=True)
+        for o in below[:3 - len(selected)]:
+            o.is_backfilled = True
         selected.extend(below[:3 - len(selected)])
 
     return selected[:5]
@@ -571,7 +574,10 @@ def _deterministic_fallback(observations: list[Observation]) -> list[dict]:
             headline = obs.id.replace("_", " ").title()
             body = f"Signal strength: {obs.signal_strength:.0%}"
 
-        result.append({"id": obs.id, "headline": headline, "body": body})
+        result.append({
+            "id": obs.id, "headline": headline, "body": body,
+            "is_backfilled": obs.is_backfilled,
+        })
 
     return result
 def analyse_writing(text: str) -> list[dict]:
@@ -1234,23 +1240,39 @@ def _analyse_intro(text: str) -> list[dict]:
         })
 
     return observations
-def _score_ai_signal(text: str) -> float:
+def _score_ai_signal(text: str, user_uses_em_dashes: bool = False) -> float:
     """
-    Scores text for AI-generated patterns. Returns 0.0–1.0.
-    Silent — never shown to the user.
+    Scores text for AI-generated patterns. Returns 0.0-1.0.
+    Silent - never shown to the user.
     Higher = more likely AI-generated.
+
+    user_uses_em_dashes: True if the person's own baseline/calibration
+    sample (raw_text, see prompts.py's em_dashes_in_source at the same
+    signal) already shows established em-dash usage. Diagnostic run
+    (dev_tools/diagnose_ai_signal.py, 30 Aug 2026) confirmed 2+ em dashes alone
+    contributes 0.30 - above AI_CONTAMINATION_PATH_THRESHOLD (0.25) on
+    its own, with every other sub-signal at zero. That means a person
+    whose natural voice uses em dashes gets their own idiolect
+    misread as AI contamination and routed into the aggressive
+    stripping path - the exact failure mode the voice_dna detection
+    elsewhere in the pipeline exists to prevent. When the person's own
+    baseline already establishes this as their voice, the em-dash
+    signal is excluded from this score entirely, same principle as
+    the prompts.py:229 detection this mirrors.
     """
     import re
     score = 0.0
     words = text.split()
     total = max(len(words), 1)
 
-    # Em dashes — strong AI signal
-    em_dashes = len(re.findall(r"[—–\u2014\u2013]", text))
-    if em_dashes >= 2:
-        score += 0.30
-    elif em_dashes == 1:
-        score += 0.12
+    # Em dashes — strong AI signal, EXCEPT when this matches the
+    # person's own established voice (see docstring above).
+    if not user_uses_em_dashes:
+        em_dashes = len(re.findall(r"[—–\u2014\u2013]", text))
+        if em_dashes >= 2:
+            score += 0.30
+        elif em_dashes == 1:
+            score += 0.12
 
     # Verbose opener phrases
     verbose_openers = re.compile(
