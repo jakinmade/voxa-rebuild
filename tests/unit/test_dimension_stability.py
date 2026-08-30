@@ -278,3 +278,104 @@ def test_deterministic():
     r1 = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
     r2 = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
     assert r1 == r2
+
+
+# ---------------------------------------------------------------------------
+# correction_evidence-driven demotion (30 Aug 2026, voice-review item #1) —
+# a dimension repeatedly corrected the same direction reads one tier lower,
+# independent of stability/volume, since that's evidence the stored number
+# doesn't match the person's real voice on that dimension.
+# ---------------------------------------------------------------------------
+
+def _strong_profile():
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    stability = {"dimensions": {d: "stable" for d in ve._STABILITY_DIMENSIONS}}
+    return fitness, baseline, stability
+
+
+def test_no_correction_evidence_leaves_confidence_unchanged():
+    fitness, baseline, stability = _strong_profile()
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability, correction_evidence=None)
+    assert result["hedge_density"] == "High"
+
+
+def test_single_correction_does_not_demote():
+    fitness, baseline, stability = _strong_profile()
+    evidence = [{"evidence": {"hedge_density": {"direction": "decreased", "delta": -1.5}}}]
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability, correction_evidence=evidence)
+    assert result["hedge_density"] == "High"
+
+
+def test_two_consistent_corrections_demote_one_tier():
+    fitness, baseline, stability = _strong_profile()
+    evidence = [
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -1.5}}},
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -2.0}}},
+    ]
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability, correction_evidence=evidence)
+    assert result["hedge_density"] == "Medium"
+    # Other dimensions must be completely unaffected.
+    assert result["sentence_length_sd"] == "High"
+
+
+def test_conflicting_direction_corrections_do_not_demote():
+    fitness, baseline, stability = _strong_profile()
+    evidence = [
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -1.5}}},
+        {"evidence": {"hedge_density": {"direction": "increased", "delta": 1.5}}},
+    ]
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability, correction_evidence=evidence)
+    assert result["hedge_density"] == "High"
+
+
+def test_medium_can_demote_to_low():
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    stability = {"dimensions": {"hedge_density": "volatile"}}  # -> Medium before demotion
+    evidence = [
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -1.5}}},
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -2.0}}},
+    ]
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability, correction_evidence=evidence)
+    assert result["hedge_density"] == "Low"
+
+
+def test_low_stays_low_after_demotion():
+    fitness = {"tier": "thin"}
+    baseline = {"word_count": 50}
+    evidence = [
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -1.5}}},
+        {"evidence": {"hedge_density": {"direction": "decreased", "delta": -2.0}}},
+    ]
+    result = ve.compute_dimension_confidence(fitness, baseline, 0, None, correction_evidence=evidence)
+    assert result["hedge_density"] == "Low"
+
+
+def test_consistent_correction_count_majority_direction():
+    evidence = [
+        {"evidence": {"hedge_density": {"direction": "decreased"}}},
+        {"evidence": {"hedge_density": {"direction": "decreased"}}},
+        {"evidence": {"hedge_density": {"direction": "increased"}}},
+    ]
+    assert ve._consistent_correction_count(evidence, "hedge_density") == 2
+
+
+def test_consistent_correction_count_even_split_returns_zero():
+    evidence = [
+        {"evidence": {"hedge_density": {"direction": "decreased"}}},
+        {"evidence": {"hedge_density": {"direction": "increased"}}},
+    ]
+    assert ve._consistent_correction_count(evidence, "hedge_density") == 0
+
+
+def test_consistent_correction_count_ignores_entries_missing_the_dimension():
+    evidence = [
+        {"evidence": {"sentence_length_sd": {"direction": "decreased"}}},
+    ]
+    assert ve._consistent_correction_count(evidence, "hedge_density") == 0
+
+
+def test_consistent_correction_count_handles_none_and_empty():
+    assert ve._consistent_correction_count(None, "hedge_density") == 0
+    assert ve._consistent_correction_count([], "hedge_density") == 0

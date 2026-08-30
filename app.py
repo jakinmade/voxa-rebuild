@@ -48,6 +48,7 @@ from voice_engine import (
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells, score_restructure_fidelity,
     compute_dimension_stability, compute_dimension_confidence, confidence_caveat,
+    score_correction_evidence,
     compute_burrows_delta,
     compute_sentence_economy, compute_passive_voice,
     score_draft_check,
@@ -4024,6 +4025,23 @@ Show the per-dimension breakdown
                         "Use my edit to strengthen my voice",
                         key=f"learn_from_edit_{output_key}", use_container_width=True,
                     ):
+                        # Structured correction evidence (30 Aug 2026,
+                        # voice-review item #1) — captures WHICH
+                        # dimension the person corrected and in WHICH
+                        # direction, alongside (not instead of) the
+                        # existing blended-sample merge below. See
+                        # score_correction_evidence's own docstring
+                        # (voice_engine.py) for why this is a distinct
+                        # signal from "a new sample was added."
+                        evidence = score_correction_evidence(output, _edited_output)
+                        if evidence:
+                            log_entry = {
+                                "evidence": evidence,
+                                "platform_format": st.session_state.get("platform_format_input"),
+                            }
+                            history = st.session_state.get("correction_evidence", [])
+                            history.append(log_entry)
+                            st.session_state.correction_evidence = history
                         _add_writing_sample_to_fingerprint(
                             _edited_output,
                             platform_format=st.session_state.get("platform_format_input"),
@@ -4473,6 +4491,7 @@ def screen_my_voice():
             st.session_state.get("baseline_fingerprint"),
             len(observations),
             stability,
+            correction_evidence=st.session_state.get("correction_evidence"),
         )
         _stability_verdict_label = {
             "stable": "Stable", "volatile": "Varies by register", "insufficient_data": "Not enough data",
@@ -4542,6 +4561,7 @@ def screen_my_voice():
                 st.session_state.get("baseline_fingerprint"),
                 len(observations),
                 st.session_state.get("dimension_stability"),
+                correction_evidence=st.session_state.get("correction_evidence"),
             ),
             cumulative_words=st.session_state.get("cumulative_words", 0),
             cumulative_docs=st.session_state.get("cumulative_docs", 0),

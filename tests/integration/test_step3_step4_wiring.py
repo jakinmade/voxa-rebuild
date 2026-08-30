@@ -850,3 +850,69 @@ def test_learn_from_edit_creates_no_per_format_baseline_when_platform_format_uns
     at.run()
     assert not at.exception
     assert "baseline_fingerprints_by_format" not in at.session_state
+
+
+# ---------------------------------------------------------------------------
+# Structured correction evidence (30 Aug 2026, voice-review item #1) —
+# Learn-from-edit, driven through the real UI, must capture the specific
+# predicted-vs-corrected delta, not just add a blended sample.
+# ---------------------------------------------------------------------------
+
+def test_learn_from_edit_captures_structured_correction_evidence():
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    # Heavily hedged prediction, same shape as the worked example in the
+    # original review document.
+    output_text = (
+        "This could potentially suggest that the approach might work, "
+        "though it may need more testing perhaps."
+    )
+    output_key = _seed_rendered_output(at, output_text)
+    at.session_state["platform_format_input"] = "email"
+    at.run()
+
+    edited_text = "This suggests the approach works. It needs more testing."
+    at.text_area(key=output_key).set_value(edited_text)
+    at.run()
+
+    learn_button = next(
+        (b for b in at.button if b.key == f"learn_from_edit_{output_key}"), None
+    )
+    assert learn_button is not None
+    learn_button.click()
+    at.run()
+    assert not at.exception
+
+    assert "correction_evidence" in at.session_state
+    history = at.session_state["correction_evidence"]
+    assert len(history) == 1
+    entry = history[0]
+    assert entry["platform_format"] == "email"
+    assert "hedge_density" in entry["evidence"]
+    assert entry["evidence"]["hedge_density"]["direction"] == "decreased"
+
+
+def test_learn_from_edit_trivial_change_captures_no_correction_evidence():
+    """An edit too small to clear DELTA_BAND_MIN_ABS_DIFF on any
+    dimension must not create a correction_evidence entry at all —
+    regression check on the floor logic reaching the live UI."""
+    at = AppTest.from_file(_APP_PATH)
+    at.session_state["screen"] = 1
+    at.run()
+    output_text = "I think this is good."
+    output_key = _seed_rendered_output(at, output_text)
+    at.run()
+
+    edited_text = "I think this is great."
+    at.text_area(key=output_key).set_value(edited_text)
+    at.run()
+
+    learn_button = next(
+        (b for b in at.button if b.key == f"learn_from_edit_{output_key}"), None
+    )
+    assert learn_button is not None
+    learn_button.click()
+    at.run()
+    assert not at.exception
+    assert "correction_evidence" not in at.session_state
