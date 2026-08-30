@@ -1448,7 +1448,7 @@ def render_alert(message: str, kind: str = "info"):
     )
 
 
-def _add_writing_sample_to_fingerprint(text: str) -> None:
+def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = None) -> None:
     """
     The complete "strengthen the baseline with one more genuine
     writing sample" sequence — extracted 29 Aug 2026 from inside
@@ -1464,11 +1464,31 @@ def _add_writing_sample_to_fingerprint(text: str) -> None:
     Confidence badge and function-word Delta in place; persists the
     strengthened profile via save_profile_if_available() (a safe
     no-op if no baseline exists yet).
+
+    platform_format (30 Aug 2026): optional, "social" | "email" | None.
+    When given, ALSO merges this sample into a second, independent
+    compounding baseline keyed by format —
+    st.session_state.baseline_fingerprints_by_format[platform_format]
+    — built with the same _merge_baseline logic as the blended
+    baseline below, so a person's email voice and social voice
+    compound separately instead of being flattened into one register.
+    Purely additive: the existing blended baseline_fingerprint is
+    still merged exactly as before regardless of this parameter, and
+    every existing caller/reader of it is unaffected. Onboarding
+    samples (Screen 1/3) don't have a platform_format and correctly
+    pass None here — only Learn-from-edit samples, which know which
+    register the render targeted, populate the per-format baseline.
     """
     new_metrics = compute_baseline_metrics(text)
     st.session_state.baseline_fingerprint = _merge_baseline(
         st.session_state.get("baseline_fingerprint"), new_metrics
     )
+    if platform_format:
+        by_format = st.session_state.get("baseline_fingerprints_by_format") or {}
+        by_format[platform_format] = _merge_baseline(
+            by_format.get(platform_format), new_metrics
+        )
+        st.session_state.baseline_fingerprints_by_format = by_format
     st.session_state.cumulative_words += len(text.split())
     st.session_state.cumulative_docs += 1
     extra_obs = analyse_writing(text)
@@ -2234,6 +2254,23 @@ def _run_render(
     ai_score = _score_ai_signal(input_text, user_uses_em_dashes=user_uses_em_dashes)
     observations = st.session_state.observations
     baseline = st.session_state.get("baseline_fingerprint")
+    # Per-register baseline (30 Aug 2026): if this render targets a
+    # specific platform_format and a compounding baseline for that
+    # exact format has accumulated enough words to be "established"
+    # (>=800 words, the same threshold _build_restoration_targets
+    # already uses to distinguish provisional from established), use
+    # that instead of the blended one -- a person's email voice and
+    # social voice compound independently rather than being flattened
+    # into one register. Falls back to the existing blended baseline
+    # unchanged whenever there's no platform_format, no per-format
+    # data yet, or it's still too thin to trust over the established
+    # blended one -- so this only ever changes behaviour once real
+    # per-register data exists, never regresses the existing path.
+    if platform_format:
+        by_format = st.session_state.get("baseline_fingerprints_by_format") or {}
+        format_baseline = by_format.get(platform_format)
+        if format_baseline and format_baseline.get("word_count", 0) >= 800:
+            baseline = format_baseline
 
     # Full corpus for voice DNA extraction: screen 1 paste + the four
     # starter completions. The starters used to feed only the numeric
@@ -3987,7 +4024,10 @@ Show the per-dimension breakdown
                         "Use my edit to strengthen my voice",
                         key=f"learn_from_edit_{output_key}", use_container_width=True,
                     ):
-                        _add_writing_sample_to_fingerprint(_edited_output)
+                        _add_writing_sample_to_fingerprint(
+                            _edited_output,
+                            platform_format=st.session_state.get("platform_format_input"),
+                        )
                         render_alert(
                             "Added. Your edit now helps strengthen your voice baseline.",
                             "success",
