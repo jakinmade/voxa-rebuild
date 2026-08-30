@@ -2229,9 +2229,10 @@ def _run_render(
         is_refinement=is_refinement, detected_mode=detected_mode,
     )
 
-    ai_score = _score_ai_signal(input_text)
-    observations = st.session_state.observations
     raw_text = st.session_state.get("raw_text", "")
+    user_uses_em_dashes = len(re.findall(r"[—–\u2014\u2013]", raw_text)) > 0 if raw_text else False
+    ai_score = _score_ai_signal(input_text, user_uses_em_dashes=user_uses_em_dashes)
+    observations = st.session_state.observations
     baseline = st.session_state.get("baseline_fingerprint")
 
     # Full corpus for voice DNA extraction: screen 1 paste + the four
@@ -2280,6 +2281,7 @@ def _run_render(
         input_text=input_text, render_context=render_context,
         voice_profile_summary=st.session_state.get("voice_profile_summary", ""),
         platform_format=platform_format,
+        locale=st.session_state.get("locale", "uk"),
     )
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -2293,7 +2295,7 @@ def _run_render(
             clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)
-            clean = _grammar_fix_pass(clean, client)
+            clean = _grammar_fix_pass(clean, client, locale=st.session_state.get("locale", "uk"))
             clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
     except Exception:
         st.session_state.render_error = (
