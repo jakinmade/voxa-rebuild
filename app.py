@@ -2459,6 +2459,8 @@ def _run_render(
             correction_delta, semantic, input_has_opinion_content, input_has_directive_content,
             mode=render_mode, sentence_economy=sentence_economy, passive_voice=passive_voice,
             platform_format=platform_format,
+            locale=st.session_state.get("locale", "uk"),
+            user_uses_em_dashes=user_uses_em_dashes,
         )
         log.info(
             "correction_pass_decision",
