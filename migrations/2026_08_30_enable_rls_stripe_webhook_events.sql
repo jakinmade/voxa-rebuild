@@ -1,0 +1,26 @@
+-- Migration: enable RLS on stripe_webhook_events (30 Aug 2026).
+--
+-- WHY: this table had Row Level Security disabled -- every row was
+-- fully exposed to the anon and authenticated roles used by Supabase
+-- client libraries, meaning anyone with the (publicly embedded) anon
+-- key could read or modify the webhook idempotency ledger. Surfaced
+-- by a routine schema check while working on an unrelated feature
+-- (see the per-register-compounding-baseline PR), fixed separately.
+--
+-- Confirmed safe to enable with NO policies: the only reader/writer
+-- of this table is the Cloudflare Worker (cloudflare/voicova-webhooks/
+-- worker.js), which authenticates with SUPABASE_SERVICE_ROLE_KEY --
+-- service_role bypasses RLS entirely in Postgrest, regardless of
+-- policies, so the Worker's access is completely unaffected. Nothing
+-- in the Streamlit app (which uses the anon key) references this
+-- table at all -- confirmed via grep before applying. A deny-all
+-- posture is therefore correct and complete here, not a stopgap:
+-- there is no legitimate anon/authenticated access to preserve.
+--
+-- Applied directly via Supabase MCP apply_migration on 30 Aug 2026,
+-- confirmed via list_tables afterward (rls_enabled: true, 2 existing
+-- rows unaffected, advisory warning cleared). This file documents
+-- that change for the repo's own migration history -- idempotent,
+-- safe to re-run.
+
+alter table public.stripe_webhook_events enable row level security;
