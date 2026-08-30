@@ -2339,11 +2339,42 @@ def compute_dimension_stability(samples: list[dict]) -> dict:
     }
 
 
+def _consistent_correction_count(correction_evidence: list[dict] | None, dimension: str) -> int:
+    """
+    Counts how many Learn-from-edit corrections (score_correction_
+    evidence entries, app.py) agree on the same direction for one
+    dimension. A dimension corrected "decreased" three times and
+    "increased" once is 3 consistent corrections (the majority
+    direction), not 4 — one outlier doesn't erase the pattern, but
+    doesn't strengthen it either. Returns 0 on an even split or no
+    evidence at all — disagreement isn't something to act on, only a
+    clear, repeated direction is.
+    """
+    if not correction_evidence:
+        return 0
+    directions = [
+        entry["evidence"][dimension]["direction"]
+        for entry in correction_evidence
+        if dimension in entry.get("evidence", {})
+    ]
+    if not directions:
+        return 0
+    increased = directions.count("increased")
+    decreased = directions.count("decreased")
+    if increased == decreased:
+        return 0
+    return max(increased, decreased)
+
+
+_CONFIDENCE_DEMOTION = {"High": "Medium", "Medium": "Low", "Low": "Low"}
+
+
 def compute_dimension_confidence(
     fitness: dict | None,
     baseline: dict | None,
     num_observations: int,
     stability: dict | None,
+    correction_evidence: list[dict] | None = None,
 ) -> dict[str, str]:
     """
     Per-dimension confidence — Low/Medium/High for each of
@@ -2368,6 +2399,17 @@ def compute_dimension_confidence(
     markdown's stability table). No new measurement is introduced;
     this recombines two signals that already exist, per dimension
     instead of blended.
+
+    correction_evidence (30 Aug 2026, voice-review item #1): optional
+    list of score_correction_evidence entries from Learn-from-edit. A
+    dimension the person has consistently corrected in the same
+    direction two or more times is evidence the STORED baseline number
+    for it doesn't match their real voice well, independent of how
+    much raw volume/stability data otherwise supports it — that
+    demotes the dimension one tier (High->Medium, Medium->Low) rather
+    than leaving a stale number reading falsely confident. A single
+    correction, or a dimension with conflicting corrections in both
+    directions, is not enough signal to act on.
 
     Returns {} when there's no baseline yet (nothing to report).
     """
@@ -2399,6 +2441,14 @@ def compute_dimension_confidence(
             result[dim] = "Medium" if dim_stability == "stable" else "Low"
         else:
             result[dim] = "Low"
+
+        # Consistent correction demotion — a dimension the person has
+        # repeatedly corrected the same direction reads one tier lower
+        # regardless of how confident the stability/volume read alone
+        # would be. See _consistent_correction_count's own docstring.
+        if _consistent_correction_count(correction_evidence, dim) >= 2:
+            result[dim] = _CONFIDENCE_DEMOTION[result[dim]]
+
     return result
 
 
@@ -2696,6 +2746,61 @@ def score_render_delta(baseline: dict, output_text: str) -> dict:
             "verdict": verdict,
         }
     return delta
+
+
+def score_correction_evidence(predicted_text: str, corrected_text: str) -> dict:
+    """
+    Structured "Learn from my edit" evidence (30 Aug 2026, voice-review
+    item #1) — compares what VOICOVA actually rendered against what the
+    person changed it to, dimension by dimension, instead of only
+    treating the edit as one more blended writing sample (which
+    _add_writing_sample_to_fingerprint already does, unchanged,
+    alongside this).
+
+    The distinction that matters: "the person edited this" says
+    something happened. This says WHICH direction, on WHICH specific
+    dimension, and BY HOW MUCH — e.g. predicted hedge_density 2.1,
+    corrected to 0.8, delta -1.3. That's a specific, actionable signal
+    ("the render over-hedges relative to this person's real voice"),
+    not just a new data point folded into an average.
+
+    Reuses DELTA_BAND_MIN_ABS_DIFF (scoring_rules.py, imported above)
+    as the meaningful-change floor per dimension — the exact same
+    threshold score_render_delta already uses to decide whether a
+    render-vs-baseline difference is real drift or noise from a
+    near-zero denominator. A correction smaller than that floor isn't
+    included as evidence; not every edit touches every dimension
+    meaningfully, and treating noise as signal would be worse than no
+    signal at all.
+
+    Returns {} if either text is empty — no measurement possible.
+    Returns a dict keyed by dimension, only for dimensions where the
+    correction cleared the floor; a dimension the edit didn't
+    meaningfully move on is simply absent, not present with delta≈0.
+    """
+    if not predicted_text or not predicted_text.strip():
+        return {}
+    if not corrected_text or not corrected_text.strip():
+        return {}
+
+    predicted = compute_baseline_metrics(predicted_text)
+    corrected = compute_baseline_metrics(corrected_text)
+
+    evidence = {}
+    for dim in _STABILITY_DIMENSIONS:
+        pred_val = predicted.get(dim, 0.0)
+        corr_val = corrected.get(dim, 0.0)
+        diff = corr_val - pred_val
+        min_abs = DELTA_BAND_MIN_ABS_DIFF.get(dim, 0.0)
+        if abs(diff) < min_abs:
+            continue
+        evidence[dim] = {
+            "predicted": round(pred_val, 3),
+            "corrected": round(corr_val, 3),
+            "delta": round(diff, 3),
+            "direction": "increased" if diff > 0 else "decreased",
+        }
+    return evidence
 
 
 def voice_match_pct(delta: dict) -> int:
