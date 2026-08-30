@@ -1639,6 +1639,8 @@ def build_correction_prompt(
     passive_voice: dict | None = None,
     linkedin_format: bool = False,
     platform_format: str | None = None,
+    locale: str = "uk",
+    user_uses_em_dashes: bool = False,
 ) -> str | None:
     """
     Builds the targeted, surgical correction prompt for whatever the
@@ -1992,11 +1994,15 @@ def build_correction_prompt(
         + "CORRECTIONS NEEDED:\n"
         + "\n".join(f"{i+1}. {inst}" for i, inst in enumerate(correction_instructions))
         + "\n\nABSOLUTE RULES — never break these, including in the small edits you make:\n"
-        "No em dashes. UK English throughout. No verbose openers ('it is worth noting', "
-        "'in today's landscape'). No filler transitions ('furthermore', 'moreover', "
-        "'additionally'). No corporate filler ('leverage', 'robust', 'holistic', "
-        "'seamlessly'). These apply to any new wording you introduce while correcting — "
-        "the text you're given has already had these stripped once; do not reintroduce "
-        "them while fixing something else. Return only the corrected text."
+        + ("Match the writer's own em-dash usage — do not introduce dashes if their writing "
+           "has none, do not strip any if it does. "
+           if user_uses_em_dashes else
+           "No em dashes. ")
+        + f"{'UK' if locale == 'uk' else 'US'} English throughout. No verbose openers "
+        "('it is worth noting', 'in today's landscape'). No filler transitions "
+        "('furthermore', 'moreover', 'additionally'). No corporate filler ('leverage', "
+        "'robust', 'holistic', 'seamlessly'). These apply to any new wording you introduce "
+        "while correcting — the text you're given has already had these stripped once; do "
+        "not reintroduce them while fixing something else. Return only the corrected text."
     )
 
