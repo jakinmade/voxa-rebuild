@@ -47,7 +47,7 @@ from voice_engine import (
     has_content_integrity_hard_fail,
     score_render_delta, build_voice_report,
     uses_contractions, score_ai_tells, score_restructure_fidelity,
-    compute_dimension_stability, confidence_caveat,
+    compute_dimension_stability, compute_dimension_confidence, confidence_caveat,
     compute_burrows_delta,
     compute_sentence_economy, compute_passive_voice,
     score_draft_check,
@@ -4303,6 +4303,7 @@ def build_voice_profile_markdown(
     cumulative_words: int,
     cumulative_docs: int,
     updated_at: str | None,
+    dimension_confidence: dict[str, str] | None = None,
 ) -> str:
     """
     Readable, exportable Voice Profile — reformats data already
@@ -4356,8 +4357,8 @@ def build_voice_profile_markdown(
             "versus swinging with the situation:"
         )
         lines.append("")
-        lines.append("| Dimension | Reading |")
-        lines.append("|---|---|")
+        lines.append("| Dimension | Reading |" + (" Confidence |" if dimension_confidence else ""))
+        lines.append("|---|---|" + ("---|" if dimension_confidence else ""))
         _stability_label = {
             "stable": "Stable — likely genuine",
             "volatile": "Varies by register",
@@ -4365,7 +4366,10 @@ def build_voice_profile_markdown(
         }
         for dim, verdict in dimension_stability["dimensions"].items():
             label = _VOICE_MATCH_LABELS.get(dim, dim)
-            lines.append(f"| {label} | {_stability_label.get(verdict, verdict)} |")
+            row = f"| {label} | {_stability_label.get(verdict, verdict)} |"
+            if dimension_confidence:
+                row += f" {dimension_confidence.get(dim, 'Low')} |"
+            lines.append(row)
         lines.append("")
 
     if baseline_fingerprint:
@@ -4456,6 +4460,20 @@ def screen_my_voice():
             f'{sample_count} samples:</div>',
             unsafe_allow_html=True,
         )
+        # Per-dimension confidence (30 Aug 2026) — compute_confidence gives
+        # one blended badge for the whole profile; a profile can be
+        # genuinely solid on one dimension while still thin on another,
+        # and the single badge can't say so. Reuses the exact same
+        # session-state values already fetched for that blended badge
+        # (sample_fitness, baseline_fingerprint, observations) — no new
+        # measurement, just a per-dimension read of data that already
+        # exists.
+        dim_confidence = compute_dimension_confidence(
+            st.session_state.get("sample_fitness"),
+            st.session_state.get("baseline_fingerprint"),
+            len(observations),
+            stability,
+        )
         _stability_verdict_label = {
             "stable": "Stable", "volatile": "Varies by register", "insufficient_data": "Not enough data",
         }
@@ -4467,13 +4485,17 @@ def screen_my_voice():
             label = _VOICE_MATCH_LABELS.get(dim, dim)
             badge = _stability_verdict_badge.get(verdict, "badge-amber")
             reading = _stability_verdict_label.get(verdict, verdict)
+            conf = dim_confidence.get(dim, "Low")
+            conf_badge = _MY_VOICE_CONFIDENCE_BADGE.get(conf, "badge-amber")
             rows.append(
                 f"<tr><td>{label}</td>"
-                f'<td class="vm-verdict"><span class="badge {badge}">{reading}</span></td></tr>'
+                f'<td class="vm-verdict"><span class="badge {badge}">{reading}</span></td>'
+                f'<td class="vm-verdict"><span class="badge {conf_badge}">{conf}</span></td></tr>'
             )
         st.markdown(
             '<table class="voice-match-table">'
-            '<thead><tr><th>Dimension</th><th class="vm-verdict">Reading</th></tr></thead>'
+            '<thead><tr><th>Dimension</th><th class="vm-verdict">Reading</th>'
+            '<th class="vm-verdict">Confidence</th></tr></thead>'
             f"<tbody>{''.join(rows)}</tbody>"
             "</table>",
             unsafe_allow_html=True,
@@ -4515,6 +4537,12 @@ def screen_my_voice():
             confidence=confidence,
             baseline_fingerprint=st.session_state.get("baseline_fingerprint"),
             dimension_stability=st.session_state.get("dimension_stability"),
+            dimension_confidence=compute_dimension_confidence(
+                st.session_state.get("sample_fitness"),
+                st.session_state.get("baseline_fingerprint"),
+                len(observations),
+                st.session_state.get("dimension_stability"),
+            ),
             cumulative_words=st.session_state.get("cumulative_words", 0),
             cumulative_docs=st.session_state.get("cumulative_docs", 0),
             updated_at=st.session_state.get("_voice_profile_updated_at"),

@@ -74,6 +74,36 @@ def test_stability_table_uses_shared_dimension_labels():
     assert "| Directness | Not enough samples yet |" in doc
 
 
+def test_stability_table_omits_confidence_column_when_not_provided():
+    """Default behaviour (dimension_confidence=None) must produce the
+    exact same table shape as before this feature existed — no new
+    column, no trailing pipe."""
+    doc = build_voice_profile_markdown(
+        observations=[], confidence="High",
+        baseline_fingerprint=BASELINE, dimension_stability=STABILITY,
+        cumulative_words=140, cumulative_docs=2, updated_at=None,
+    )
+    assert "| Dimension | Reading |" in doc
+    assert "Confidence |" not in doc
+
+
+def test_stability_table_includes_confidence_column_when_provided():
+    """Per-dimension confidence (30 Aug 2026) — when supplied, the
+    exported doc must show it alongside stability, same as the
+    on-screen table."""
+    doc = build_voice_profile_markdown(
+        observations=[], confidence="High",
+        baseline_fingerprint=BASELINE, dimension_stability=STABILITY,
+        cumulative_words=140, cumulative_docs=2, updated_at=None,
+        dimension_confidence={
+            "hedge_density": "High", "sentence_length_sd": "Low",
+            "first_person_ratio": "Medium", "directive_ratio": "Low",
+        },
+    )
+    assert "| Dimension | Reading | Confidence |" in doc
+    assert "| Hedging | Stable" in doc and doc.count("| High |") >= 1
+
+
 def test_baseline_metrics_table_present():
     doc = build_voice_profile_markdown(
         observations=[], confidence="High",

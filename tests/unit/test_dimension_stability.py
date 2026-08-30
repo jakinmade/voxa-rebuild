@@ -184,3 +184,97 @@ def test_mostly_volatile_gives_a_plain_english_caveat():
 def test_caveat_deterministic():
     stability = {"stable_count": 1, "volatile_count": 3, "sample_count": 3}
     assert ve.confidence_caveat(stability) == ve.confidence_caveat(stability)
+
+
+# ---------------------------------------------------------------------------
+# compute_dimension_confidence (30 Aug 2026) — per-dimension confidence
+# instead of one blended badge. See voice review discussion: a profile can
+# be genuinely solid on one dimension while thin on another, and the single
+# badge can't say so.
+# ---------------------------------------------------------------------------
+
+def test_no_baseline_returns_empty_dict():
+    assert ve.compute_dimension_confidence(None, None, 0, None) == {}
+
+
+def test_every_dimension_present_in_result():
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    stability = {"dimensions": {d: "stable" for d in ve._STABILITY_DIMENSIONS}}
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
+    assert set(result.keys()) == set(ve._STABILITY_DIMENSIONS)
+
+
+def test_weak_overall_evidence_caps_every_dimension_at_low_regardless_of_stability():
+    """The evidence-quantity floor (word count/tier/observation count,
+    same gates compute_confidence uses) must dominate — a dimension
+    can't read more confident than the overall evidence supports, even
+    if that one dimension happens to look stable."""
+    fitness = {"tier": "thin"}
+    baseline = {"word_count": 50}
+    stability = {"dimensions": {d: "stable" for d in ve._STABILITY_DIMENSIONS}}
+    result = ve.compute_dimension_confidence(fitness, baseline, 0, stability)
+    assert all(v == "Low" for v in result.values())
+
+
+def test_strong_overall_evidence_still_differentiates_per_dimension():
+    """The headline behaviour this function exists for: with strong
+    overall evidence, per-dimension stability must still produce real
+    spread, not one blended verdict repeated four times."""
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    stability = {"dimensions": {
+        "hedge_density": "stable",
+        "sentence_length_sd": "stable",
+        "first_person_ratio": "volatile",
+        "directive_ratio": "insufficient_data",
+    }}
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
+    assert result["hedge_density"] == "High"
+    assert result["sentence_length_sd"] == "High"
+    assert result["first_person_ratio"] == "Medium"
+    assert result["directive_ratio"] == "Low"
+    # The actual point of this feature: not every dimension the same.
+    assert len(set(result.values())) > 1
+
+
+def test_medium_overall_evidence_volatile_dimension_reads_low_not_medium():
+    fitness = {"tier": "thin"}
+    baseline = {"word_count": 300}
+    stability = {"dimensions": {
+        "hedge_density": "stable", "sentence_length_sd": "volatile",
+        "first_person_ratio": "volatile", "directive_ratio": "volatile",
+    }}
+    result = ve.compute_dimension_confidence(fitness, baseline, 2, stability)
+    assert result["hedge_density"] == "Medium"
+    assert result["sentence_length_sd"] == "Low"
+
+
+def test_missing_dimension_in_stability_data_defaults_to_insufficient_data():
+    """A dimension absent from stability['dimensions'] (e.g. stability
+    was computed before this dimension existed, or data is partial)
+    must not crash — treated as insufficient_data, same as an explicit
+    insufficient_data label would be."""
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    stability = {"dimensions": {"hedge_density": "stable"}}  # others absent
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
+    assert result["hedge_density"] == "High"
+    assert result["sentence_length_sd"] == "Low"
+
+
+def test_no_stability_data_at_all_still_returns_all_dimensions():
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    result = ve.compute_dimension_confidence(fitness, baseline, 5, None)
+    assert set(result.keys()) == set(ve._STABILITY_DIMENSIONS)
+    assert all(v == "Low" for v in result.values())
+
+
+def test_deterministic():
+    fitness = {"tier": "gold"}
+    baseline = {"word_count": 1000}
+    stability = {"dimensions": {d: "stable" for d in ve._STABILITY_DIMENSIONS}}
+    r1 = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
+    r2 = ve.compute_dimension_confidence(fitness, baseline, 5, stability)
+    assert r1 == r2
