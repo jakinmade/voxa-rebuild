@@ -134,3 +134,59 @@ def test_my_voice_hides_stability_table_when_no_stability_data():
     assert not at.exception
     body = " ".join(m.value for m in at.markdown)
     assert "Stability across your last" not in body
+
+
+def test_my_voice_stability_table_includes_confidence_column():
+    """Per-dimension confidence (30 Aug 2026) — the stability table
+    must also show a Confidence column, not just Stability, so a
+    profile that's genuinely solid on one dimension but thin on
+    another can say so instead of one blended badge."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.session_state["dimension_stability"] = {
+        "dimensions": {
+            "hedge_density": "stable",
+            "sentence_length_sd": "volatile",
+            "first_person_ratio": "stable",
+            "directive_ratio": "insufficient_data",
+        },
+        "stable_count": 2, "volatile_count": 1, "sample_count": 2,
+    }
+    at.run()
+    assert not at.exception
+    body = " ".join(m.value for m in at.markdown)
+    assert "Confidence</th>" in body
+
+
+def test_my_voice_shows_real_per_dimension_confidence_spread_with_strong_profile():
+    """With enough overall evidence (word count, gold tier, enough
+    observations), per-dimension stability must produce real
+    differentiation on screen — High for stable dimensions, lower for
+    volatile/insufficient ones — not the same badge repeated four
+    times."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.session_state["baseline_fingerprint"] = {
+        "hedge_density": 2.0, "sentence_length_sd": 5.0,
+        "first_person_ratio": 0.3, "directive_ratio": 0.1,
+        "word_count": 1000,
+    }
+    at.session_state["sample_fitness"] = {"tier": "gold"}
+    at.session_state["observations"] = [
+        {"headline": f"Trait {i}", "body": "x"} for i in range(4)
+    ]
+    at.session_state["dimension_stability"] = {
+        "dimensions": {
+            "hedge_density": "stable",
+            "sentence_length_sd": "stable",
+            "first_person_ratio": "volatile",
+            "directive_ratio": "insufficient_data",
+        },
+        "stable_count": 2, "volatile_count": 1, "sample_count": 3,
+    }
+    at.run()
+    assert not at.exception
+    body = " ".join(m.value for m in at.markdown)
+    assert "High" in body
+    assert "Medium" in body
+    assert "Low" in body

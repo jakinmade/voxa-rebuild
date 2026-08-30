@@ -2339,6 +2339,69 @@ def compute_dimension_stability(samples: list[dict]) -> dict:
     }
 
 
+def compute_dimension_confidence(
+    fitness: dict | None,
+    baseline: dict | None,
+    num_observations: int,
+    stability: dict | None,
+) -> dict[str, str]:
+    """
+    Per-dimension confidence — Low/Medium/High for each of
+    _STABILITY_DIMENSIONS individually, instead of one blended verdict.
+
+    Why this exists: compute_confidence (below) collapses per-dimension
+    stability into a single stable_ratio and returns one badge for the
+    whole profile. That hides real, useful variation — a profile can be
+    genuinely solid on sentence rhythm while still thin on directive
+    ratio, and the single badge can't say so. The renderer (and the
+    person reading their own Voice Report) benefits from knowing which
+    specific dimensions the engine actually has evidence for, not just
+    an aggregate.
+
+    Deliberately reuses compute_confidence's own evidence-quantity
+    gates (word count, fitness tier, observation count) as a shared
+    floor — no dimension can read more confident than the overall
+    evidence available, only less. What varies per dimension is
+    whether that dimension itself is stable, volatile, or has
+    insufficient_data (from compute_dimension_stability), same
+    per-dimension read already used elsewhere (build_voice_profile_
+    markdown's stability table). No new measurement is introduced;
+    this recombines two signals that already exist, per dimension
+    instead of blended.
+
+    Returns {} when there's no baseline yet (nothing to report).
+    """
+    if not baseline:
+        return {}
+
+    wc = baseline.get("word_count", 0)
+    tier = (fitness or {}).get("tier", "thin")
+    dims = (stability or {}).get("dimensions", {})
+
+    global_high_eligible = wc >= 800 and tier in ("gold", "strong") and num_observations >= 4
+    global_medium_eligible = wc >= 250 and tier in ("gold", "strong", "thin")
+
+    result = {}
+    for dim in _STABILITY_DIMENSIONS:
+        dim_stability = dims.get(dim, "insufficient_data")
+        if global_high_eligible:
+            # Plenty of overall evidence — per-dimension stability decides
+            # whether THIS dimension earns the top tier or reads noisier.
+            if dim_stability == "stable":
+                result[dim] = "High"
+            elif dim_stability == "volatile":
+                result[dim] = "Medium"
+            else:
+                result[dim] = "Low"
+        elif global_medium_eligible:
+            # Overall evidence only supports Medium at best — a stable
+            # dimension still can't outrank the evidence floor.
+            result[dim] = "Medium" if dim_stability == "stable" else "Low"
+        else:
+            result[dim] = "Low"
+    return result
+
+
 def compute_confidence(
     fitness: dict | None,
     baseline: dict | None,
