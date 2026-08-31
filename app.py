@@ -801,6 +801,14 @@ st.markdown("""
     }
     .content-lock-item span:last-child {
         font-weight: 500;
+        /* Same root-cause fix as .callout-text/.voice-check-text: text
+           sibling of a flex-shrink:0 mark with no flex protection of
+           its own gets squeezed and mid-word broken by Streamlit's
+           global CSS. This is the Content Lock checklist box. */
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
     }
     .voice-match-table {
         width: 100%;
