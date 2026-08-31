@@ -2746,6 +2746,24 @@ def _run_render(
                 delta["first_person_ratio"]["verdict"] = "SKIPPED"
                 delta["first_person_ratio"]["skip_reason"] = "content_ceiling"
 
+        # Recompute against the FINAL clean text, not the mid-pipeline
+        # snapshot taken right after the correction LLM call (~line
+        # 2603). Everything between that point and here — the
+        # still_missed deterministic fixers above, _regex_sweep, UK
+        # English conversion — can further modify clean, including
+        # stripping out the very hedge phrase or sentence growth that
+        # snapshot caught. Reusing the stale merged insertion_check for
+        # the hard-fail gate and Content Lock report was flagging
+        # problems already fixed in the text the person actually sees
+        # (confirmed live: a render's persisted output_text contained
+        # neither the reported hedge nor an attribution swap when
+        # re-diffed fresh, yet content_lock_pass had been stored as
+        # false). A fresh diff against the true original input folds in
+        # every stage that ran, however many there were, so it can't go
+        # stale the same way again. Safe to run unconditionally — when
+        # no correction pass fired, this just re-confirms what
+        # initial_insertion_check already found.
+        insertion_check = _check_uncorrected_insertions(input_text, clean)
         confidence = compute_confidence(
             st.session_state.get("sample_fitness"), baseline, len(observations),
             st.session_state.get("dimension_stability"),
