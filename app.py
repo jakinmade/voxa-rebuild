@@ -130,6 +130,51 @@ st.set_page_config(
     ) else "collapsed",
 )
 
+# ---- SEO / social meta ----
+# Streamlit's static HTML shell always ships <title>Streamlit</title> with
+# no meta description or OG tags; the real title only lands client-side
+# after JS runs, and there's no description/OG tag at all otherwise. This
+# is the single biggest thing standing between voicova.com and being
+# indexed or looking right when shared/linked. Injected once per session
+# via a component that reaches into the parent document's <head>.
+if not st.session_state.get("_seo_meta_injected"):
+    st.session_state["_seo_meta_injected"] = True
+    st.components.v1.html(
+        """
+        <script>
+        (function() {
+            const doc = window.parent.document;
+            const setMeta = (attr, key, content) => {
+                let tag = doc.querySelector(`meta[${attr}="${key}"]`);
+                if (!tag) {
+                    tag = doc.createElement("meta");
+                    tag.setAttribute(attr, key);
+                    doc.head.appendChild(tag);
+                }
+                tag.setAttribute("content", content);
+            };
+            doc.title = "Voicova - Communication Identity";
+            setMeta("name", "description",
+                "Voicova preserves who you are when you write. Test any draft against your own voice fingerprint and fix what doesn't sound like you.");
+            setMeta("property", "og:title", "Voicova - Communication Identity");
+            setMeta("property", "og:description",
+                "Voicova preserves who you are when you write.");
+            setMeta("property", "og:type", "website");
+            setMeta("property", "og:url", "https://voicova.com");
+            setMeta("name", "twitter:card", "summary");
+            let canon = doc.querySelector('link[rel="canonical"]');
+            if (!canon) {
+                canon = doc.createElement("link");
+                canon.setAttribute("rel", "canonical");
+                doc.head.appendChild(canon);
+            }
+            canon.setAttribute("href", "https://voicova.com");
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
 # ---- Styles ----
 st.markdown("""
 <style>
