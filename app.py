@@ -77,6 +77,7 @@ from stripe_subscription import (
     request_subscription_restore,
     confirm_subscription_restore,
     create_billing_portal_session,
+    send_issue_report_email,
 )
 from lifetime_cap import get_lifetime_render_count, device_has_active_subscription
 
@@ -3364,6 +3365,46 @@ def _shell_sidebar(current_screen: int):
                 st.session_state["_manage_subscription_requested"] = True
                 st.rerun()
             _handle_manage_subscription_request()
+
+        # Report an issue — added 31 Aug 2026. Until now the only
+        # mention of support anywhere in the app was a bare "contact
+        # support" phrase with no email, link, or form behind it.
+        # Deliberately minimal: one text box, one button, on every
+        # shell screen (same shared sidebar). Context (device_id,
+        # current screen, last render id if any) is attached
+        # automatically so the person doesn't have to describe their
+        # setup themselves. Fails silently to send_issue_report_email's
+        # own contract — a report that couldn't send must never surface
+        # as an error to someone already having a bad time.
+        st.markdown('<div style="margin-top:1.5rem;"></div>', unsafe_allow_html=True)
+        with st.expander("Report an issue"):
+            if st.session_state.get("_issue_report_just_sent"):
+                st.caption("Thanks — that's been sent.")
+                st.session_state["_issue_report_just_sent"] = False
+            issue_text = st.text_area(
+                "What went wrong?", key=f"issue_report_input_{current_screen}",
+                label_visibility="collapsed", placeholder="What went wrong?",
+                height=80,
+            )
+            if st.button("Send", key=f"issue_report_submit_{current_screen}"):
+                if issue_text and issue_text.strip():
+                    context = {"last_render_id": st.session_state.get("render_id") or "none"}
+                    sent = send_issue_report_email(
+                        issue_text.strip(), device_id, current_screen, context=context,
+                    )
+                    st.session_state["_issue_report_just_sent"] = True
+                    if not sent:
+                        # Honest about the send failing, without
+                        # blaming the person or asking them to retry
+                        # into the same dead end — same tone as the
+                        # existing subscription_confirm_failed alert.
+                        st.session_state["_issue_report_just_sent"] = False
+                        render_alert(
+                            "Couldn't send that just now. Please try "
+                            "again in a moment.", "warning",
+                        )
+                    else:
+                        st.rerun()
 
 
 def screen_render():

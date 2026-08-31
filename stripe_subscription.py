@@ -593,3 +593,88 @@ def _send_restore_email(to_email: str, token: str) -> None:
         sg.send(message)
     except Exception:
         log.error("restore_email_send_failed", exc_info=True)
+
+
+def send_issue_report_email(
+    message: str, device_id: str, screen: int,
+    context: dict | None = None,
+) -> bool:
+    """
+    Sends a user-submitted "Report an issue" message to VOICOVA's own
+    inbox. Added 31 Aug 2026 -- until now the only user-facing mention
+    of support was a bare "contact support" phrase in a payment-error
+    message, with no email address, link, or form behind it: there was
+    no real path for a person to actually report a problem.
+
+    Deliberately the simplest possible shape, matching the same
+    SendGrid account/pattern already used for restore emails and
+    CLEARANCE's report emails -- no new service, no new table, no new
+    API key. VOICOVA_SUPPORT_EMAIL is optional; falls back to the same
+    address VOICOVA_EMAIL_FROM already resolves to, so this works with
+    zero additional Railway configuration.
+
+    context: small dict of already-available session state (last
+    render_id, current voice_match tier, etc.) the person doesn't have
+    to type themselves -- attached read-only, never solicited as a
+    required field. Fails silently (returns False), same discipline as
+    _send_restore_email and write_render_history: a report that
+    couldn't send must never surface as an error to someone who's
+    already having a bad experience with the product.
+
+    Returns True on a successful send, False otherwise -- the caller
+    decides what to show the person either way.
+    """
+    if os.environ.get("EMAIL_ENABLED", "true").strip().lower() == "false":
+        log.info("issue_report_email_skipped", reason="EMAIL_ENABLED=false")
+        return False
+
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if api_key:
+        api_key = "".join(c for c in api_key if 33 <= ord(c) <= 126).strip()
+    if not api_key:
+        log.error("issue_report_email_unavailable", reason="sendgrid_key_not_set")
+        return False
+
+    import html
+    from datetime import datetime, timezone
+
+    to_email = os.environ.get(
+        "VOICOVA_SUPPORT_EMAIL",
+        os.environ.get("VOICOVA_EMAIL_FROM", "hello@voicova.com"),
+    )
+    submitted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    context = context or {}
+    context_rows = "".join(
+        f"<tr><td style='padding:2px 12px 2px 0;color:#6b7280;'>{html.escape(str(k))}</td>"
+        f"<td style='padding:2px 0;color:#111827;'>{html.escape(str(v))}</td></tr>"
+        for k, v in context.items()
+    )
+    html_body = f"""
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827;">
+  <div style="padding:1.5rem;">
+    <p style="font-size:0.8rem;color:#6b7280;">
+      VOICOVA issue report &middot; {submitted_at} &middot; screen {screen} &middot; device {html.escape(device_id)}
+    </p>
+    <p style="font-size:0.95rem;color:#111827;line-height:1.7;white-space:pre-wrap;
+              border-left:3px solid #e5e7eb;padding-left:1rem;margin:1rem 0;">{html.escape(message)}</p>
+    <table style="font-size:0.8rem;margin-top:1rem;">{context_rows}</table>
+  </div>
+</div>
+"""
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        from_email = os.environ.get("VOICOVA_EMAIL_FROM", "hello@voicova.com")
+        mail = Mail(
+            from_email=from_email,
+            to_emails=to_email,
+            subject=f"VOICOVA issue report ({submitted_at})",
+            html_content=html_body,
+        )
+        sg = SendGridAPIClient(api_key)
+        sg.send(mail)
+        log.info("issue_report_email_sent", device_id=device_id, screen=screen)
+        return True
+    except Exception:
+        log.error("issue_report_email_send_failed", exc_info=True)
+        return False
