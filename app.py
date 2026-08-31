@@ -2009,7 +2009,8 @@ def screen_reveal():
     # this stage, not a bug; it's exactly what "Add another sample"
     # below (the deepen panel) exists to improve.
     _render_dimension_confidence_table(
-        observations, heading="How solid this baseline is so far:"
+        observations, heading="How solid this baseline is so far:",
+        show_flag_control=True,
     )
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
@@ -4539,7 +4540,9 @@ _STABILITY_VERDICT_BADGE = {
 }
 
 
-def _render_dimension_confidence_table(observations: list[dict], heading: str) -> bool:
+def _render_dimension_confidence_table(
+    observations: list[dict], heading: str, show_flag_control: bool = False
+) -> bool:
     """
     Per-dimension Reading/Confidence table — extracted 31 Aug 2026 from
     screen_my_voice (30 Aug 2026 per-dimension confidence work) so
@@ -4553,6 +4556,22 @@ def _render_dimension_confidence_table(observations: list[dict], heading: str) -
     baseline_with_sample, called from screen_paste before screen_reveal
     is ever shown).
 
+    Reads st.session_state.flagged_dimensions (31 Aug 2026, calibration
+    flag) and passes it through to compute_dimension_confidence on
+    every call site, so a flag made on the reveal screen demotes the
+    Confidence badge consistently everywhere this table is shown, not
+    only where it was flagged.
+
+    show_flag_control (31 Aug 2026): when True, also renders the
+    confirm/flag interaction below the table — "flag anything that
+    doesn't sound like you" — and returns to session_state rather than
+    hand-editing any value (see the reveal screen's docstring for why
+    calibration stays a flag, not an edit). Only screen_reveal passes
+    True; screen_my_voice's standing dashboard shows the resulting
+    badges but doesn't re-solicit flags on every visit — the
+    calibration moment is when the person is actively reading each
+    dimension, not a returning check-in.
+
     Returns True if a table was rendered, False if there wasn't enough
     stability data yet (caller decides whether that's worth a fallback
     message).
@@ -4560,6 +4579,8 @@ def _render_dimension_confidence_table(observations: list[dict], heading: str) -
     stability = st.session_state.get("dimension_stability")
     if not stability or not stability.get("dimensions"):
         return False
+
+    flagged = set(st.session_state.get("flagged_dimensions") or ())
 
     sample_count = stability.get("sample_count", 0)
     st.markdown(
@@ -4572,10 +4593,13 @@ def _render_dimension_confidence_table(observations: list[dict], heading: str) -
         len(observations),
         stability,
         correction_evidence=st.session_state.get("correction_evidence"),
+        flagged_dimensions=flagged,
     )
     rows = []
     for dim, verdict in stability["dimensions"].items():
         label = _VOICE_MATCH_LABELS.get(dim, dim)
+        if dim in flagged:
+            label += " \u2691"
         badge = _STABILITY_VERDICT_BADGE.get(verdict, "badge-amber")
         reading = _STABILITY_VERDICT_LABEL.get(verdict, verdict)
         conf = dim_confidence.get(dim, "Low")
@@ -4599,7 +4623,58 @@ def _render_dimension_confidence_table(observations: list[dict], heading: str) -
         'situation pulled out of you.</div>',
         unsafe_allow_html=True,
     )
+
+    if show_flag_control:
+        _render_calibration_flag_control(stability["dimensions"], flagged)
+
     return True
+
+
+def _render_calibration_flag_control(
+    dimensions: dict[str, str], currently_flagged: set[str]
+) -> None:
+    """
+    Confirm/flag interaction (31 Aug 2026) — lets a person say "this
+    reading doesn't sound like me" for a specific dimension, without
+    ever hand-editing the underlying number. Deliberately narrow: a
+    flag only demotes that dimension's Confidence badge one tier
+    (compute_dimension_confidence, voice_engine.py) and nudges toward
+    "Deepen your fingerprint" below, which is the one legitimate way
+    a reading actually changes — by giving the engine more genuine
+    writing to measure, not by the person overriding the measurement
+    directly. Keeps the "no LLM in the decision path, reproducible
+    output" architecture intact: flagging changes how much a number is
+    trusted, never the number itself.
+
+    Session-scoped only for this pass — flagged_dimensions is not yet
+    part of the Supabase persistence payload (persistence.py), so a
+    flag survives the current session but not a fresh visit on a new
+    device-cookie load. Extending persistence would mean a schema
+    change on a live table; deliberately left out of this pass rather
+    than risk that without it being asked for directly.
+    """
+    options = list(dimensions.keys())
+    if not options:
+        return
+
+    st.markdown(
+        '<div class="sub" style="margin-top:1.2rem;">'
+        'Anything above not sound like you?</div>',
+        unsafe_allow_html=True,
+    )
+    selected_labels = st.multiselect(
+        "Flag dimensions",
+        options=[_VOICE_MATCH_LABELS.get(d, d) for d in options],
+        default=[_VOICE_MATCH_LABELS.get(d, d) for d in options if d in currently_flagged],
+        label_visibility="collapsed",
+        key="calibration_flag_select",
+    )
+    label_to_dim = {_VOICE_MATCH_LABELS.get(d, d): d for d in options}
+    newly_flagged = {label_to_dim[label] for label in selected_labels}
+
+    if newly_flagged != currently_flagged:
+        st.session_state.flagged_dimensions = sorted(newly_flagged)
+        st.rerun()
 
 
 def build_voice_profile_markdown(
@@ -4872,6 +4947,24 @@ def screen_check_draft():
         return
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+
+    # Calibration flag caveat (31 Aug 2026) — a soft caveat, not a
+    # gate: deliberately does not block checking a draft even when the
+    # baseline has flagged dimensions. Content Lock hard-fails because
+    # a meaning change is a correctness problem; a flagged dimension is
+    # a confidence problem, and refusing to show a result the person
+    # asked for over reduced (not absent) confidence would be a worse
+    # trade than just telling them plainly. Named generically ("some
+    # readings"), not per-dimension — the badge on My Voice/reveal
+    # already says which ones, this just points there.
+    flagged = st.session_state.get("flagged_dimensions")
+    if flagged:
+        render_alert(
+            "Heads up: you flagged some of your voice readings as not "
+            "quite right, so this check leans on a softer baseline than "
+            "usual. Add another sample on My Voice to firm it up.",
+            "warning",
+        )
 
     verdict = result["verdict"]
     _render_verdict_banner(verdict, sub=f'Voice match: {result["tier"]}')

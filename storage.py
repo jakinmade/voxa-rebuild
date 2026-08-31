@@ -50,6 +50,12 @@ def init_state():
 
         # New in v4 — deepen fingerprint, visible from first use, not gated
         "deepen_open": False,
+
+        # 31 Aug 2026 — calibration flag: dimensions the person marked
+        # "doesn't sound like me" on the reveal screen. Session-scoped
+        # only for now (not yet in the Supabase persistence payload —
+        # see _render_calibration_flag_control's docstring).
+        "flagged_dimensions": [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:

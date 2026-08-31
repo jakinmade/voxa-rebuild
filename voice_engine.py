@@ -2375,6 +2375,7 @@ def compute_dimension_confidence(
     num_observations: int,
     stability: dict | None,
     correction_evidence: list[dict] | None = None,
+    flagged_dimensions: set[str] | list[str] | None = None,
 ) -> dict[str, str]:
     """
     Per-dimension confidence — Low/Medium/High for each of
@@ -2411,6 +2412,19 @@ def compute_dimension_confidence(
     correction, or a dimension with conflicting corrections in both
     directions, is not enough signal to act on.
 
+    flagged_dimensions (31 Aug 2026, calibration flag): optional set
+    of dimension keys the person explicitly flagged as "doesn't sound
+    like me" on the reveal screen at calibration time. Unlike
+    correction_evidence, this carries no direction (there's no
+    predicted/corrected text pair to score) — it's a direct statement
+    of distrust, so it demotes the same one tier as a consistent
+    correction would, and doesn't stack with one: a dimension that is
+    both flagged and has 2+ consistent corrections is still only
+    demoted once. Deliberately does NOT change the underlying baseline
+    value itself — flagging lowers how much the number is trusted, it
+    is not a hand-edit of the number (see the reveal screen's own
+    docstring for why: no manual override of a deterministic reading).
+
     Returns {} when there's no baseline yet (nothing to report).
     """
     if not baseline:
@@ -2419,6 +2433,7 @@ def compute_dimension_confidence(
     wc = baseline.get("word_count", 0)
     tier = (fitness or {}).get("tier", "thin")
     dims = (stability or {}).get("dimensions", {})
+    flagged = set(flagged_dimensions or ())
 
     global_high_eligible = wc >= 800 and tier in ("gold", "strong") and num_observations >= 4
     global_medium_eligible = wc >= 250 and tier in ("gold", "strong", "thin")
@@ -2446,7 +2461,11 @@ def compute_dimension_confidence(
         # repeatedly corrected the same direction reads one tier lower
         # regardless of how confident the stability/volume read alone
         # would be. See _consistent_correction_count's own docstring.
-        if _consistent_correction_count(correction_evidence, dim) >= 2:
+        # A calibration flag demotes the same one tier, and the two
+        # don't compound — either signal alone is enough distrust to
+        # act on, and there's no principled way to justify a second
+        # tier off for having both without new evidence saying so.
+        if _consistent_correction_count(correction_evidence, dim) >= 2 or dim in flagged:
             result[dim] = _CONFIDENCE_DEMOTION[result[dim]]
 
     return result
