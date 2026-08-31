@@ -327,6 +327,62 @@ st.markdown("""
         line-height: 1.55;
     }
 
+    /* Verdict headline - 31 Aug 2026 revamp. Leads results with a
+       decision (PASS / REVIEW REQUIRED) rather than a metrics grid;
+       the existing badges/detail rows render underneath as supporting
+       evidence, unchanged. Reuses the existing success/warning tokens
+       so it matches the rest of the design system exactly. */
+    .verdict-banner {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        padding: 1.15rem 1.3rem;
+        margin-bottom: 1.1rem;
+        border-radius: var(--radius-lg);
+        opacity: 0;
+        animation: voice-check-in 0.5s ease-out forwards;
+    }
+    .verdict-banner.pass {
+        background: var(--success-soft);
+        border: 1px solid var(--success);
+    }
+    .verdict-banner.review {
+        background: var(--warning-soft);
+        border: 1px solid var(--warning);
+    }
+    .verdict-banner-mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.4rem;
+        height: 2.4rem;
+        flex-shrink: 0;
+        border-radius: 50%;
+        font-weight: 700;
+        font-size: 1.2rem;
+        line-height: 1;
+    }
+    .verdict-banner.pass .verdict-banner-mark {
+        background: var(--success); color: var(--success-soft);
+    }
+    .verdict-banner.review .verdict-banner-mark {
+        background: var(--warning); color: var(--warning-soft);
+    }
+    .verdict-banner-title {
+        font-family: var(--font-display);
+        font-size: 1.4rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        line-height: 1.1;
+    }
+    .verdict-banner.pass .verdict-banner-title { color: var(--success); }
+    .verdict-banner.review .verdict-banner-title { color: var(--warning); }
+    .verdict-banner-sub {
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-top: 0.15rem;
+    }
+
     .mode-label {
         font-family: var(--font-mono);
         font-size: 0.78rem;
@@ -3255,7 +3311,30 @@ _SHELL_NAV_KEYS = {
     (8, 5): "nav_to_my_voice_from_check",
     (8, 6): "nav_to_history_from_check",
 }
-_SHELL_SCREENS = [(4, "Write"), (8, "Check a draft"), (5, "My Voice"), (6, "Past renders")]
+_SHELL_SCREENS = [(4, "Write"), (8, "Check"), (5, "My Voice"), (6, "History")]
+
+
+def _render_verdict_banner(verdict: str, sub: str = ""):
+    """
+    Shared verdict headline for both the Write render report and the
+    Check-a-draft result - 31 Aug 2026 revamp. Leads with the decision
+    (PASS / REVIEW REQUIRED); everything else on the screen remains
+    exactly as before and now reads as supporting evidence underneath.
+    Pure presentation - takes the already-computed verdict string, no
+    new scoring logic.
+    """
+    is_pass = verdict == "PASS"
+    cls = "pass" if is_pass else "review"
+    title = "PASS \u2014 Safe to deliver" if is_pass else "REVIEW REQUIRED"
+    mark = "\u2713" if is_pass else "!"
+    sub_html = f'<div class="verdict-banner-sub">{_safe_html(sub)}</div>' if sub else ""
+    st.markdown(
+        f'<div class="verdict-banner {cls}">'
+        f'<div class="verdict-banner-mark">{mark}</div>'
+        f'<div><div class="verdict-banner-title">{title}</div>{sub_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _shell_sidebar(current_screen: int):
@@ -3701,6 +3780,10 @@ def screen_render():
                     "risk": "How much this render may have drifted from what you actually meant.",
                     "ai_tell": "Whether wording that reads as AI-generated survived into the rewrite.",
                 }
+                _render_verdict_banner(
+                    "REVIEW" if gated else "PASS",
+                    sub=f"Voice consistency: {vm_tier}",
+                )
                 st.markdown(f"""
 <div class="voice-report">
 {content_lock_banner}
@@ -4635,14 +4718,7 @@ def screen_check_draft():
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
     verdict = result["verdict"]
-    verdict_badge = "badge-green" if verdict == "PASS" else "badge-amber"
-    st.markdown(
-        f'<div class="sub">Voice match: '
-        f'<span class="badge {result["badge"]}">{result["tier"]}</span>'
-        f'&nbsp;&nbsp;Verdict: '
-        f'<span class="badge {verdict_badge}">{verdict}</span></div>',
-        unsafe_allow_html=True,
-    )
+    _render_verdict_banner(verdict, sub=f'Voice match: {result["tier"]}')
 
     verdict_mark = "\u2713" if verdict == "PASS" else "!"
     st.markdown(
