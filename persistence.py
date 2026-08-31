@@ -209,6 +209,12 @@ def restore_profile_if_available() -> bool:
         # as it's always behaved.
         if row.get("correction_evidence"):
             st.session_state["correction_evidence"] = row["correction_evidence"]
+        # Optional (31 Aug 2026) — same safe pattern. A row saved before
+        # this column existed simply won't have it, and compute_
+        # dimension_confidence's flag demotion is a no-op with nothing
+        # flagged, same as it's always behaved.
+        if row.get("flagged_dimensions"):
+            st.session_state["flagged_dimensions"] = row["flagged_dimensions"]
         # Optional — a row saved before this feature existed simply
         # won't have it, and a render proceeds exactly as it did
         # before (anchor sentences and numeric targets alone).
@@ -258,6 +264,7 @@ def save_profile_if_available() -> None:
         "voice_profile_summary": st.session_state.get("voice_profile_summary"),
         "baseline_fingerprints_by_format": st.session_state.get("baseline_fingerprints_by_format"),
         "correction_evidence": st.session_state.get("correction_evidence"),
+        "flagged_dimensions": st.session_state.get("flagged_dimensions"),
         # Explicit, not left to the column's DEFAULT now() — that
         # default only fires on INSERT. This table is written via
         # upsert, and an upsert that hits the existing-row path is an

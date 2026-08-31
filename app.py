@@ -4646,12 +4646,13 @@ def _render_calibration_flag_control(
     output" architecture intact: flagging changes how much a number is
     trusted, never the number itself.
 
-    Session-scoped only for this pass — flagged_dimensions is not yet
-    part of the Supabase persistence payload (persistence.py), so a
-    flag survives the current session but not a fresh visit on a new
-    device-cookie load. Extending persistence would mean a schema
-    change on a live table; deliberately left out of this pass rather
-    than risk that without it being asked for directly.
+    Persists across visits (31 Aug 2026) — flagged_dimensions is now
+    part of the Supabase persistence payload (persistence.py, same
+    optional/backward-compatible read pattern as correction_evidence:
+    a row saved before this column existed just doesn't have it, and
+    the flag demotion is a no-op with nothing flagged). A nullable
+    jsonb column added via migration, additive to the live table, no
+    change to any existing row.
     """
     options = list(dimensions.keys())
     if not options:

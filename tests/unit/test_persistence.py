@@ -239,6 +239,36 @@ def test_restore_omits_voice_profile_summary_key_when_absent():
     assert "voice_profile_summary" not in st.session_state
 
 
+def test_restore_populates_flagged_dimensions_when_present():
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+        "flagged_dimensions": ["hedge_density"],
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert st.session_state["flagged_dimensions"] == ["hedge_density"]
+
+
+def test_restore_omits_flagged_dimensions_key_when_absent():
+    """A row saved before this column existed won't have it — restore
+    must not set the key at all (not set it to None), matching the
+    same pattern already used for voice_profile_summary above."""
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert "flagged_dimensions" not in st.session_state
+
+
 def test_restore_does_not_overwrite_an_already_populated_session():
     """Guards against clobbering a baseline built earlier this same
     session (e.g. a mid-flow rerun) with a stale saved profile."""
@@ -313,6 +343,34 @@ def test_save_includes_none_for_voice_profile_summary_when_not_yet_generated():
 
     payload = mock_client.table.return_value.upsert.call_args[0][0]
     assert payload["voice_profile_summary"] is None
+
+
+def test_save_includes_flagged_dimensions_when_present():
+    st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
+    st.session_state["_device_id"] = "device-1"
+    st.session_state["flagged_dimensions"] = ["hedge_density", "directive_ratio"]
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        mock_client = _mock_supabase_client()
+        with patch("persistence.get_supabase_client", return_value=mock_client):
+            persistence.save_profile_if_available()
+
+    payload = mock_client.table.return_value.upsert.call_args[0][0]
+    assert payload["flagged_dimensions"] == ["hedge_density", "directive_ratio"]
+
+
+def test_save_includes_none_for_flagged_dimensions_when_none_flagged():
+    """Same explicit-key discipline as voice_profile_summary — the key
+    is always present in the payload (None when nothing's flagged),
+    not silently omitted."""
+    st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
+    st.session_state["_device_id"] = "device-1"
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        mock_client = _mock_supabase_client()
+        with patch("persistence.get_supabase_client", return_value=mock_client):
+            persistence.save_profile_if_available()
+
+    payload = mock_client.table.return_value.upsert.call_args[0][0]
+    assert payload["flagged_dimensions"] is None
 
 
 def test_save_failure_does_not_raise():
