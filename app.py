@@ -361,6 +361,13 @@ st.markdown("""
         color: var(--ink);
         line-height: 1.32;
         letter-spacing: -0.005em;
+        /* Same fix as .callout-text below: sibling to a flex-shrink:0
+           icon with no flex protection of its own = mid-word breaks
+           under Streamlit's global CSS once squeezed. */
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
     }
     .voice-check-evidence {
         font-size: 0.85rem;
@@ -943,7 +950,20 @@ st.markdown("""
         color: var(--gold);
     }
     .callout-info .callout-icon { background: var(--gold); color: var(--canvas); }
-    .callout-text { color: var(--ink); }
+    .callout-text {
+        color: var(--ink);
+        /* 31 Aug 2026 fix: same root cause already diagnosed for
+           .badge and .vr-stat (29 Aug) — Streamlit's own global CSS
+           force-breaks text mid-word once a flex child gets squeezed
+           narrower than a single word. flex:1 + min-width:0 gives the
+           text its fair share of the row instead of being crushed by
+           .callout-icon; overflow-wrap/word-break reset to normal so
+           it wraps at spaces only, never mid-word. */
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
 
     /* Spinner, brand-matched via Streamlit's stSpinner data-testid
        (same public-contract targeting convention as the button rules
