@@ -906,6 +906,28 @@ st.markdown("""
         font-weight: 600;
         transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
     }
+    /* 31 Aug 2026 fix — 4th location of the same recurring bug (see
+       .voice-check-text, .callout-text, .content-lock-item span:last-
+       child above): the action-button row (Write again / Start over /
+       Export your profile / Download the record / Download as text /
+       Download as PDF) sits six-wide in equal columns, narrow enough
+       that a two- or three-word label has to wrap, and it was
+       wrapping mid-word instead of at the space. Applied broadly to
+       every descendant of a native button, not one named text class
+       like the earlier three fixes — Streamlit's own button markup
+       isn't this app's HTML to hang a class on, so the selector has
+       to reach whichever internal node actually holds the label text
+       rather than assuming which one it is.
+       Fixes the button label; the "*" also passes into any inline
+       icon Streamlit's button may render alongside the label, which
+       this only removes forced letter-splitting from, not any
+       layout property. */
+    div[data-testid="stButton"] button *,
+    div[data-testid="stDownloadButton"] button *,
+    button[data-testid^="stBaseButton"] * {
+        overflow-wrap: normal;
+        word-break: normal;
+    }
     button[data-testid^="stBaseButton"]:active {
         transform: scale(0.98);
     }
