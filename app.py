@@ -1997,6 +1997,21 @@ def screen_reveal():
             unsafe_allow_html=True,
         )
 
+    # Calibration confidence (31 Aug 2026) — the reveal screen showed
+    # observations with no indication of how solid each one is, so the
+    # baseline got accepted on faith before Voice Drift ever checks
+    # anything against it. Reuses the exact per-dimension table already
+    # built for screen_my_voice (_render_dimension_confidence_table) —
+    # no new scoring, just showing it one step earlier, at the point
+    # the baseline is actually formed rather than only afterward on the
+    # standing dashboard. A single first sample will mostly read "Not
+    # enough data" / Low here — that's the correct, honest reading at
+    # this stage, not a bug; it's exactly what "Add another sample"
+    # below (the deepen panel) exists to improve.
+    _render_dimension_confidence_table(
+        observations, heading="How solid this baseline is so far:"
+    )
+
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     # Un-collapsed by default so this doesn't get missed the way a
     # collapsed expander with no visual weight would.
@@ -4516,6 +4531,76 @@ Show the per-dimension breakdown
 
 _MY_VOICE_CONFIDENCE_BADGE = {"High": "badge-green", "Medium": "badge-amber", "Low": "badge-red"}
 
+_STABILITY_VERDICT_LABEL = {
+    "stable": "Stable", "volatile": "Varies by register", "insufficient_data": "Not enough data",
+}
+_STABILITY_VERDICT_BADGE = {
+    "stable": "badge-green", "volatile": "badge-amber", "insufficient_data": "badge-amber",
+}
+
+
+def _render_dimension_confidence_table(observations: list[dict], heading: str) -> bool:
+    """
+    Per-dimension Reading/Confidence table — extracted 31 Aug 2026 from
+    screen_my_voice (30 Aug 2026 per-dimension confidence work) so
+    screen_reveal (the onboarding calibration step) can show the same
+    table before the baseline is ever relied on, not just afterward on
+    the standing My Voice dashboard. Pure extraction: every line below
+    previously lived only inside screen_my_voice, unchanged logic, same
+    compute_dimension_confidence call, same .voice-match-table markup.
+    No new detection, no new scoring — reads session-state values both
+    screens already have by the time they render (see _strengthen_
+    baseline_with_sample, called from screen_paste before screen_reveal
+    is ever shown).
+
+    Returns True if a table was rendered, False if there wasn't enough
+    stability data yet (caller decides whether that's worth a fallback
+    message).
+    """
+    stability = st.session_state.get("dimension_stability")
+    if not stability or not stability.get("dimensions"):
+        return False
+
+    sample_count = stability.get("sample_count", 0)
+    st.markdown(
+        f'<div class="sub" style="margin-top:1.4rem;">{heading.format(sample_count=sample_count)}</div>',
+        unsafe_allow_html=True,
+    )
+    dim_confidence = compute_dimension_confidence(
+        st.session_state.get("sample_fitness"),
+        st.session_state.get("baseline_fingerprint"),
+        len(observations),
+        stability,
+        correction_evidence=st.session_state.get("correction_evidence"),
+    )
+    rows = []
+    for dim, verdict in stability["dimensions"].items():
+        label = _VOICE_MATCH_LABELS.get(dim, dim)
+        badge = _STABILITY_VERDICT_BADGE.get(verdict, "badge-amber")
+        reading = _STABILITY_VERDICT_LABEL.get(verdict, verdict)
+        conf = dim_confidence.get(dim, "Low")
+        conf_badge = _MY_VOICE_CONFIDENCE_BADGE.get(conf, "badge-amber")
+        rows.append(
+            f"<tr><td>{label}</td>"
+            f'<td class="vm-verdict"><span class="badge {badge}">{reading}</span></td>'
+            f'<td class="vm-verdict"><span class="badge {conf_badge}">{conf}</span></td></tr>'
+        )
+    st.markdown(
+        '<table class="voice-match-table">'
+        '<thead><tr><th>Dimension</th><th class="vm-verdict">Reading</th>'
+        '<th class="vm-verdict">Confidence</th></tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="microcopy" style="margin-top:0.4rem;">"Stable" means this trait held '
+        'steady across your different writing samples \u2014 likely genuine, not just what one '
+        'situation pulled out of you.</div>',
+        unsafe_allow_html=True,
+    )
+    return True
+
 
 def build_voice_profile_markdown(
     observations: list[dict],
@@ -4674,61 +4759,11 @@ def screen_my_voice():
     # detection. Reuses the exact .voice-match-table HTML/CSS shape
     # already built for the render-time function-word breakdown table
     # (screen_render's Voice Report), not a new table style.
-    stability = st.session_state.get("dimension_stability")
-    if stability and stability.get("dimensions"):
-        sample_count = stability.get("sample_count", 0)
-        st.markdown(
-            f'<div class="sub" style="margin-top:1.4rem;">Stability across your last '
-            f'{sample_count} samples:</div>',
-            unsafe_allow_html=True,
-        )
-        # Per-dimension confidence (30 Aug 2026) — compute_confidence gives
-        # one blended badge for the whole profile; a profile can be
-        # genuinely solid on one dimension while still thin on another,
-        # and the single badge can't say so. Reuses the exact same
-        # session-state values already fetched for that blended badge
-        # (sample_fitness, baseline_fingerprint, observations) — no new
-        # measurement, just a per-dimension read of data that already
-        # exists.
-        dim_confidence = compute_dimension_confidence(
-            st.session_state.get("sample_fitness"),
-            st.session_state.get("baseline_fingerprint"),
-            len(observations),
-            stability,
-            correction_evidence=st.session_state.get("correction_evidence"),
-        )
-        _stability_verdict_label = {
-            "stable": "Stable", "volatile": "Varies by register", "insufficient_data": "Not enough data",
-        }
-        _stability_verdict_badge = {
-            "stable": "badge-green", "volatile": "badge-amber", "insufficient_data": "badge-amber",
-        }
-        rows = []
-        for dim, verdict in stability["dimensions"].items():
-            label = _VOICE_MATCH_LABELS.get(dim, dim)
-            badge = _stability_verdict_badge.get(verdict, "badge-amber")
-            reading = _stability_verdict_label.get(verdict, verdict)
-            conf = dim_confidence.get(dim, "Low")
-            conf_badge = _MY_VOICE_CONFIDENCE_BADGE.get(conf, "badge-amber")
-            rows.append(
-                f"<tr><td>{label}</td>"
-                f'<td class="vm-verdict"><span class="badge {badge}">{reading}</span></td>'
-                f'<td class="vm-verdict"><span class="badge {conf_badge}">{conf}</span></td></tr>'
-            )
-        st.markdown(
-            '<table class="voice-match-table">'
-            '<thead><tr><th>Dimension</th><th class="vm-verdict">Reading</th>'
-            '<th class="vm-verdict">Confidence</th></tr></thead>'
-            f"<tbody>{''.join(rows)}</tbody>"
-            "</table>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            '<div class="microcopy" style="margin-top:0.4rem;">"Stable" means this trait held '
-            'steady across your different writing samples \u2014 likely genuine, not just what one '
-            'situation pulled out of you.</div>',
-            unsafe_allow_html=True,
-        )
+    # Per-dimension confidence (30 Aug 2026, extracted into a shared
+    # helper 31 Aug 2026 — see _render_dimension_confidence_table).
+    _render_dimension_confidence_table(
+        observations, heading="Stability across your last {sample_count} samples:"
+    )
 
     # Shareable card (27 Aug 2026) — a low-effort, high-reach feature:
     # nothing in the product before this was shareable, and the data
