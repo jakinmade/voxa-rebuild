@@ -1754,6 +1754,46 @@ def _entities_and_numbers(text: str) -> set:
         'For', 'With', 'From', 'Also', 'Some', 'Have', 'Been', 'Will',
         'Would', 'Could', 'Should', 'Just', 'Still', 'Even', 'Here',
         'Very', 'More', 'Most', 'Into', 'Over', 'After', 'About',
+        # Common correspondence-opener / discourse words. Confirmed
+        # live 31 Aug 2026: the 16 Aug fix below made the entity
+        # regex match start-of-string (needed to catch a salutation
+        # name as the very first word), but the lookbehind
+        # (?<=[.!? ]) also matches after any plain space — so it was
+        # never really "sentence-initial only", it flags ANY
+        # capitalised word not in this set, throughout the whole
+        # text. A real render opening "Please write a short note..."
+        # got "Please" flagged as a dropped proper noun once the
+        # rewrite paraphrased past it, alongside "Thanks" and
+        # "Looking" in similar constructions — ordinary professional-
+        # correspondence openers, not facts. Same trade-off already
+        # accepted above ("Will" stays excluded despite being a common
+        # first name too): missing a genuine rare name mention here is
+        # a smaller failure than flagging ordinary prose as broken on
+        # nearly every render that opens or continues with one of
+        # these.
+        'Please', 'Thanks', 'Thank', 'Sorry', 'Looking', 'Following',
+        'Hope', 'Hoping', 'Regarding', 'Wanted', 'Want', 'Since', 'So',
+        'Now', 'Then', 'Let', 'Sure', 'Perhaps', 'Given', 'Based',
+        'Attached', 'Enclosed', 'Congrats', 'Congratulations',
+        'Welcome', 'Hi', 'Hello', 'Hey', 'Dear', 'Best', 'Regards',
+        'Sincerely', 'Cheers', 'Great', 'Good', 'Sounds', 'Looks',
+        'Seems', 'Quick', 'One', 'Few', 'Many', 'All', 'Each', 'Every',
+        'Any', 'No', 'Not', 'Yes', 'Ok', 'Okay',
+        'Checking', 'Reaching', 'Touching', 'Flagging', 'Noting',
+        'Confirming', 'Sending', 'Adding', 'Additionally', 'Meanwhile',
+        'Finally', 'Lastly', 'Overall', 'Generally', 'Basically',
+        'Honestly', 'Frankly', 'Actually', 'Again', 'Worth', 'Either',
+        # Deliberately NOT included: "Curious", "Wondering". A
+        # confirmed live incident (17 Aug 2026, see
+        # test_entity_casing_fixer.py) specifically depends on
+        # "Curious" staying trackable as a genuine content word — a
+        # real render dropped it entirely (reworded away, not just
+        # relocated/lowercased) and that needed to be caught as a
+        # semantic-drift failure, not waved through as a discourse
+        # opener. Unlike the words above, these two carry real content
+        # signal often enough that exempting them would trade a
+        # confirmed true positive for an unconfirmed reduction in
+        # false positives.
     }
     # Lookbehind covers [.!? ] OR start-of-string. Confirmed live: a
     # salutation name is structurally the very first word of the text,
@@ -1766,6 +1806,8 @@ def _entities_and_numbers(text: str) -> set:
     proper = {w for w in re.findall(r'(?:(?<=[.!? ])|^)[A-Z][a-zA-Z]{2,}', text) if w not in non_proper}
     numbers = set(re.findall(r'\b\d+[\d,.]*%?\b', text))
     return proper | numbers
+
+
 
 
 def _possessive_attributions(text: str) -> dict:

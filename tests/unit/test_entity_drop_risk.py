@@ -84,3 +84,51 @@ def test_dropped_entity_check_additive_to_existing_hard_fails():
     semantic = {"semantic_match": 100, "attribution_swaps": [], "dropped_entities": []}
     risk = ve.compute_risk(delta, semantic, ai_tells={"clean": False})
     assert risk == "High"
+
+
+# ---------------------------------------------------------------------------
+# _entities_and_numbers — common correspondence-opener words must not be
+# false-flagged as dropped entities. Confirmed live 31 Aug 2026: the
+# start-of-string fix above (correctly) made the regex catch a
+# capitalised first word, but the lookbehind (?<=[.!? ]) also matches
+# after any plain space, so it was never really "sentence-initial
+# only" — it flags any capitalised word not in the exclusion set,
+# anywhere in the text. A real render opening "Please write a short
+# note..." had "Please" flagged as a dropped proper noun once the
+# rewrite paraphrased past it, alongside "Thanks" and "Looking" in
+# similar constructions.
+# ---------------------------------------------------------------------------
+
+def test_common_correspondence_openers_not_treated_as_entities():
+    text = (
+        "Please write a short note. Thanks for reading. Looking forward "
+        "to it. Following up on the CLEARANCE link."
+    )
+    entities = ve._entities_and_numbers(text)
+    assert "Please" not in entities
+    assert "Thanks" not in entities
+    assert "Looking" not in entities
+    assert "Following" not in entities
+
+
+def test_correspondence_opener_paraphrased_away_is_not_a_hard_fail():
+    """The exact shape of the live incident: a message opens with a
+    common imperative word, the rewrite paraphrases it away entirely
+    (not just relocates or lowercases it) — must not trip
+    dropped_entities the way a genuinely dropped name or number would."""
+    original = "Please write a short note about the launch plan."
+    render = "Here's a short note about the launch plan."
+    result = ve.score_semantic_drift(original, render)
+    assert "Please" not in result["dropped_entities"]
+
+
+def test_genuine_name_still_caught_alongside_correspondence_openers():
+    """The broadened exclusion set must not weaken the original
+    salutation-name fix it sits next to — a real dropped/swapped name
+    in the same kind of message still needs to be caught."""
+    original = "Please pass this along to Scott before Friday."
+    render = "Please pass this along to Josh before Friday."
+    result = ve.score_semantic_drift(original, render)
+    assert "Scott" in result["dropped_entities"]
+    assert "Please" not in result["dropped_entities"]
+
