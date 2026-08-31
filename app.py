@@ -484,6 +484,46 @@ st.markdown("""
         margin-top: 0.5rem;
     }
 
+    /* 31 Aug 2026 polish pass: the landing page's "How it works"
+       steps were reusing .microcopy — a class built for throwaway
+       fine-print (e.g. the firm-signal disclaimer) — for the page's
+       actual explainer content. Same font-size/color as a legal
+       caption meant that content read as an afterthought. This gives
+       it real hierarchy: a numbered mark that echoes the report's
+       instrument-panel language, a proper headline weight for the
+       step name, body-text (not faint) for the description. */
+    .step-card {
+        text-align: center;
+        padding: 0 0.4rem;
+    }
+    .step-card .step-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        margin-bottom: 0.5rem;
+        border-radius: 50%;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        font-weight: 700;
+    }
+    .step-card .step-label {
+        display: block;
+        font-family: var(--font-display);
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--ink);
+        margin-bottom: 0.25rem;
+    }
+    .step-card .step-desc {
+        font-size: 0.85rem;
+        color: var(--body-text);
+        line-height: 1.5;
+    }
+
     .progress {
         display: flex;
         align-items: flex-end;
@@ -1232,26 +1272,34 @@ def screen_landing():
     step_col1, step_col2, step_col3, step_col4 = st.columns(4)
     with step_col1:
         st.markdown(
-            '<div class="microcopy"><strong>1. Paste</strong><br>'
-            'A few things you\'ve actually written. No account needed.</div>',
+            '<div class="step-card"><span class="step-num">1</span>'
+            '<span class="step-label">Paste</span>'
+            '<span class="step-desc">A few things you\'ve actually written. '
+            'No account needed.</span></div>',
             unsafe_allow_html=True,
         )
     with step_col2:
         st.markdown(
-            '<div class="microcopy"><strong>2. Calibrate</strong><br>'
-            'A couple of quick, typed sentences sharpen the fingerprint.</div>',
+            '<div class="step-card"><span class="step-num">2</span>'
+            '<span class="step-label">Calibrate</span>'
+            '<span class="step-desc">A couple of quick, typed sentences '
+            'sharpen the fingerprint.</span></div>',
             unsafe_allow_html=True,
         )
     with step_col3:
         st.markdown(
-            '<div class="microcopy"><strong>3. Write</strong><br>'
-            'Paste any AI draft. Get it back sounding like you.</div>',
+            '<div class="step-card"><span class="step-num">3</span>'
+            '<span class="step-label">Write</span>'
+            '<span class="step-desc">Paste any AI draft. Get it back '
+            'sounding like you.</span></div>',
             unsafe_allow_html=True,
         )
     with step_col4:
         st.markdown(
-            '<div class="microcopy"><strong>4. Check</strong><br>'
-            'Paste anything, from anywhere. See if it still sounds like you.</div>',
+            '<div class="step-card"><span class="step-num">4</span>'
+            '<span class="step-label">Check</span>'
+            '<span class="step-desc">Paste anything, from anywhere. '
+            'See if it still sounds like you.</span></div>',
             unsafe_allow_html=True,
         )
 
