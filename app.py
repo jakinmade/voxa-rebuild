@@ -703,10 +703,30 @@ st.markdown("""
     .what-changed-chip {
         font-family: var(--font-mono);
         font-size: 0.78rem;
-        padding: 0.25rem 0.55rem;
-        border-radius: 999px;
+        line-height: 1.35;
+        padding: 0.3rem 0.65rem;
+        /* 1 Sep 2026 fix: full-pill (999px) radius reads as sharp only
+           when the label is a single short word ("hedging \u2191"). Real
+           labels include multi-word dimensions like "ownership (first
+           person)" (see _DIMENSION_LABELS in voice_engine.py), which
+           at this font size run long enough to either get clipped by
+           the pill's own rounded ends or wrap onto a second line -
+           and a 999px radius on a two-line block renders as a lumpy
+           oval, not a chip. Dropping to the standard small radius
+           keeps the same visual language as every other badge/box on
+           this card while looking correct at any label length or
+           viewport width, wrapped or not. box-sizing/max-width/
+           overflow-wrap are the same defensive trio used elsewhere in
+           this file (.callout-text, .content-lock-item span:last-
+           child) so a chip can never overflow its row regardless of
+           how long a future dimension label gets. */
+        border-radius: var(--radius-sm);
         background: var(--surface-2, var(--surface));
         color: var(--ink);
+        box-sizing: border-box;
+        max-width: 100%;
+        overflow-wrap: break-word;
+        word-break: normal;
     }
     .what-changed-empty {
         font-size: 0.82rem;
