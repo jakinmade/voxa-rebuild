@@ -738,7 +738,12 @@ st.markdown("""
         flex-direction: column;
         gap: 0.15rem;
         padding: 0.7rem 0.9rem;
-        border-radius: 0.5rem;
+        /* 1 Sep 2026 fix: was a hardcoded 0.5rem (8px), one size off
+           the --radius-sm (6px) token used by .content-lock-item just
+           below it in the same card - two visually similar boxes
+           stacked in the same voice-report with slightly different
+           corner rounding. Token, not new value, so it now matches. */
+        border-radius: var(--radius-sm);
         margin-bottom: 0.9rem;
     }
     .content-lock-banner.pass {
@@ -888,7 +893,9 @@ st.markdown("""
         display: inline-flex;
         align-items: center;
         padding: 0.2rem 0.6rem;
-        border-radius: 6px;
+        /* Token, not the literal value it already matched - same
+           1 Sep 2026 radius-consistency pass as content-lock-banner. */
+        border-radius: var(--radius-sm);
         background: var(--danger-soft);
         color: var(--danger);
         font-size: 0.8rem;
@@ -1282,7 +1289,7 @@ def _pricing_tiers_html(compact: bool = False) -> str:
         else:
             body = "".join(f'<div class="microcopy">&#8226; {f}</div>' for f in tier["features"])
         cards.append(
-            '<div style="border:0.5px solid var(--border);border-radius:10px;'
+            '<div style="border:0.5px solid var(--border);border-radius:var(--radius-md);'
             'padding:14px 16px;flex:1;min-width:150px;">'
             f'<div class="tagline">{tier["name"]}</div>'
             f'<div class="headline" style="font-size:1.4rem;">{tier["price"]}'
@@ -1362,7 +1369,7 @@ def screen_landing():
         st.markdown('<div class="sub">A generic AI draft</div>', unsafe_allow_html=True)
         st.markdown(
             '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
-            'border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;'
+            'border:0.5px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;'
             'font-size:0.85rem;color:var(--body-text);">'
             'I wanted to reach out regarding the project timeline. I believe we should '
             'consider adjusting our approach moving forward to ensure optimal outcomes.'
@@ -1373,7 +1380,7 @@ def screen_landing():
         st.markdown('<div class="sub">Rewritten in your voice</div>', unsafe_allow_html=True)
         st.markdown(
             '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
-            'border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;'
+            'border:0.5px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;'
             'font-size:0.85rem;color:var(--body-text);">'
             'Quick one on the timeline. I think we need to change tack here. Happy to '
             'talk it through whenever works.'
@@ -4112,7 +4119,7 @@ Show the per-dimension breakdown
                         note = "Highlighted: a word choice worth a second look. Hover to see why."
                     st.markdown(
                         f'<div style="white-space:pre-wrap;line-height:1.6;'
-                        f'background:var(--canvas);border:0.5px solid var(--border);border-radius:10px;'
+                        f'background:var(--canvas);border:0.5px solid var(--border);border-radius:var(--radius-md);'
                         f'padding:14px 16px;margin-bottom:0.6rem;">{highlighted}</div>'
                         f'<div class="microcopy">{note}</div>',
                         unsafe_allow_html=True,
@@ -4260,7 +4267,13 @@ Show the per-dimension breakdown
                     f'style="font-family: var(--font-sans); font-size: 0.85rem; '
                     f'font-weight: 500; color: var(--accent); '
                     f'background: var(--accent-soft); border: 1px solid var(--border); '
-                    f'border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer; '
+                    # 1 Sep 2026 fix: was a hardcoded 8px, one size off the
+                    # var(--radius-sm) (6px) every real button in the app
+                    # uses (see div[data-testid="stButton"] button rule
+                    # above), sitting directly under an output box that
+                    # itself uses --radius-md (10px) - three close-but-
+                    # mismatched corner radii stacked in one small area.
+                    f'border-radius: var(--radius-sm); padding: 0.4rem 0.9rem; cursor: pointer; '
                     f'margin-bottom: 0.6rem;">Copy text</button>',
                     unsafe_allow_html=True,
                 )
