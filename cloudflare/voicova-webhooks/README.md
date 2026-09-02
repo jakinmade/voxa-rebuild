@@ -36,7 +36,7 @@ repeat it.
   Secrets, all as Secret type): `STRIPE_WEBHOOK_SECRET`,
   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 
-## Status as of 21 Aug 2026 — NOT yet confirmed working
+## Status as of 21 Aug 2026 — NOT yet confirmed working (superseded, see below)
 
 Worker deployed, all three secrets set, Stripe test-mode webhook
 endpoint created with the three events above selected. Three resent
@@ -49,6 +49,32 @@ logs) versus a secret that's present but doesn't match Stripe's
 `whsec_...` value (e.g. a copy-paste corruption, same failure shape as
 CLEARANCE's June 2026 SendGrid key issue).
 
-**Do not consider Section 15.2 item 3 closed until three real test
-events come back 200 and a row in `lifetime_render_cap` visibly
-updates in Supabase.**
+## Status as of 2 Sept 2026 (hardening Session 2 infra audit)
+
+Pulled the live Worker's code directly via the Cloudflare API and
+confirmed it matches this file's 27 Aug reconciliation redesign
+almost exactly, including the `secret.trim().replace(/^["']|["']$/g,
+"")` defensive fix for the copy-paste corruption failure mode
+described above — so the redesign this repo's commit history says was
+"NOT yet deployed" as of 27 Aug **has since been deployed**. This
+resolves the "is the fix even live" question the 21 Aug status above
+left open.
+
+**Still not independently confirmed from this session:** whether
+`STRIPE_WEBHOOK_SECRET`, `STRIPE_API_KEY`, `SUPABASE_URL`, and
+`SUPABASE_SERVICE_ROLE_KEY` are each currently set to a *correct*
+value at runtime — Cloudflare secrets are write-only and don't show
+values back, and this session had no access to the Worker's live logs
+or to Stripe's dashboard to resend a real test event. The bar this
+file already set stands: **do not consider Section 15.2 item 3 fully
+closed until three real test events come back 200 and a row in
+`lifetime_render_cap` visibly updates in Supabase** — the code is now
+confirmed correct; only that last runtime check remains.
+
+## Status as of 3 Sept 2026 — confirmed working end to end
+
+User confirmed the runtime check above: real Stripe test events
+verified against the live Worker, returning 200, with
+`lifetime_render_cap` updating in Supabase as expected. Section 15.2
+item 3 is closed — both the code (2 Sept) and the live runtime
+secrets (3 Sept) are now confirmed correct.
