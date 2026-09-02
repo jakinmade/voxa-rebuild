@@ -24,7 +24,10 @@ supabase==2.23.0
 # Restore-subscription magic-link emails — same package/version as
 # clearance-app's send_report_email, reused deliberately (see
 # _send_restore_email in stripe_subscription.py)
-sendgrid>=6.11.0
+# Pinned exact (2 Sept 2026 hardening pass) — was >=6.11.0, the one
+# remaining open range in this file; same class of risk that broke
+# render-cap counting via an unpinned supabase-py minor bump.
+sendgrid==6.12.5
 streamlit-cookies-controller==0.0.4
 
 # Subscription checkout/verification (Step 4, stripe_subscription.py) —
