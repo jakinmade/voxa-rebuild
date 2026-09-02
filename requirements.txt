@@ -49,3 +49,9 @@ pdfplumber==0.11.9
 # dependency, app.py's "Share your Voice DNA" download button on the My
 # Voice screen calls it directly.
 Pillow==12.3.0
+
+# Error tracking (Sentry) — captures unhandled exceptions in production
+# so failures surface without waiting for a user report. DSN comes from
+# the SENTRY_DSN Railway env var; SDK no-ops safely if it's unset (e.g.
+# local/test runs).
+sentry-sdk==2.68.1

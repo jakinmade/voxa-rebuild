@@ -25,6 +25,9 @@ import uuid
 from datetime import datetime, timezone
 import streamlit as st
 
+import sentry_sdk
+sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN"), traces_sample_rate=0.1)
+
 from scoring_rules import scoring_rules_version
 from render_events import log_render_event
 from render_cap import check_and_reserve_render
