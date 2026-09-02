@@ -45,6 +45,12 @@ stripe==15.3.0
 reportlab==4.4.10
 pdfplumber==0.11.9
 
+# Post-deploy smoke test (dev_tools/smoke_test.py, 3 Sept 2026 hardening
+# pass) — checks a live WebSocket handshake against voicova.com, the
+# exact failure mode that broke app-wide on 1 Sept undetected. Test/dev
+# only, not imported by the live app itself.
+websocket-client==1.9.2
+
 # Shareable Voice DNA card (voice_dna_card.py, 27 Aug 2026) — runtime
 # dependency, app.py's "Share your Voice DNA" download button on the My
 # Voice screen calls it directly.

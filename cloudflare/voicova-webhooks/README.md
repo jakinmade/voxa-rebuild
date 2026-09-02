@@ -70,3 +70,11 @@ file already set stands: **do not consider Section 15.2 item 3 fully
 closed until three real test events come back 200 and a row in
 `lifetime_render_cap` visibly updates in Supabase** — the code is now
 confirmed correct; only that last runtime check remains.
+
+## Status as of 3 Sept 2026 — confirmed working end to end
+
+User confirmed the runtime check above: real Stripe test events
+verified against the live Worker, returning 200, with
+`lifetime_render_cap` updating in Supabase as expected. Section 15.2
+item 3 is closed — both the code (2 Sept) and the live runtime
+secrets (3 Sept) are now confirmed correct.
