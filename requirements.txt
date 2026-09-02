@@ -55,3 +55,12 @@ Pillow==12.3.0
 # the SENTRY_DSN Railway env var; SDK no-ops safely if it's unset (e.g.
 # local/test runs).
 sentry-sdk==2.68.1
+
+# Smoke test tooling (scripts/smoke_test.py, hardening item 4) — not
+# needed to run the live Streamlit app itself, only to run the
+# post-deploy smoke test (CI, or manually with --full). websocket-client
+# and stripe are lightweight; playwright is only required for --full and
+# needs `playwright install chromium` after pip install, so it's not
+# pinned here to avoid bloating every ordinary install — see the
+# workflow file and script docstring for exact setup.
+websocket-client==1.9.0

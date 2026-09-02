@@ -1,0 +1,42 @@
+name: Post-deploy smoke test
+
+# Runs the safe (tier 1) smoke test automatically after every push to
+# main. This is deliberately the *safe* tier only — homepage, WebSocket,
+# Stripe connectivity — none of which touch real user/render data. The
+# full render-flow check (scripts/smoke_test.py --full) has real side
+# effects on production Supabase data and is intentionally left as a
+# manual step per hardening item 4's own definition of done — see the
+# script's module docstring for why.
+#
+# A fixed delay is used to wait for Railway's build+deploy rather than
+# polling Railway's API, since that would need a Railway token as a
+# repo secret. If this proves too short/long in practice, adjust
+# DEPLOY_WAIT_SECONDS below rather than adding new infrastructure.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_WAIT_SECONDS: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install smoke test dependencies
+        run: pip install websocket-client stripe
+
+      - name: Wait for Railway deploy to go live
+        run: sleep "$DEPLOY_WAIT_SECONDS"
+
+      - name: Run smoke test (safe tier)
+        env:
+          STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
+        run: python scripts/smoke_test.py --url https://voicova.com
