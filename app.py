@@ -61,7 +61,7 @@ from prompts import (
     _detect_mode, apply_intent_mode, _detect_locale,
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
     build_correction_prompt, merge_starter_evidence,
-    build_voice_profile_summary_prompt,
+    build_voice_profile_summary_prompt, uses_em_dashes,
     CORRECTION_TOOL, response_looks_contaminated,
 )
 from components.paste_guard import paste_guard
@@ -2547,7 +2547,35 @@ def _run_render(
     # Baseline-driven, not assumed: does this person's own writing use
     # contractions? Only strip them from the output if their own writing
     # doesn't have them either.
-    keep_contractions = uses_contractions(fingerprint_corpus) if fingerprint_corpus else False
+    #
+    # Fixed 4 Sept 2026: this used to check ONLY fingerprint_corpus (the
+    # onboarding calibration text - Sample 1 paste + Screen 3 starters,
+    # captured once, reused for every render since). That meant a
+    # render input that itself used contractions consistently still had
+    # them stripped, if the calibration sample happened to fall under
+    # the 1-per-100-words threshold - a real, confirmed case where a
+    # genuine four-contraction business email had every one expanded
+    # ("it's"->"it is", "didn't"->"did not", "you're"->"you are") because
+    # calibration alone said no, even though the actual input said yes.
+    # Now checked against EITHER signal: the input being rewritten right
+    # now is direct evidence of voice too, not just the onboarding
+    # sample, and it should never be overridden by a stale or
+    # context-mismatched calibration verdict.
+    keep_contractions = (
+        (uses_contractions(fingerprint_corpus) if fingerprint_corpus else False)
+        or uses_contractions(input_text)
+    )
+
+    # Same fix, same reasoning, for em dashes - previously stripped
+    # unconditionally with no check against baseline OR input at all
+    # (unlike contractions, there wasn't even a partial guard). Confirmed
+    # in the same real example: "Scott — following up..." became
+    # "Scott, following up..." even though the em dash was the user's
+    # own genuine opener, not an AI tell.
+    keep_dashes = (
+        (uses_em_dashes(fingerprint_corpus) if fingerprint_corpus else False)
+        or uses_em_dashes(input_text)
+    )
 
     # Same signal used to gate the Ownership/Directness restoration targets
     # and their correction-pass counterparts: does THIS input (not the
@@ -2575,11 +2603,11 @@ def _run_render(
                 system=system, messages=[{"role": "user", "content": input_text}],
             )
             clean = response.content[0].text
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)
-            clean = _grammar_fix_pass(clean, client, locale=st.session_state.get("locale", "uk"))
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
+            clean = _grammar_fix_pass(clean, client, locale=st.session_state.get("locale", "uk"), original_input_text=input_text)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
     except Exception:
         st.session_state.render_error = (
             "That didn't go through. Your text is safe, try again."
@@ -2720,7 +2748,7 @@ def _run_render(
         # (residual modal hedges, noun-phrase subjects, non-imperative
         # wrappers, etc. — the directions each fixer declines on
         # purpose), not dimensions the deterministic pass already fixed.
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
+        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
         if st.session_state.get("locale", "uk") == "uk":
             clean = _apply_uk_english(clean)
         delta = score_render_delta(baseline, clean)
@@ -2804,7 +2832,7 @@ def _run_render(
                 if corrected is None:
                     log.error("correction_pass_failed_both_attempts")
                     corrected = pre_llm_correction
-                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions, original_input_text=input_text)
+                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
                 if st.session_state.get("locale", "uk") == "uk":
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
@@ -2916,7 +2944,7 @@ def _run_render(
                 clean, _ = _fix_directive_ratio(
                     clean, d["baseline"], d["output"], input_has_directive_content
                 )
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)
             delta = score_render_delta(baseline, clean)
@@ -2940,7 +2968,7 @@ def _run_render(
         # input and were flagged anyway).
         ai_tells = score_ai_tells(clean, original_input_text=input_text)
         if not ai_tells["clean"]:
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
             ai_tells = score_ai_tells(clean, original_input_text=input_text)
 
         # Downgrade MISSED -> SKIPPED for dimensions the input never
@@ -3022,6 +3050,7 @@ def _run_render(
         # drift if the underlying baseline corpus changes between the
         # render and the click.
         st.session_state.render_keep_contractions = keep_contractions
+        st.session_state.render_keep_dashes = keep_dashes
         log.info(
             "render_complete", is_refinement=is_refinement,
             confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
@@ -3119,6 +3148,7 @@ def _run_render(
         st.session_state.render_completed_at = None
         st.session_state.render_insertion_check = None
         st.session_state.render_keep_contractions = None
+        st.session_state.render_keep_dashes = None
 
     st.session_state.render_output = clean
     return True
@@ -3458,8 +3488,9 @@ def _clean_ai_tells_and_rescore():
     if not current:
         return
     keep_contractions = st.session_state.get("render_keep_contractions", False)
+    keep_dashes = st.session_state.get("render_keep_dashes", False)
     input_text = st.session_state.get("render_input_text", "")
-    cleaned = _regex_sweep(current, keep_contractions=keep_contractions, original_input_text=input_text)
+    cleaned = _regex_sweep(current, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
     new_ai_tells = score_ai_tells(cleaned, original_input_text=input_text)
 
     st.session_state.render_output = cleaned

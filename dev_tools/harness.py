@@ -200,7 +200,12 @@ def run_render_stage(
     input_text = persona["render_input"]
     observations = fingerprint["observations"]
     baseline = fingerprint["baseline"]
-    keep_contractions = fingerprint["keep_contractions"]
+    # Mirrors app.py's 4 Sept 2026 fix: don't let a stale/context-
+    # mismatched calibration verdict override what the current input
+    # itself shows. See app.py's keep_contractions comment for the
+    # real confirmed case this fixes.
+    keep_contractions = fingerprint["keep_contractions"] or ve.uses_contractions(input_text)
+    keep_dashes = pr.uses_em_dashes(persona.get("sample1_text", "")) or pr.uses_em_dashes(input_text)
     locale = fingerprint["locale"]
 
     detected_mode = pr._detect_mode(input_text)
@@ -220,11 +225,11 @@ def run_render_stage(
         system=system, messages=[{"role": "user", "content": input_text}],
     )
     clean = response.content[0].text
-    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions)
+    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
     if locale == "uk":
         clean = pr._apply_uk_english(clean)
-    clean = pr._grammar_fix_pass(clean, client)
-    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions)
+    clean = pr._grammar_fix_pass(clean, client, original_input_text=input_text)
+    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
 
     delta = ve.score_render_delta(baseline, clean)
     semantic = ve.score_semantic_drift(input_text, clean)
@@ -279,11 +284,11 @@ def run_render_stage(
             system=system, messages=[{"role": "user", "content": refined_input}],
         )
         clean2 = response2.content[0].text
-        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions)
+        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
         if locale == "uk":
             clean2 = pr._apply_uk_english(clean2)
-        clean2 = pr._grammar_fix_pass(clean2, client)
-        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions)
+        clean2 = pr._grammar_fix_pass(clean2, client, original_input_text=refined_input)
+        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
 
         delta2 = ve.score_render_delta(baseline, clean2)
         semantic2 = ve.score_semantic_drift(refined_input, clean2)
