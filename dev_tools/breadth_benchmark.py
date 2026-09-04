@@ -87,6 +87,7 @@ def run_breadth_benchmark(persona_paths: list[str], api_key: str) -> dict:
             "dropped_entities": report.get("dropped_entities", []),
             "attribution_swaps": report.get("attribution_swaps", []),
             "correction_pass_applied": render_stage.get("correction_pass_applied"),
+            "deterministic_fixers_applied": render_stage.get("deterministic_fixers_applied"),
             "output": render_stage.get("output", ""),
         })
 

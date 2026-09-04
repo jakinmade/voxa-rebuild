@@ -69,6 +69,7 @@ if _REPO_ROOT not in sys.path:
 
 import voice_engine as ve
 import prompts as pr
+import deterministic_fixers as df
 
 # Mirrors app.py's SAMPLE2_REQUIRED_MIN_WORDS and REQUIRED_STARTER_INDICES.
 # Indices 0 and 3 are required (picked for register contrast); 1 and 2
@@ -240,6 +241,72 @@ def run_render_stage(
     starter_delta = ve.score_render_delta(starter_baseline, clean) if starter_baseline else None
     correction_delta = pr.merge_starter_evidence(delta, starter_delta)
 
+    # Parity fix, 4 Sept 2026 (second one this session - see the
+    # correction-pass parity fix below for the first). Real finding:
+    # this harness has NEVER called any of the five deterministic
+    # fixers (hedge, sentence-length, ownership, directive,
+    # scaffolding) at all - every breadth-benchmark run today,
+    # including the ones that confirmed PR #25/#26/#27, went straight
+    # from scoring to the LLM correction call, skipping the free,
+    # deterministic pass production always runs first. That means no
+    # result from this harness has ever actually exercised any
+    # auto-fixer, and the LLM correction call here was being asked to
+    # fix things (a hedge word, a scaffolding phrase) production would
+    # have already handled for free before that call ever fires.
+    # Ported directly from app.py's equivalent block - same order,
+    # same fixers, same "each fixer only fires on the direction it can
+    # safely handle" contract.
+    input_metrics_signal = ve.compute_baseline_metrics(input_text)
+    input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
+    input_has_directive_content = input_metrics_signal["directive_ratio"] > 0
+
+    if correction_delta.get("hedge_density", {}).get("verdict") == "MISSED":
+        d = correction_delta["hedge_density"]
+        clean, hedge_fixed = df._fix_hedge_density(clean, d["baseline"], d["output"])
+        clean, modal_fixed = df._fix_modal_hedge(clean, d["baseline"], d["output"])
+    else:
+        hedge_fixed = modal_fixed = False
+    if correction_delta.get("sentence_length_sd", {}).get("verdict") == "MISSED":
+        d = correction_delta["sentence_length_sd"]
+        clean, rhythm_fixed = df._fix_sentence_length_sd(clean, d["baseline"], d["output"])
+    else:
+        rhythm_fixed = False
+    if correction_delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
+        d = correction_delta["first_person_ratio"]
+        clean, ownership_fixed = df._fix_first_person_ratio(
+            clean, d["baseline"], d["output"], input_has_opinion_content
+        )
+        clean, ownership_over_fixed = df._fix_first_person_over_ratio(
+            clean, d["baseline"], d["output"], input_text
+        )
+        clean, ownership_restored = df.restore_fabricated_ownership_sentences(clean, input_text)
+        ownership_fixed = ownership_fixed or ownership_over_fixed or ownership_restored
+    else:
+        ownership_fixed = False
+    if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
+        d = correction_delta["directive_ratio"]
+        clean, directive_fixed = df._fix_directive_ratio(
+            clean, d["baseline"], d["output"], input_has_directive_content
+        )
+    else:
+        directive_fixed = False
+    if correction_delta.get("scaffolding_density", {}).get("verdict") == "MISSED":
+        d = correction_delta["scaffolding_density"]
+        clean, scaffolding_fixed = df._fix_scaffolding_density(clean, d["baseline"], d["output"])
+    else:
+        scaffolding_fixed = False
+
+    # Re-score after the deterministic pass, same reason as app.py:
+    # the LLM correction call below should only target what genuinely
+    # survived the free fixes, not dimensions already resolved.
+    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+    if locale == "uk":
+        clean = pr._apply_uk_english(clean)
+    delta = ve.score_render_delta(baseline, clean)
+    semantic = ve.score_semantic_drift(input_text, clean)
+    starter_delta = ve.score_render_delta(starter_baseline, clean) if starter_baseline else None
+    correction_delta = pr.merge_starter_evidence(delta, starter_delta)
+
     correction_prompt = pr.build_correction_prompt(correction_delta, semantic)
     correction_applied = False
     if correction_prompt:
@@ -339,6 +406,11 @@ def run_render_stage(
         "ai_score_input": ai_score,
         "output": clean,
         "correction_pass_applied": correction_applied,
+        "deterministic_fixers_applied": {
+            "hedge_density": hedge_fixed, "modal_hedge": modal_fixed,
+            "sentence_length_sd": rhythm_fixed, "first_person_ratio": ownership_fixed,
+            "directive_ratio": directive_fixed, "scaffolding_density": scaffolding_fixed,
+        },
         "voice_report": voice_report,
         "refinement_result": refinement_result,
     }
