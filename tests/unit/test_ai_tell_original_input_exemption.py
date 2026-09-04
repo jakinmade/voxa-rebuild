@@ -113,3 +113,81 @@ def test_analytical_register_only_checked_when_register_warrants_it():
     corporate_text = "We should leverage this synergy going forward."
     result = ve.score_ai_tells(corporate_text, original_input_text="")
     assert result["register"] == "corporate"
+
+
+# ---------------------------------------------------------------------------
+# calibration_text — added 4 Sept 2026, same false-positive class as
+# original_input_text above, but for a stylistic device that's part of
+# someone's genuine calibrated voice yet doesn't happen to appear in THIS
+# specific render's input.
+# ---------------------------------------------------------------------------
+
+def test_verbatim_phrase_exempted_when_genuinely_in_calibration():
+    """A phrase-list hit (not the fragment-emphasis pattern) exempted
+    because it appears verbatim in the calibration corpus, even though
+    it's absent from this specific render's input."""
+    calibration = "I suspect this won't hold up under real load."
+    render = "So I suspect this won't hold up."
+    result = ve.score_ai_tells(render, calibration_text=calibration)
+    assert result["clean"] is True
+
+
+def test_fragment_emphasis_needs_pattern_level_exemption_not_phrase_level():
+    """The real bug this fix exists for: a narrative-storyteller
+    persona's calibration sample used a short declarative fragment for
+    emphasis ('No stack trace, nothing.') and a rewrite using the SAME
+    DEVICE on completely different words ('Not optional. Not a
+    nice-to-have.') still got flagged, because a verbatim phrase-match
+    exemption can never work here by construction - the two fragments
+    share no literal text at all, only the same structural device.
+    Confirms the fix checks whether the PATTERN itself matches
+    anywhere in calibration_text, not whether the exact phrase does."""
+    calibration = (
+        "So picture this. It's 11pm, we're three days from launch, and the "
+        "payment integration just silently stops working with zero error "
+        "logs. No stack trace, nothing. Turned out to be a timezone mismatch."
+    )
+    render = (
+        "Root cause was a config mismatch. Full end-to-end payment flows "
+        "need to be a mandatory gate before any future launch. Not optional. "
+        "Not a nice-to-have."
+    )
+    # Without calibration: correctly flagged (no evidence given).
+    without = ve.score_ai_tells(render)
+    assert without["clean"] is False
+    assert any("not optional" in f.lower() for f in without["flagged"])
+    # With calibration showing the same device on different words: exempted.
+    with_calibration = ve.score_ai_tells(render, calibration_text=calibration)
+    assert with_calibration["clean"] is True
+
+
+def test_fragment_emphasis_still_flagged_without_calibration_evidence():
+    """The exemption must stay narrow - a fragment-emphasis hit with
+    no calibration evidence at all (the default, and every existing
+    caller that hasn't been updated) must still be flagged exactly as
+    before this fix existed."""
+    render = "This is critical. Not optional. Move forward regardless."
+    result = ve.score_ai_tells(render)
+    assert result["clean"] is False
+
+
+def test_calibration_pattern_match_requires_the_same_pattern_not_any_fragment():
+    """The pattern-level exemption checks _FRAGMENT_EMPHASIS_PATTERN
+    specifically - calibration text with unrelated content, no matter
+    how long, must not accidentally exempt a real fragment-emphasis
+    hit in the render."""
+    calibration = "I write in complete, conventional sentences with no unusual emphasis devices at all."
+    render = "This is critical. Not optional. Move forward regardless."
+    result = ve.score_ai_tells(render, calibration_text=calibration)
+    assert result["clean"] is False
+
+
+def test_default_behaviour_unchanged_when_calibration_text_omitted():
+    """Every existing caller not yet updated to pass this parameter
+    must see byte-identical behaviour - defaults to "" which exempts
+    nothing extra."""
+    text = "This is critical. Not optional. Move forward regardless."
+    with_default = ve.score_ai_tells(text)
+    with_explicit_empty = ve.score_ai_tells(text, calibration_text="")
+    assert with_default == with_explicit_empty
+    assert with_default["clean"] is False

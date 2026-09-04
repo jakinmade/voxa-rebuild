@@ -3581,7 +3581,16 @@ _ANALYTICAL_TELL_PHRASES = re.compile(
 # followed by a capitalised noun-phrase fragment with no verb of its own
 # (e.g. "Distinct stage. Not a subdivision."). Common essay-voice tic.
 _FRAGMENT_EMPHASIS_PATTERN = re.compile(
-    r"[.!?]\s+(Not\s+\w+|Different\s+\w+|No\s+\w+(?:\s+\w+){0,3})[.!?]",
+    # "No" branch widened 4 Sept 2026 to tolerate an optional comma-
+    # separated continuation ("No stack trace, nothing.") - real
+    # finding: the calibration-corpus check this pattern also feeds
+    # (see score_ai_tells' calibration_text parameter) couldn't
+    # recognise a real persona's own genuine use of this device because
+    # the internal comma broke the match before reaching terminal
+    # punctuation, so the exemption never fired for a case it should
+    # have. "Not"/"Different" branches left untouched - no evidence
+    # yet of the same comma-continuation shape occurring with those.
+    r"[.!?]\s+(Not\s+\w+|Different\s+\w+|No\s+\w+(?:[,\s]+\w+){0,3})[.!?]",
     re.I
 )
 
@@ -3691,7 +3700,7 @@ def uses_contractions(text: str) -> bool:
     return (hits / words) > 0.01  # roughly 1+ contraction per 100 words
 
 
-def score_ai_tells(text: str, original_input_text: str = "") -> dict:
+def score_ai_tells(text: str, original_input_text: str = "", calibration_text: str = "") -> dict:
     """
     Measured verification that the output doesn't read as AI-written —
     run AFTER the regex sweep and grammar pass, not instead of them.
@@ -3732,6 +3741,23 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     the person's usual habits, a deliberate product rule, not an
     AI-detection heuristic, so there is no "genuine" exception for them.
 
+    calibration_text: the person's onboarding calibration corpus,
+    added 4 Sept 2026 — same false-positive class as original_input_
+    text above, but for a stylistic device that's part of someone's
+    genuine, calibrated voice yet doesn't happen to appear in THIS
+    specific render's input. Confirmed live: a narrative-storyteller
+    persona's calibration sample used short declarative fragments for
+    emphasis ("No stack trace, nothing.") and a rewrite using the same
+    device on different words ("Not optional. Not a nice-to-have.")
+    got flagged as an AI tell by _FRAGMENT_EMPHASIS_PATTERN, because
+    the exemption only ever checked the current render's input, never
+    the calibration corpus that actually demonstrates this is their
+    style. Same reasoning as original_input_text's exemption, just one
+    more source of "things this person genuinely writes" to check
+    against - optional, defaults to "" (exempts nothing extra), so
+    every existing caller that doesn't pass it keeps its current
+    behaviour exactly.
+
     Return shape is unchanged from before this parameter existed
     (original_input_text defaults to "", which exempts nothing — every
     existing caller that doesn't pass it keeps its current behaviour
@@ -3740,23 +3766,26 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     available should be updated to pass it.
     """
     original_lower = original_input_text.lower()
+    calibration_lower = calibration_text.lower()
 
     def _matches_excluding_genuine(pattern: "re.Pattern") -> list:
         """Same shape as the old .findall() call this replaces
         (returns the captured group content, not the raw match, to
         keep the exact display text every existing test/caller
         expects) — but first drops any match whose full matched text
-        already appears verbatim in the person's own original input.
+        already appears verbatim in the person's own original input
+        OR their calibration corpus (see calibration_text above).
         Uses finditer + group(0) for the exemption check specifically
         because these patterns are always a single outer group
-        wrapped in \\b...\\b (verified against every pattern this
+        wrapped in \b...\b (verified against every pattern this
         function uses), so group(0) and the captured group content
         are the same text; group(0) is used for the check since it's
         the actual matched substring, not a display convenience.
         """
         kept = []
         for m in pattern.finditer(text):
-            if m.group(0).lower() in original_lower:
+            matched_lower = m.group(0).lower()
+            if matched_lower in original_lower or matched_lower in calibration_lower:
                 continue
             kept.append(m.group(1) if m.lastindex else m.group(0))
         return kept
@@ -3771,7 +3800,25 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
     analytical_hits = []
     if register in ("analytical", "mixed"):
         analytical_hits = _matches_excluding_genuine(_ANALYTICAL_TELL_PHRASES)
-        analytical_hits += _matches_excluding_genuine(_FRAGMENT_EMPHASIS_PATTERN)
+        # _FRAGMENT_EMPHASIS_PATTERN needs a different exemption shape
+        # than the phrase lists above. Added 4 Sept 2026, real finding:
+        # a narrative-storyteller persona's calibration sample used
+        # short declarative fragments for emphasis ("No stack trace,
+        # nothing.") and a rewrite using the SAME DEVICE on different
+        # words ("Not optional. Not a nice-to-have.") still got flagged,
+        # even after calibration_text was added to _matches_excluding_
+        # genuine above - because that exemption checks verbatim text
+        # match, and "not optional" and "no stack trace, nothing" share
+        # no literal substring at all. They're the same STRUCTURAL
+        # device, not the same phrase - a phrase-identity check can
+        # never catch that by construction. The right question for a
+        # pattern detector isn't "did they write this exact fragment
+        # before", it's "do they use this KIND of fragment at all" - so
+        # this checks whether the pattern itself matches anywhere in
+        # calibration_text, and if so, exempts every hit in THIS render,
+        # not just an identical one.
+        if not (calibration_text and _FRAGMENT_EMPHASIS_PATTERN.search(calibration_text)):
+            analytical_hits += _matches_excluding_genuine(_FRAGMENT_EMPHASIS_PATTERN)
 
     all_hits = phrase_hits + analytical_hits + shield_hits
 
