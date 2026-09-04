@@ -1394,7 +1394,7 @@ def screen_landing():
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     st.markdown(
         '<div class="microcopy">No account or signup. Your profile is tied to a device '
-        'cookie, not an email. Clear your cookies and it\'s gone. Per-device, too — your '
+        'cookie, not an email. Clear your cookies and it\'s gone. Per-device, too, your '
         'phone or another computer starts fresh with its own free renders. No selling, '
         'no sharing, no third-party analytics on what you write. 15 renders free, then '
         '£6.99/month or £49/year for unlimited.</div>',
@@ -1492,7 +1492,7 @@ def _render_restore_access_expander(key_prefix: str = "") -> None:
     """
     if st.session_state.get("restore_failed"):
         render_alert(
-            "That link didn't work — it may have expired or already "
+            "That link didn't work. It may have expired or already "
             "been used. Request a new one below.",
             "error",
         )
@@ -1852,7 +1852,7 @@ def screen_paste():
         st.markdown(
             '<div class="microcopy" style="margin-bottom:0.6rem;">'
             'Good input: an email you actually sent, a message to a colleague '
-            'about a real project — names, specifics, your own words. Not a '
+            'about a real project: names, specifics, your own words. Not a '
             'formal document or something written to sound professional.</div>',
             unsafe_allow_html=True,
         )
@@ -1966,7 +1966,7 @@ def screen_paste():
 
     st.markdown(
         '<div class="microcopy">No account or signup. Your profile is tied to a device '
-        'cookie, not an email — so it\'s there next time you\'re on this browser, gone if '
+        'cookie, not an email, so it\'s there next time you\'re on this browser, gone if '
         'you clear cookies or switch devices.</div>',
         unsafe_allow_html=True
     )
@@ -1984,7 +1984,7 @@ def screen_paste():
             "no third-party analytics on this data.\n\n"
             "It's also per-device: this browser only. On your phone or "
             "another computer, you'll go through onboarding again and get "
-            "your own separate 15 free renders — nothing carries across."
+            "your own separate 15 free renders. Nothing carries across."
         )
 
     # Plain link to /pricing, not a promotional push. This screen's
@@ -3573,7 +3573,7 @@ def _render_verdict_banner(verdict: str, sub: str = ""):
     """
     is_pass = verdict == "PASS"
     cls = "pass" if is_pass else "review"
-    title = "PASS \u2014 Safe to deliver" if is_pass else "REVIEW REQUIRED"
+    title = "PASS: safe to deliver" if is_pass else "REVIEW REQUIRED"
     mark = "\u2713" if is_pass else "!"
     sub_html = f'<div class="verdict-banner-sub">{_safe_html(sub)}</div>' if sub else ""
     st.markdown(
@@ -4222,7 +4222,7 @@ Show the per-dimension breakdown
                     if _char_count > 3000:
                         _len_badge, _len_note = (
                             "badge-red",
-                            "over LinkedIn's 3,000-character limit — it will be cut off",
+                            "over LinkedIn's 3,000-character limit, it will be cut off",
                         )
                     elif _char_count > 1600:
                         _len_badge, _len_note = (
@@ -4823,7 +4823,7 @@ def build_voice_profile_markdown(
     lines = [
         "# Your Voice Profile",
         "",
-        "*What VOICOVA has actually learned about how you write — a measured baseline, not an instruction.*",
+        "*What VOICOVA has actually learned about how you write: a measured baseline, not an instruction.*",
         "",
     ]
 
@@ -4860,7 +4860,7 @@ def build_voice_profile_markdown(
         lines.append("| Dimension | Reading |" + (" Confidence |" if dimension_confidence else ""))
         lines.append("|---|---|" + ("---|" if dimension_confidence else ""))
         _stability_label = {
-            "stable": "Stable — likely genuine",
+            "stable": "Stable, likely genuine",
             "volatile": "Varies by register",
             "insufficient_data": "Not enough samples yet",
         }
@@ -4885,7 +4885,7 @@ def build_voice_profile_markdown(
     lines.append("---")
     lines.append(
         "This document is a snapshot of a measured baseline, not a set of "
-        "instructions — nothing here can be edited to change how VOICOVA "
+        "instructions. Nothing here can be edited to change how VOICOVA "
         "renders. Every render is checked against this baseline afterward, "
         "not just written toward it; see the Voice Report on any render "
         "for that check."
@@ -5033,7 +5033,7 @@ def screen_check_draft():
         return
 
     st.markdown(
-        '<div class="sub">Paste a finished draft — yours, someone else\'s, '
+        '<div class="sub">Paste a finished draft, yours, someone else\'s, '
         'AI-written, doesn\'t matter. See if it holds up against your voice, '
         'without rewriting it.</div>',
         unsafe_allow_html=True,
