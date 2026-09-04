@@ -226,14 +226,29 @@ def run_render_stage(
         system=system, messages=[{"role": "user", "content": input_text}],
     )
     clean = response.content[0].text
-    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
+    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
     if locale == "uk":
         clean = pr._apply_uk_english(clean)
     clean = pr._grammar_fix_pass(clean, client, original_input_text=input_text)
-    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
+    clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
 
     delta = ve.score_render_delta(baseline, clean)
     semantic = ve.score_semantic_drift(input_text, clean)
+
+    # Third parity fix this session, found by independent review, not
+    # self-caught: initial_insertion_check must be computed here, right
+    # after the first clean text exists, mirroring app.py exactly -
+    # diffing against input_text (not an intermediate) at the earliest
+    # point content exists to diff. Previously this harness computed
+    # NO insertion_check at all, anywhere, which fed into two separate
+    # real gaps: compute_risk was called with only 3 args (missing the
+    # insertion_check that lets it catch sentence-growth fabrication),
+    # and has_content_integrity_hard_fail - the actual mechanism that
+    # gates a render behind a confirmation wall in production - was
+    # never called in this file at all. Every prior breadth-benchmark
+    # result from this harness could have shown "clean"/"Low risk" on
+    # a render production would have gated for genuine fabrication.
+    initial_insertion_check = df._check_uncorrected_insertions(input_text, clean)
 
     # Second, independent check against the starter-only baseline -
     # mirrors app.py exactly. Rule-based, no extra API call.
@@ -357,17 +372,31 @@ def run_render_stage(
             delta = ve.score_render_delta(baseline, clean)
             semantic = ve.score_semantic_drift(input_text, clean)
             correction_applied = True
+            # Merged with the initial-render check rather than replacing
+            # it, mirroring app.py exactly, so growth/hedges from either
+            # stage carry through to compute_risk below.
+            correction_insertion_check = df._check_uncorrected_insertions(pre_llm_correction, clean)
+            initial_insertion_check = {
+                "new_hedges": initial_insertion_check["new_hedges"] + correction_insertion_check["new_hedges"],
+                "sentence_growth": initial_insertion_check["sentence_growth"] + correction_insertion_check["sentence_growth"],
+                "flagged": initial_insertion_check["flagged"] or correction_insertion_check["flagged"],
+            }
         except Exception as e:
             correction_applied = f"failed: {e}"
 
     ai_tells = ve.score_ai_tells(clean, original_input_text=input_text, calibration_text=persona.get("sample1_text", ""))
     if not ai_tells["clean"]:
-        clean = pr._regex_sweep(clean, keep_contractions=keep_contractions)
+        clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
         ai_tells = ve.score_ai_tells(clean, original_input_text=input_text, calibration_text=persona.get("sample1_text", ""))
 
     confidence = ve.compute_confidence(fingerprint["fitness"], baseline, len(observations))
-    risk = ve.compute_risk(delta, semantic, ai_tells)
-    voice_report = ve.build_voice_report(delta, semantic, confidence, risk, ai_tells)
+    risk = ve.compute_risk(delta, semantic, ai_tells, initial_insertion_check)
+    content_integrity_hard_fail = ve.has_content_integrity_hard_fail(semantic, ai_tells, initial_insertion_check)
+    voice_report = ve.build_voice_report(
+        delta, semantic, confidence, risk, ai_tells,
+        content_integrity_hard_fail=content_integrity_hard_fail,
+    )
+    voice_report["insertion_check"] = initial_insertion_check
 
     # Simulated refinement — Sample 3, one round, per the v4 spec
     refinement_result = None
@@ -385,17 +414,23 @@ def run_render_stage(
             system=system, messages=[{"role": "user", "content": refined_input}],
         )
         clean2 = response2.content[0].text
-        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
+        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions, original_input_text=refined_input, keep_dashes=keep_dashes)
         if locale == "uk":
             clean2 = pr._apply_uk_english(clean2)
         clean2 = pr._grammar_fix_pass(clean2, client, original_input_text=refined_input)
-        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions, keep_dashes=keep_dashes)
+        clean2 = pr._regex_sweep(clean2, keep_contractions=keep_contractions, original_input_text=refined_input, keep_dashes=keep_dashes)
 
         delta2 = ve.score_render_delta(baseline, clean2)
         semantic2 = ve.score_semantic_drift(refined_input, clean2)
         ai_tells2 = ve.score_ai_tells(clean2, original_input_text=refined_input, calibration_text=persona.get("sample1_text", ""))
-        risk2 = ve.compute_risk(delta2, semantic2, ai_tells2)
-        report2 = ve.build_voice_report(delta2, semantic2, confidence, risk2, ai_tells2)
+        insertion_check2 = df._check_uncorrected_insertions(refined_input, clean2)
+        risk2 = ve.compute_risk(delta2, semantic2, ai_tells2, insertion_check2)
+        hard_fail2 = ve.has_content_integrity_hard_fail(semantic2, ai_tells2, insertion_check2)
+        report2 = ve.build_voice_report(
+            delta2, semantic2, confidence, risk2, ai_tells2,
+            content_integrity_hard_fail=hard_fail2,
+        )
+        report2["insertion_check"] = insertion_check2
 
         refinement_result = {"output": clean2, "voice_report": report2}
     elif persona.get("refinement") and skip_refinement:
