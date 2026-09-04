@@ -287,6 +287,35 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     else:
         lines.append("CONTRACTIONS: does not use contractions in their writing — do not introduce any")
 
+    # Sentence completeness — added 4 Sept 2026, real-render finding.
+    # A dropped-subject opener in the original ("Built out for X...")
+    # was restored to a grammatically fuller form ("I built it out for
+    # X...") during generation, and the same happened to a comma-
+    # spliced list ("...SR 11-7, the state AI laws now live" became
+    # "...SR 11-7, and the state AI laws are all live" - an "and"
+    # added). Neither is a factual addition, but both genuinely add
+    # words, which is exactly what deterministic_fixers.
+    # _check_uncorrected_insertions' word-budget check is watching for
+    # (correctly - see that function's own docstring on why it can't
+    # safely be loosened further without risking a previously-fixed
+    # false positive returning). Rather than touch that carefully-tuned
+    # detection again, this stops the trigger at the source: nothing
+    # previously told the model that completing a fragment into fuller
+    # grammar was undesirable, so it applied its own default instinct
+    # to "improve" the phrasing. General principle, not conditional on
+    # a specific detected pattern - safe for anyone using this tool,
+    # since nobody wants their own deliberate economy of language
+    # corrected into more conventional prose.
+    lines.append(
+        "SENTENCE COMPLETENESS: do not add a subject, article, or connective word "
+        "the original left out for economy (e.g. 'Built out for X' should not become "
+        "'I built it out for X'; a comma-spliced list should not gain an 'and' it "
+        "didn't have). Match their level of structural completeness - if they wrote "
+        "it as a fragment or dropped a word deliberately, keep it that way. This is "
+        "not the same as fixing an actual grammar error - it's leaving alone what "
+        "isn't broken."
+    )
+
     # Observations — headline + evidence quote where available
     lines.append("\nVOICE OBSERVATIONS (from their own writing):")
     for obs in observations[:5]:
@@ -1123,26 +1152,49 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
         text = re.sub(r"\bcurious whether\b", "curious if", text, flags=re.I)
 
     # 2. Contractions — only expanded if the user's own baseline doesn't use them
+    contractions = [
+        ("aren't", "are not"), ("isn't", "is not"), ("wasn't", "was not"),
+        ("weren't", "were not"), ("didn't", "did not"), ("doesn't", "does not"),
+        ("don't", "do not"), ("haven't", "have not"), ("hasn't", "has not"),
+        ("hadn't", "had not"), ("won't", "will not"), ("wouldn't", "would not"),
+        ("couldn't", "could not"), ("shouldn't", "should not"), ("can't", "cannot"),
+        ("it's", "it is"), ("that's", "that is"), ("there's", "there is"),
+        ("they're", "they are"), ("they've", "they have"), ("they'd", "they would"),
+        ("I'm", "I am"), ("I've", "I have"), ("I'd", "I would"), ("I'll", "I will"),
+        ("we're", "we are"), ("we've", "we have"), ("we'd", "we would"),
+        ("you're", "you are"), ("you've", "you have"), ("you'd", "you would"),
+        ("he's", "he is"), ("she's", "she is"), ("who's", "who is"),
+        ("what's", "what is"), ("where's", "where is"),
+    ]
     if not keep_contractions:
-        contractions = [
-            ("aren't", "are not"), ("isn't", "is not"), ("wasn't", "was not"),
-            ("weren't", "were not"), ("didn't", "did not"), ("doesn't", "does not"),
-            ("don't", "do not"), ("haven't", "have not"), ("hasn't", "has not"),
-            ("hadn't", "had not"), ("won't", "will not"), ("wouldn't", "would not"),
-            ("couldn't", "could not"), ("shouldn't", "should not"), ("can't", "cannot"),
-            ("it's", "it is"), ("that's", "that is"), ("there's", "there is"),
-            ("they're", "they are"), ("they've", "they have"), ("they'd", "they would"),
-            ("I'm", "I am"), ("I've", "I have"), ("I'd", "I would"), ("I'll", "I will"),
-            ("we're", "we are"), ("we've", "we have"), ("we'd", "we would"),
-            ("you're", "you are"), ("you've", "you have"), ("you'd", "you would"),
-            ("he's", "he is"), ("she's", "she is"), ("who's", "who is"),
-            ("what's", "what is"), ("where's", "where is"),
-        ]
         for contraction, full in contractions:
             pattern = re.compile(r'\b' + re.escape(contraction) + r'\b', re.IGNORECASE)
             def _repl(m, f=full):
                 return f[0].upper() + f[1:] if m.group(0)[0].isupper() else f
             text = pattern.sub(_repl, text)
+    else:
+        # 2b. Restoration for contractions the model expanded anyway —
+        # added 4 Sept 2026, real-render finding. The CONTRACTIONS
+        # instruction in _build_voice_dna tells the model to use
+        # contractions, but with no enforcement, the model can still
+        # choose the expanded form at a given position on its own
+        # judgement - confirmed live: "It's the deterministic proof
+        # layer..." rendered as "It is the deterministic proof layer..."
+        # in two consecutive identical-input renders, even with
+        # keep_contractions=True, while every OTHER contraction in the
+        # same output was correctly preserved. Same evidence-gated
+        # pattern as the "curious if" restoration above: only restores
+        # a specific contraction when the original genuinely, verbatim
+        # used that exact contracted form (case-insensitive whole
+        # word) - never guesses or introduces a contraction that
+        # wasn't demonstrably the person's own.
+        for contraction, full in contractions:
+            if not re.search(r'\b' + re.escape(contraction) + r'\b', original_input_text, re.IGNORECASE):
+                continue
+            full_pattern = re.compile(r'\b' + re.escape(full) + r'\b', re.IGNORECASE)
+            def _restore(m, c=contraction):
+                return c[0].upper() + c[1:] if m.group(0)[0].isupper() else c
+            text = full_pattern.sub(_restore, text)
 
     # 3. Claude literary closers — abstract triplet endings
     # "The ambition exists. The blueprint doesn't. Until they commit..."
