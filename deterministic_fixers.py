@@ -25,7 +25,7 @@ rejected as a meaning-risk, same standard as the ones that shipped.
 import re
 from collections import Counter
 import difflib
-from voice_engine import _extract_sentences, _imperative_pattern, _HEDGE_PATTERN
+from voice_engine import _extract_sentences, _imperative_pattern, _HEDGE_PATTERN, _SCAFFOLDING_PATTERN
 
 # Single source of truth, imported from voice_engine.py rather than
 # duplicated here — this file previously kept its own hand-copied word
@@ -157,10 +157,23 @@ def _clean_after_delete(s: str) -> str:
     """Shared cleanup after removing a word from inside a sentence:
     collapse double spaces, drop a now-orphaned leading/trailing comma,
     drop " ," left when the deleted word had a comma right after it,
-    re-capitalise if the first word was consumed."""
+    re-capitalise if the first word was consumed.
+
+    Colon handling added 4 Sept 2026 alongside the scaffolding-density
+    fixer: deleting a phrase like "Let me explain:" or a mid-sentence
+    "background:" can leave an orphaned colon the comma-only rules
+    above never covered - confirmed by direct testing before this
+    shipped, not a hypothetical. Mirrors the comma rules exactly,
+    same reasoning: a bare leftover colon (leading, trailing, or
+    immediately after a comma) is never a valid punctuation state
+    for any caller of this shared helper, not just the one that
+    happened to surface it."""
     s = re.sub(r"\s*,\s*,", ",", s)          # "X, , Y" -> "X, Y"
+    s = re.sub(r"\s*,\s*:", ":", s)          # "X, : Y" -> "X: Y"
     s = re.sub(r"^\s*,\s*", "", s)            # leading orphan comma
     s = re.sub(r"\s*,\s*(?=[.!?]|$)", "", s)  # trailing orphan comma
+    s = re.sub(r"^\s*:\s*", "", s)            # leading orphan colon
+    s = re.sub(r"\s*:\s*(?=[.!?]|$)", "", s)  # trailing orphan colon
     s = re.sub(r"\s{2,}", " ", s).strip()
     if s:
         s = s[0].upper() + s[1:]
@@ -769,6 +782,83 @@ _POLITE_WRAPPER = re.compile(
     r"would you (?:please\s+)?|you (?:should|could|might want to|may want to)\s+)",
     re.I
 )
+
+
+def _fix_scaffolding_density(text: str, target: float, current: float) -> tuple[str, bool]:
+    """
+    Deterministic scaffolding-phrase correction, over-scaffolded
+    direction only (current > target) — same shape and safety
+    convention as _fix_hedge_density above. Added 4 Sept 2026 to close
+    a gap flagged the same day: conclusion_opener_ratio and
+    scaffolding_density were added as SCORED, enforced dimensions
+    (voice_engine.compute_baseline_metrics) but neither had an auto-
+    fixer, unlike the original four. This closes the scaffolding_
+    density half — deletion-based, same as hedges, so it carries the
+    same safety profile. conclusion_opener_ratio (does the piece lead
+    with its point) is NOT given a fixer here: correcting it needs
+    reordering sentences, not deleting words, which is a materially
+    riskier transformation this pass deliberately does not attempt —
+    see this file's sentence-alignment fixers' own documented history
+    of a cleverer attempt breaking a real render. Left measured and
+    reported only, same as before.
+
+    Uses voice_engine's own _SCAFFOLDING_PATTERN — the same one
+    score_reader_assumption and compute_baseline_metrics already
+    share — so there is exactly one definition of "scaffolding"
+    across detection and correction, not two that could drift apart.
+
+    Every matched phrase here is a clause-level preface ("basically",
+    "in other words", "as you know", "the reason is", ...) that reads
+    naturally deleted outright — unlike a hedge word, which softens a
+    claim in place, a scaffolding phrase's whole job is to introduce
+    what follows, so removing it and re-capitalising is the correct
+    fix, not a partial one. _clean_after_delete's existing orphan-
+    comma and re-capitalisation handling covers the punctuation this
+    produces (a comma right after "Basically," or "in other words,").
+
+    Returns (fixed_text, applied) exactly like the other fixers here —
+    the caller re-scores afterward rather than trusting this flag alone.
+    """
+    if current <= target:
+        return text, False
+
+    def _fix_one(s: str) -> tuple[str, bool]:
+        matches = list(_SCAFFOLDING_PATTERN.finditer(s))
+        if not matches:
+            return s, False
+
+        # Delete right-to-left, but check EACH deletion in isolation for
+        # a broken result before committing to it - two real cases found
+        # by direct testing before this fixer ever shipped: "The reason
+        # is that X" -> deleting "the reason is" alone leaves "That X",
+        # an orphaned subordinating conjunction with no clause to attach
+        # to; "Let me explain: X" -> deleting "let me explain" leaves a
+        # leading ": X", an orphaned colon _clean_after_delete only
+        # handles for commas. Rather than special-case every possible
+        # leftover (guaranteed to miss the next one, same lesson as
+        # this file's other fixers), any deletion whose OWN cleaned
+        # result would start with a leftover connector/punctuation is
+        # skipped outright - the scaffolding phrase stays in place for
+        # that specific match, correctly surfacing as still-MISSED
+        # rather than silently shipping broken grammar the caller has
+        # no way to catch downstream.
+        _BROKEN_RESULT_START = re.compile(r"^(that|which|who|whose)\b|^[:;,]", re.I)
+
+        result = s
+        any_applied = False
+        for m in sorted(matches, key=lambda m: m.start(), reverse=True):
+            candidate = result[:m.start()] + result[m.end():]
+            cleaned = _clean_after_delete(candidate)
+            if _BROKEN_RESULT_START.match(cleaned):
+                continue
+            result = candidate
+            any_applied = True
+
+        if not any_applied:
+            return s, False
+        return _clean_after_delete(result), True
+
+    return _apply_across_paragraphs(text, _fix_one)
 
 
 def _fix_directive_ratio(text: str, target: float, current: float,
