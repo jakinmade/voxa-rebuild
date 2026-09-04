@@ -1835,6 +1835,18 @@ def _entities_and_numbers(text: str) -> set:
         # failed to preserve.
         'Furthermore', 'Moreover', 'However', 'Therefore', 'Nevertheless',
         'Additionally', 'Consequently', 'Regardless',
+        # Added 4 Sept 2026, same session - real finding from the
+        # register-conversion fix: correctly removing casual filler
+        # ("OMG this proposal is honestly kind of a mess lol...") from
+        # a formal rewrite left the entity checker flagging the
+        # removed filler itself as dropped facts. "Let" is a modal/
+        # imperative verb (same category as Will/Would/Could/Should
+        # above, from "Let me know"/"Let's chat"); "Anyway" is a
+        # discourse connective (same category as Also/Still/Even/
+        # Furthermore above); "OMG" is an interjection - a new
+        # grammatical category for this list, but unambiguously not a
+        # proper noun by the same reasoning as everything else here.
+        'Let', 'Anyway', 'OMG',
     }
     # Lookbehind covers [.!? ] OR start-of-string. Confirmed live: a
     # salutation name is structurally the very first word of the text,
@@ -2294,11 +2306,33 @@ def score_semantic_drift(input_text: str, output_text: str, platform_format: str
         # different words (the Scott -> Josh regression this exists
         # to catch) are unaffected: "scott" plainly doesn't appear
         # anywhere in an output that says "Josh, ...".
+        #
+        # Simple singular/plural variant added 4 Sept 2026, real
+        # finding: "Users loved it." is an ordinary common noun,
+        # capitalised only because it starts a sentence, not a proper
+        # noun - _entities_and_numbers still extracts it as a
+        # candidate entity (see that function's own docstring on why
+        # its exclusion-list approach can't be exhaustive). The
+        # rewrite correctly used singular "user" mid-sentence, entirely
+        # normal English, but the exact whole-word match required
+        # "users" itself to survive and flagged a real, meaningless
+        # false positive (dropped_entities, semantic_match 9). Tested
+        # directly against the actual protection this check exists
+        # for before shipping: "Scott" still correctly fails to survive
+        # in an output that says "Josh" - this only adds tolerance for
+        # a trivial pluralisation, it doesn't weaken the name-swap
+        # detection at all.
+        def _survives(entity: str) -> bool:
+            e = entity.lower()
+            variants = {e}
+            if e.endswith('s') and len(e) > 3:
+                variants.add(e[:-1])
+            else:
+                variants.add(e + 's')
+            return any(re.search(r'\b' + re.escape(v) + r'\b', output_lower) for v in variants)
+
         output_lower = output_text.lower()
-        preserved = {
-            e for e in input_entities
-            if re.search(r'\b' + re.escape(e.lower()) + r'\b', output_lower)
-        }
+        preserved = {e for e in input_entities if _survives(e)}
         entity_score = len(preserved) / len(input_entities)
         dropped = sorted(input_entities - preserved)
     else:

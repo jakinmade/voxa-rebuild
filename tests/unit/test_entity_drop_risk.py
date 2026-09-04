@@ -59,6 +59,56 @@ def test_name_swap_now_visible_as_dropped_entity():
 
 
 # ---------------------------------------------------------------------------
+# Two more real findings, same session (4 Sept 2026 breadth benchmark),
+# same underlying tension: _entities_and_numbers' exclusion-list approach
+# can't be exhaustive (any capitalised word not on the list is a candidate
+# entity), so ordinary sentence-initial common nouns and casual
+# interjections keep surfacing as false positives one real example at a
+# time. Each fix here is deliberately narrow and verified NOT to weaken
+# the name-swap protection above, rather than a broader heuristic change
+# that would trade real protection for less list maintenance.
+# ---------------------------------------------------------------------------
+
+def test_pluralised_common_noun_not_flagged_as_dropped():
+    """'Users loved it.' is an ordinary common noun, capitalised only
+    because it starts a sentence, not a proper noun. The rewrite
+    correctly used singular 'user' mid-sentence - entirely normal
+    English - but the exact whole-word match required 'users' itself
+    to survive and flagged a real, meaningless false positive
+    (semantic_match cratered to 9 on the actual live render)."""
+    original = "The findings clearly demonstrate that the intervention worked. Users loved it."
+    render = "The findings clearly demonstrate that the intervention worked, and user response was strongly positive."
+    result = ve.score_semantic_drift(original, render)
+    assert "Users" not in result["dropped_entities"]
+    assert result["entity_preservation"] == 100
+
+
+def test_morphology_tolerance_does_not_weaken_name_swap_detection():
+    """Regression guard for the fix above: singular/plural tolerance
+    must not make the Scott -> Josh detection any less strict - a
+    genuinely different name is still a genuinely different name
+    regardless of this change."""
+    original = "Scott, following up on the CLEARANCE test link."
+    render = "Josh, following up on the CLEARANCE test link."
+    result = ve.score_semantic_drift(original, render)
+    assert "Scott" in result["dropped_entities"]
+    assert result["entity_preservation"] < 100
+
+
+def test_casual_interjections_not_extracted_as_entities():
+    """Real finding from the register-conversion fix: correctly
+    removing casual filler ('OMG this proposal is honestly kind of a
+    mess lol...Anyway thoughts?? Let's chat.') from a formal rewrite
+    left the entity checker flagging the removed filler itself as
+    dropped facts. None of these are proper nouns."""
+    text = "OMG this proposal is honestly kind of a mess lol!! Anyway thoughts?? Let's chat."
+    entities = ve._entities_and_numbers(text)
+    assert "OMG" not in entities
+    assert "Anyway" not in entities
+    assert "Let" not in entities
+
+
+# ---------------------------------------------------------------------------
 # compute_risk — dropped entity is a hard fail, same tier as attribution
 # swap and sentence_growth
 # ---------------------------------------------------------------------------
