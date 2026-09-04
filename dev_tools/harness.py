@@ -221,7 +221,7 @@ def run_render_stage(
 
     client = anthropic.Anthropic(api_key=api_key, max_retries=0)
     response = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=max_tokens,
+        model="claude-sonnet-4-6", max_tokens=max_tokens, temperature=0,
         system=system, messages=[{"role": "user", "content": input_text}],
     )
     clean = response.content[0].text
@@ -245,7 +245,7 @@ def run_render_stage(
     if correction_prompt:
         try:
             correction_response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=max_tokens,
+                model="claude-sonnet-4-6", max_tokens=max_tokens, temperature=0,
                 system=correction_prompt, messages=[{"role": "user", "content": clean}],
             )
             corrected = correction_response.content[0].text
@@ -280,7 +280,7 @@ def run_render_stage(
         refined_input = f"{input_text}\n\n[Refinement requested: {note}]" if note else input_text
 
         response2 = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=max_tokens,
+            model="claude-sonnet-4-6", max_tokens=max_tokens, temperature=0,
             system=system, messages=[{"role": "user", "content": refined_input}],
         )
         clean2 = response2.content[0].text

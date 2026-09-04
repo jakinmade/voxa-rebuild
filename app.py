@@ -2346,7 +2346,7 @@ def _generate_voice_profile_summary(corpus_text: str) -> str | None:
     try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=200,
+            model="claude-sonnet-4-6", max_tokens=200, temperature=0,
             system=build_voice_profile_summary_prompt(),
             messages=[{"role": "user", "content": corpus_text}],
         )
@@ -2599,7 +2599,7 @@ def _run_render(
     try:
         with st.spinner("Writing as you..."):
             response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=4096,
+                model="claude-sonnet-4-6", max_tokens=4096, temperature=0,
                 system=system, messages=[{"role": "user", "content": input_text}],
             )
             clean = response.content[0].text
@@ -2803,7 +2803,7 @@ def _run_render(
                 for attempt in range(2):
                     with st.spinner("Refining..."):
                         correction_response = client.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=4096,
+                            model="claude-sonnet-4-6", max_tokens=4096, temperature=0,
                             system=correction_prompt,
                             messages=[{"role": "user", "content": clean}],
                             tools=[CORRECTION_TOOL],
