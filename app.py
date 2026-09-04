@@ -2572,10 +2572,15 @@ def _run_render(
     # in the same real example: "Scott — following up..." became
     # "Scott, following up..." even though the em dash was the user's
     # own genuine opener, not an AI tell.
-    keep_dashes = (
-        (uses_em_dashes(fingerprint_corpus) if fingerprint_corpus else False)
-        or uses_em_dashes(input_text)
-    )
+    #
+    # Tightened 4 Sept 2026 (product decision, see uses_em_dashes'
+    # docstring): combine calibration and current input into one pool
+    # of evidence and require 2+ total occurrences, rather than OR-ing
+    # two single-instance checks. A single dash anywhere is treated as
+    # a possible one-off slip, not a confirmed habit - the safer
+    # default is strip until the evidence is repeated.
+    _dash_evidence = f"{fingerprint_corpus} {input_text}" if fingerprint_corpus else input_text
+    keep_dashes = uses_em_dashes(_dash_evidence)
 
     # Same signal used to gate the Ownership/Directness restoration targets
     # and their correction-pass counterparts: does THIS input (not the

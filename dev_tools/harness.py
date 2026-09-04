@@ -205,7 +205,7 @@ def run_render_stage(
     # itself shows. See app.py's keep_contractions comment for the
     # real confirmed case this fixes.
     keep_contractions = fingerprint["keep_contractions"] or ve.uses_contractions(input_text)
-    keep_dashes = pr.uses_em_dashes(persona.get("sample1_text", "")) or pr.uses_em_dashes(input_text)
+    keep_dashes = pr.uses_em_dashes(f"{persona.get('sample1_text', '')} {input_text}")
     locale = fingerprint["locale"]
 
     detected_mode = pr._detect_mode(input_text)

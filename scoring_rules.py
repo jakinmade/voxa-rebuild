@@ -167,6 +167,16 @@ DELTA_BAND_MIN_ABS_DIFF = {
     "sentence_length_sd": 2.0,   # words
     "first_person_ratio": 0.10,  # proportion of sentences
     "directive_ratio": 0.10,     # proportion of sentences
+    # Added 4 Sept 2026 alongside the two new scored dimensions
+    # (conclusion_opener_ratio, scaffolding_density) — see
+    # voice_engine.compute_baseline_metrics for what each measures.
+    # Floors chosen by the same reasoning as the four above (a move
+    # too small to plausibly notice shouldn't be able to read as
+    # MISSED), not yet calibrated against real production variance —
+    # same caveat dev_tools/stability_test.py's own rating bands
+    # already carry. Revisit once real usage data exists.
+    "conclusion_opener_ratio": 0.10,  # ratio (opener length / avg length)
+    "scaffolding_density": 1.0,       # scaffolding phrases per 100 words
 }
 
 
@@ -183,6 +193,19 @@ RISK_HIGH_SEMANTIC_MATCH_BELOW = 70
 RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST = 3
 RISK_MEDIUM_SEMANTIC_MATCH_BELOW = 85
 RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST = 1
+# NOTE (4 Sept 2026): two more scored dimensions were added
+# (conclusion_opener_ratio, scaffolding_density — see
+# voice_engine.compute_baseline_metrics), taking score_render_delta
+# from 4 possible MISSED dimensions to 6. These two absolute-count
+# thresholds were deliberately left unchanged rather than scaled up
+# proportionally (e.g. to 4-5) — meaning RISK_HIGH_MISSED_DIMENSIONS_
+# AT_LEAST=3 now represents 50% of tracked dimensions missed, not the
+# 75% it did before. Left as-is on the same reasoning stability_test.py's
+# own rating bands already state: no real production data yet to
+# calibrate against, and an easier-to-trigger High-risk gate is not
+# obviously wrong given the priority (as of 4 Sept 2026) is tightening
+# consistency standards, not loosening them. Revisit with real usage
+# data rather than guessing further.
 
 
 # ---------------------------------------------------------------------------

@@ -85,6 +85,21 @@ _HEDGE_PATTERN = re.compile(
     r")\b", re.I
 )
 
+# Moved to module level 4 Sept 2026 so compute_baseline_metrics can
+# share the exact same pattern score_reader_assumption already uses -
+# one source of truth for what counts as "explaining to the reader"
+# rather than two independently-maintained regexes that could drift
+# apart. Previously only lived inside score_reader_assumption as a
+# local variable, which is why reader_assumption was an onboarding-
+# time OBSERVATION only, never a re-checkable numeric target the way
+# hedge_density etc. are - see compute_baseline_metrics' scaffolding_
+# density for the numeric side this pattern now also feeds.
+_SCAFFOLDING_PATTERN = re.compile(
+    r"\b(as you (know|may know|will know)|let me (explain|be clear|clarify)|"
+    r"what (this|that) means (is|for you)|in other words|to put it (simply|another way)|"
+    r"basically|simply put|the reason (is|being)|background(:|,))\b", re.I
+)
+
 _DOTTED_ABBREV = re.compile(r'\b(?:[A-Za-z]\.){2,}')
 _WORD_ABBREV = re.compile(
     r'\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Rev|Hon|vs|etc|approx|dept|no|vol|pp|'
@@ -296,12 +311,7 @@ def score_hedging_signature(sentences: list[str], text: str) -> Observation:
     )
 def score_reader_assumption(sentences: list[str], text: str) -> Observation:
     """Does the writer explain or assume the reader is already up to speed?"""
-    scaffolding = re.compile(
-        r"\b(as you (know|may know|will know)|let me (explain|be clear|clarify)|"
-        r"what (this|that) means (is|for you)|in other words|to put it (simply|another way)|"
-        r"basically|simply put|the reason (is|being)|background(:|,))\b", re.I
-    )
-    found = scaffolding.findall(text)
+    found = _SCAFFOLDING_PATTERN.findall(text)
     assumes_peer = len(found) == 0
 
     definition_pattern = re.compile(r"\b\w+ (is|are|refers to|means) (a |an |the )?\w+", re.I)
@@ -588,9 +598,9 @@ def analyse_writing(text: str) -> list[dict]:
     observations = select_observations(text)
     return _deterministic_fallback(observations)
 def _derive_baseline_metrics(stats: dict) -> dict:
-    """Computes the four reported metrics from sufficient statistics —
+    """Computes the six reported metrics from sufficient statistics —
     the counts/sums that can be validly SUMMED across merged samples,
-    as opposed to the four metrics themselves, which mostly can't (see
+    as opposed to the metrics themselves, which mostly can't (see
     _merge_baseline's docstring for why). Used by both
     compute_baseline_metrics (a single fresh sample) and _merge_baseline
     (an aggregated multi-sample baseline) so there is exactly one
@@ -598,8 +608,9 @@ def _derive_baseline_metrics(stats: dict) -> dict:
 
     stats keys: word_count, sentence_count, hedge_count,
     sentence_length_sum, sentence_length_sumsq, first_person_sentence_count,
-    directive_sentence_count. All are raw totals — safe to sum across
-    any number of samples with no information loss, unlike the four
+    directive_sentence_count, opener_length_sum, opener_sentence_count,
+    scaffolding_count. All are raw totals — safe to sum across
+    any number of samples with no information loss, unlike the six
     derived ratios/rates below.
     """
     total_words = max(stats["word_count"], 1)
@@ -622,11 +633,23 @@ def _derive_baseline_metrics(stats: dict) -> dict:
     first_person_ratio = round(stats["first_person_sentence_count"] / total_sents, 3)
     directive_ratio = round(stats["directive_sentence_count"] / total_sents, 3)
 
+    # opener_sentence_count sums each merged sample's own min(3, its
+    # sentence count) - each sample contributes its own opener length
+    # sum and count, so this stays a correct average-opener-length even
+    # pooled across several onboarding samples.
+    opener_sent_count = max(stats.get("opener_sentence_count", 0), 1)
+    opener_avg_len = stats.get("opener_length_sum", 0) / opener_sent_count
+    conclusion_opener_ratio = round(opener_avg_len / max(mean_len, 0.01), 3)
+
+    scaffolding_density = round((stats.get("scaffolding_count", 0) / total_words) * 100, 2)
+
     return {
         "hedge_density": hedge_density,
         "sentence_length_sd": sentence_length_sd,
         "first_person_ratio": first_person_ratio,
         "directive_ratio": directive_ratio,
+        "conclusion_opener_ratio": conclusion_opener_ratio,
+        "scaffolding_density": scaffolding_density,
     }
 
 
@@ -708,11 +731,41 @@ def compute_baseline_metrics(text: str) -> dict:
     directive_sents = len(_imperative_sentences(sentences))
     directive_ratio = round(directive_sents / total_sents, 3)
 
+    # 5. Conclusion-opener ratio — added 4 Sept 2026 to close a real gap:
+    # score_conclusion_position could tell you whether a SINGLE piece of
+    # writing led with its point, but that observation was never turned
+    # into a numeric target checked against a REWRITE the way hedge_
+    # density etc. are. A rewrite could silently stop leading with the
+    # point and nothing in score_render_delta would catch it. Mirrors
+    # score_conclusion_position's own heuristic (opener sentences short
+    # relative to the piece as a whole = point stated first, elaboration
+    # follows) as a continuous ratio instead of a threshold boolean, so
+    # it fits the same percentage-diff banding every other dimension
+    # here uses. Lower ratio = more point-first.
+    first_three = sentences[:3]
+    opener_length_sum = sum(len(s.split()) for s in first_three)
+    opener_sentence_count = len(first_three)
+    conclusion_opener_ratio = round(
+        (opener_length_sum / max(opener_sentence_count, 1)) / max(avg_len, 0.01), 3
+    )
+
+    # 6. Scaffolding density — added 4 Sept 2026, same reasoning as #5
+    # but for score_reader_assumption: "does this writer explain things
+    # to the reader or assume a peer" was onboarding-only commentary,
+    # never re-checked against a rewrite. Per-100-words rate, same
+    # convention as hedge_density. Uses the module-level
+    # _SCAFFOLDING_PATTERN so this and score_reader_assumption can never
+    # drift apart into two different definitions of "scaffolding".
+    scaffolding_count = len(_SCAFFOLDING_PATTERN.findall(text))
+    scaffolding_density = round((scaffolding_count / total_words) * 100, 2)
+
     return {
         "hedge_density": hedge_density,
         "sentence_length_sd": sentence_length_sd,
         "first_person_ratio": first_person_ratio,
         "directive_ratio": directive_ratio,
+        "conclusion_opener_ratio": conclusion_opener_ratio,
+        "scaffolding_density": scaffolding_density,
         "word_count": total_words,
         # Sufficient statistics — see docstring above.
         "sentence_count": total_sents,
@@ -721,6 +774,9 @@ def compute_baseline_metrics(text: str) -> dict:
         "hedge_count": hedge_count,
         "first_person_sentence_count": fp_sents,
         "directive_sentence_count": directive_sents,
+        "opener_length_sum": opener_length_sum,
+        "opener_sentence_count": opener_sentence_count,
+        "scaffolding_count": scaffolding_count,
     }
 
 
@@ -894,6 +950,7 @@ def fingerprint_hash(baseline: dict) -> str:
 _SUFFICIENT_STAT_KEYS = (
     "sentence_count", "sentence_length_sum", "sentence_length_sumsq",
     "hedge_count", "first_person_sentence_count", "directive_sentence_count",
+    "opener_length_sum", "opener_sentence_count", "scaffolding_count",
 )
 
 
@@ -956,7 +1013,12 @@ def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
         # One-time migration fallback for a baseline saved before this
         # fix — see docstring. Old formula, deliberately unchanged
         # here so this path's behaviour is exactly what it always was,
-        # not a new, unverified variant of it.
+        # not a new, unverified variant of it. conclusion_opener_ratio/
+        # scaffolding_density added 4 Sept 2026: an existing baseline
+        # from before that date won't have these keys AT ALL (not just
+        # missing sufficient stats), so .get() with a neutral default
+        # (1.0 = opener same length as average, no signal either way;
+        # 0.0 = no scaffolding detected) rather than a KeyError.
         def weighted(old_val, new_val):
             return round((old_val * old_wc + new_val * new_wc) / total_wc, 3)
 
@@ -965,6 +1027,12 @@ def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
             "sentence_length_sd": weighted(existing["sentence_length_sd"], new_metrics["sentence_length_sd"]),
             "first_person_ratio": weighted(existing["first_person_ratio"], new_metrics["first_person_ratio"]),
             "directive_ratio": weighted(existing["directive_ratio"], new_metrics["directive_ratio"]),
+            "conclusion_opener_ratio": weighted(
+                existing.get("conclusion_opener_ratio", 1.0), new_metrics.get("conclusion_opener_ratio", 1.0)
+            ),
+            "scaffolding_density": weighted(
+                existing.get("scaffolding_density", 0.0), new_metrics.get("scaffolding_density", 0.0)
+            ),
             "word_count": total_wc,
         }
         # Carry new_metrics' own sufficient stats forward as the
@@ -984,6 +1052,9 @@ def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
         "hedge_count": existing["hedge_count"] + new_metrics["hedge_count"],
         "first_person_sentence_count": existing["first_person_sentence_count"] + new_metrics["first_person_sentence_count"],
         "directive_sentence_count": existing["directive_sentence_count"] + new_metrics["directive_sentence_count"],
+        "opener_length_sum": existing["opener_length_sum"] + new_metrics["opener_length_sum"],
+        "opener_sentence_count": existing["opener_sentence_count"] + new_metrics["opener_sentence_count"],
+        "scaffolding_count": existing["scaffolding_count"] + new_metrics["scaffolding_count"],
     }
     derived = _derive_baseline_metrics(summed_stats)
     return {**derived, **summed_stats}
@@ -2736,8 +2807,20 @@ def score_render_delta(baseline: dict, output_text: str) -> dict:
     """
     output_metrics = compute_baseline_metrics(output_text)
     delta = {}
-    for key in ["hedge_density", "sentence_length_sd", "first_person_ratio", "directive_ratio"]:
-        b_val = baseline[key]
+    # Neutral defaults for a baseline persisted before 4 Sept 2026 (see
+    # _merge_baseline's docstring) - conclusion_opener_ratio/
+    # scaffolding_density may not exist at all on an old stored profile
+    # until it goes through a fresh calibration merge.
+    _dimension_defaults = {
+        "hedge_density": 0.0, "sentence_length_sd": 0.0,
+        "first_person_ratio": 0.0, "directive_ratio": 0.0,
+        "conclusion_opener_ratio": 1.0, "scaffolding_density": 0.0,
+    }
+    for key in [
+        "hedge_density", "sentence_length_sd", "first_person_ratio", "directive_ratio",
+        "conclusion_opener_ratio", "scaffolding_density",
+    ]:
+        b_val = baseline.get(key, _dimension_defaults[key])
         o_val = output_metrics[key]
         diff = o_val - b_val
         abs_diff = abs(diff)
@@ -2924,6 +3007,8 @@ _DIMENSION_LABELS = {
     "sentence_length_sd": "sentence rhythm",
     "first_person_ratio": "ownership (first person)",
     "directive_ratio": "directness",
+    "conclusion_opener_ratio": "conclusion position",
+    "scaffolding_density": "reader assumption",
 }
 
 
