@@ -1825,6 +1825,15 @@ def _entities_and_numbers(text: str) -> set:
         'For', 'With', 'From', 'Also', 'Some', 'Have', 'Been', 'Will',
         'Would', 'Could', 'Should', 'Just', 'Still', 'Even', 'Here',
         'Very', 'More', 'Most', 'Into', 'Over', 'After', 'About',
+        # Added 4 Sept 2026 - same category as Also/Still/Even above
+        # (sentence-connective adverbs), just missing siblings. Real
+        # breadth-benchmark finding: "Furthermore" being dropped from
+        # a rewrite scored as a lost FACT (a real dropped_entities
+        # flag, semantic_match 10), when it's a discourse connective
+        # like the others already excluded, not a fact the rewrite
+        # failed to preserve.
+        'Furthermore', 'Moreover', 'However', 'Therefore', 'Nevertheless',
+        'Additionally', 'Consequently', 'Regardless',
     }
     # Lookbehind covers [.!? ] OR start-of-string. Confirmed live: a
     # salutation name is structurally the very first word of the text,

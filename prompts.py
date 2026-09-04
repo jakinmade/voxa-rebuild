@@ -1798,7 +1798,17 @@ _CONTAMINATION_PATTERNS = re.compile(
     r"|\bwhich i should\b"
     r"|\bdoes not actually need\b"
     r"|\bthe rules? prohibit\b"
-    r"|\breassign(?:ing|ed)? (?:credit|any)\b",
+    r"|\breassign(?:ing|ed)? (?:credit|any)\b"
+    # Added 4 Sept 2026 - drawn from a real leak the breadth-benchmark
+    # harness parity fix surfaced (a formal_civil_servant persona
+    # render): the model narrated redrafting itself mid-output
+    # ("Wait, let me re-read the instructions... Let me redo:") across
+    # several concatenated attempts. Same "obvious cases cheaply, not
+    # exhaustive" philosophy as the original list - narrow phrases
+    # unlikely to appear in genuine first-person user voice.
+    r"|\blet me re-read\b"
+    r"|\blet me redo\b"
+    r"|\bneed(?:s|ed)? to be added back\b",
     re.IGNORECASE,
 )
 
