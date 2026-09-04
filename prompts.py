@@ -1548,7 +1548,7 @@ def _grammar_fix_pass(text: str, client, locale: str = "uk", original_input_text
     grammar_max_tokens = max(512, min(4096, len(text) // 3 + 200))
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=grammar_max_tokens,
+        max_tokens=grammar_max_tokens, temperature=0,
         system=system,
         messages=[{"role": "user", "content": text}],
     )
