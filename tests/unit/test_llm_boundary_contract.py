@@ -104,7 +104,7 @@ def test_correction_pass_fails_closed_not_open():
 # ---------------------------------------------------------------------------
 
 def test_grammar_fix_pass_is_explicitly_scoped_to_errors_only():
-    window = _lines_around(PROMPTS_PY, "def _grammar_fix_pass(", before=0, after=40)
+    window = _lines_around(PROMPTS_PY, "def _grammar_fix_pass(", before=0, after=60)
     assert "Fix errors only" in window
     assert "Never rewrite" in window
     assert "DO NOT TOUCH" in window

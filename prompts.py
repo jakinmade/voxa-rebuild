@@ -756,7 +756,28 @@ _DASH_DEPENDENT_STARTERS = {
 }
 
 
-def _split_dashes_deterministic(text: str) -> str:
+def uses_em_dashes(text: str) -> bool:
+    """
+    Does this person's own writing use em dashes? Same reasoning as
+    voice_engine.uses_contractions: em dashes are a well-known AI tell
+    on AVERAGE, but for a specific person they can be a genuine,
+    consistent stylistic choice (a clipped, confident opener like
+    "Scott — following up..." rather than "Scott, following up...").
+    Stripping them unconditionally, with no check against the
+    person's own baseline or the actual text being rewritten, pushes
+    the output away from their voice for exactly the people whose
+    voice already uses one. Threshold matches uses_contractions'
+    reasoning (roughly one instance is enough to count as a real,
+    repeatable habit, not noise) rather than reusing its 1-per-100-words
+    density bar, since dashes are naturally far rarer per word than
+    contractions even for someone who uses them habitually.
+    """
+    return bool(_DASH_VARIANTS_PATTERN.search(text))
+
+
+def _split_dashes_deterministic(text: str, keep_dashes: bool = False) -> str:
+    if keep_dashes:
+        return text
     matches = list(_DASH_VARIANTS_PATTERN.finditer(text))
     if not matches:
         return text
@@ -953,7 +974,8 @@ def _conjugate_verb(m):
     return verb + 's'
 
 
-def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text: str = "") -> str:
+def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text: str = "",
+                  keep_dashes: bool = False) -> str:
     """
     Deterministic guardrail sweep — runs on every render output.
     No API call. No Claude involvement. Code enforces these rules.
@@ -1008,10 +1030,13 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     import re
 
     # 1. Em dashes — split or join, never a spaced-hyphen substitute
-    text = _split_dashes_deterministic(text)
+    text = _split_dashes_deterministic(text, keep_dashes=keep_dashes)
     # Belt and braces — any remaining dash variant the splitter missed
     # falls back to a comma join, not " - " (that reintroduces the tell).
-    text = re.sub(r"[\u2012\u2013\u2014\u2015]\s*", ", ", text)
+    # Skipped when keep_dashes is set - the person's own voice uses
+    # dashes, so any that survived the splitter are correct, not a miss.
+    if not keep_dashes:
+        text = re.sub(r"[\u2012\u2013\u2014\u2015]\s*", ", ", text)
     text = re.sub(r'  +', ' ', text)
 
     # 2. Contractions — only expanded if the user's own baseline doesn't use them
@@ -1371,11 +1396,23 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     )
 
     return text
-def _grammar_fix_pass(text: str, client, locale: str = "uk") -> str:
+def _grammar_fix_pass(text: str, client, locale: str = "uk", original_input_text: str = "") -> str:
     """
     Second Claude call — grammar errors only.
     Brief: find and fix grammar errors. Do not rewrite. Do not change voice.
     Returns corrected text. If no errors found, returns original text unchanged.
+
+    original_input_text: the person's own actual input for this render.
+    Added 4 Sept 2026 (previously this function had no visibility into
+    it at all) specifically so rule 10 below can tell a genuine comma
+    splice, already present in the person's own writing, from an actual
+    grammar error — confirmed live: a comma-spliced sentence in a real
+    person's original draft ("...on that thread, something you could
+    put in front of a portfolio company this week") was being split
+    into two sentences by this pass, flattening a deliberate stylistic
+    rhythm choice into more conventional but flatter prose, exactly the
+    class of over-correction DO NOT TOUCH item 2 already exists to
+    prevent for sentence fragments.
 
     Expanded ("grammarly is flagging some grammar issues,
     that cannot happen, that is a credibility killer") from 6 fixable
@@ -1431,7 +1468,13 @@ def _grammar_fix_pass(text: str, client, locale: str = "uk") -> str:
         "9. Pronoun reference: a pronoun ('it', 'this', 'they') with no clear antecedent, or "
         "one that does not agree in number with what it refers to.\n"
         "10. Run-on sentences and comma splices: two independent clauses joined by only a "
-        "comma where UK usage requires a full stop, semicolon, or conjunction.\n"
+        "comma where UK usage requires a full stop, semicolon, or conjunction. EXCEPTION: "
+        "if the person's ORIGINAL INPUT (given below, before the text you're correcting) "
+        "already contains comma splices of its own, that is their genuine, consistent "
+        "written style, not an error to fix here — leave comma splices in the text you are "
+        "correcting alone in that case, the same way DO NOT TOUCH item 2 already protects "
+        "deliberate sentence fragments. Only apply this rule when the original input itself "
+        "reads as conventionally punctuated.\n"
         "11. Dangling or misplaced modifiers: a modifying phrase that grammatically attaches "
         "to the wrong noun because of where it sits in the sentence.\n"
         "12. Tense inconsistency: a verb tense that breaks from the tense already established "
@@ -1467,6 +1510,13 @@ def _grammar_fix_pass(text: str, client, locale: str = "uk") -> str:
         "\n"
         "Return only the corrected text. No explanation. No preamble."
     )
+    if original_input_text.strip():
+        system += (
+            "\n\nORIGINAL INPUT (for judging rule 10's comma-splice exception only — "
+            "not the text you are correcting, do not correct this, it is reference "
+            "context to tell the person's genuine style from an actual error):\n"
+            f"{original_input_text.strip()}"
+        )
     # Cost guardrail: grammar-only fixing never expands the text by much,
     # so max_tokens is sized to the input rather than a flat ceiling.
     # ~4 chars/token in, plus headroom for punctuation/word-count shifts.
