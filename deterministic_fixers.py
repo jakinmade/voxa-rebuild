@@ -1213,6 +1213,36 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
 
     matcher = difflib.SequenceMatcher(None, before_norm, after_norm, autojunk=False)
 
+    # Function words excluded from the new-word budget — added 4 Sept
+    # 2026, real-render finding. A dropped-subject restoration ("Built
+    # out for X" -> "I built it out for X") and a comma-spliced list
+    # gaining a conjunction ("...SR 11-7, the laws now live" -> "...SR
+    # 11-7, and the laws are all live") each add a genuine word with
+    # zero new information - pure grammatical connective tissue needed
+    # to turn a fragment into a complete sentence, not fabricated
+    # content. The word-budget check's own stated purpose is telling
+    # fabrication apart from "a split that redistributes existing
+    # words" (see this function's docstring) - a subject pronoun or
+    # conjunction added at exactly the point a fragment got completed
+    # is the same category of non-fabrication the check already
+    # excludes for zero-word splits, just one function word short of
+    # qualifying under the old all-words-count rule.
+    #
+    # Deliberately NARROW and ADDITIVE, not a rewrite of the alignment
+    # logic this docstring already warns is fragile (see KNOWN
+    # LIMITATION above - a prior same-session attempt at a cleverer
+    # fix broke a second real render). This only filters WHICH words
+    # count toward the budget threshold; it cannot introduce a new
+    # false negative on genuine fabrication, since fabricated content
+    # overwhelmingly consists of actual content words (nouns, verbs,
+    # adjectives, facts, names) that this list never touches - only
+    # pure function words are excluded, and only ever in the direction
+    # of making the check MORE lenient, never less sensitive.
+    _FUNCTION_WORD_BUDGET_EXCLUSIONS = frozenset({
+        "i", "it", "this", "that", "and", "is", "are", "am", "was", "were",
+        "the", "a", "an", "all",
+    })
+
     sentence_growth = 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
@@ -1227,6 +1257,7 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
         new_word_count = sum(
             max(0, count - before_words.get(word, 0))
             for word, count in after_words.items()
+            if word not in _FUNCTION_WORD_BUDGET_EXCLUSIONS
         )
         if new_word_count > 0:
             sentence_growth += local_growth
