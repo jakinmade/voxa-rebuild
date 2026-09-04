@@ -739,12 +739,19 @@ def test_multiple_word_neutral_splits_across_a_render_not_flagged():
 # shape (fuzzy-pairing near-identical sentences before the word-budget
 # check) was tried and reverted after it broke the real render above by
 # mismatching one half of a genuine split — see the function's
-# docstring. Marked xfail rather than removed, so a future, more
-# careful fix has a target to aim at and this doesn't silently regress
-# further without anyone noticing.
+# docstring. Was marked xfail; fixed 4 Sept 2026 by the function-word
+# budget exclusion (see _check_uncorrected_insertions' docstring) —
+# not a fix to the adjacency-merging behaviour itself (blocks with no
+# anchor between them still merge, as documented), but in this
+# specific real case every "new" word the merge produces ("The",
+# "is") is a pure function word the exclusion filter now correctly
+# excludes, so the merged block's genuine word-budget correctly comes
+# out to zero. Confirmed this is the real reason, not a coincidental
+# pass: same real text this test uses ("Timing feels right..."/"It's
+# the deterministic proof layer...") is the exact example that
+# motivated the function-word exclusion fix.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="known limitation: adjacent edits with no anchor sentence between them merge into one diff block — see function docstring, 29 Aug 2026", strict=True)
 def test_unrelated_word_addition_adjacent_to_a_split_with_no_anchor_between_them():
     before = (
         "Timing feels right off the back of your Workflow Agent Manager "
