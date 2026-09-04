@@ -25,6 +25,7 @@ from voice_engine import (
     _format_function_patterns,
     _classify_register,
     compute_baseline_metrics,
+    uses_contractions,
     _PLAUSIBILITY_SHIELD_DROP,
     _PLAUSIBILITY_SHIELD_MIDSENTENCE,
     _PLAUSIBILITY_SHIELD_REPLACE,
@@ -263,6 +264,28 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
         lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
     else:
         lines.append("PUNCTUATION: uses em dashes — this is part of their voice, preserve them where the input has them, don't strip them out")
+
+    # Contractions — added 4 Sept 2026. Real-render finding: _regex_
+    # sweep's keep_contractions gate can only PROTECT a contraction the
+    # model already generated; it has no power to add one back if the
+    # model's own unguided judgement chose the expanded form instead.
+    # Confirmed live: "It's the deterministic proof layer..." rendered
+    # as "It is the deterministic proof layer..." in two consecutive
+    # identical-input renders, even with keep_contractions=True and
+    # even though other contractions in the SAME output ("it's the
+    # concrete proof point", "you're not chasing", "it didn't") were
+    # correctly preserved - the sweep did its job everywhere the model
+    # happened to contract on its own, but had nothing to work with at
+    # the one position the model chose not to. Same missing-instruction
+    # class as the em-dash gap above: nothing told the model to use
+    # contractions in the first place, so this line closes it the same
+    # way. Uses the same blended calibration+current-input signal as
+    # keep_contractions (see app.py) via uses_contractions on
+    # structural_text.
+    if uses_contractions(structural_text):
+        lines.append("CONTRACTIONS: uses contractions (it's, don't, you're) — this is part of their voice, use them naturally throughout, don't write the expanded form")
+    else:
+        lines.append("CONTRACTIONS: does not use contractions in their writing — do not introduce any")
 
     # Observations — headline + evidence quote where available
     lines.append("\nVOICE OBSERVATIONS (from their own writing):")
@@ -1076,6 +1099,28 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     if not keep_dashes:
         text = re.sub(r"[\u2012\u2013\u2014\u2015]\s*", ", ", text)
     text = re.sub(r'  +', ' ', text)
+
+    # 1b. "curious if" -> "curious whether" restoration — added 4 Sept
+    # 2026, real-render finding. score_ai_tells' "curious whether" tell
+    # is deliberately, precisely scoped (see its own docstring) to NOT
+    # flag "curious if", specifically because that's ordinary human
+    # phrasing confirmed live in a real person's genuine writing. That
+    # exemption is correct and shouldn't change. What this fixes is one
+    # layer earlier: with no instruction either way, the model itself
+    # swapped the person's own "curious if" into "curious whether"
+    # during generation - landing exactly on the construction the tell-
+    # detector exists to catch, in two consecutive identical-input
+    # renders. Nothing tells the model to keep a subordinating
+    # conjunction the person already chose correctly, so it drifts
+    # toward the more AI-typical form on its own. Deterministic,
+    # narrow, and only fires when it's provably a restoration rather
+    # than a guess: original_input_text must contain "curious if" and
+    # NOT already contain "curious whether" (someone whose own writing
+    # genuinely uses "curious whether" should keep it).
+    if (original_input_text
+            and re.search(r"\bcurious if\b", original_input_text, re.I)
+            and not re.search(r"\bcurious whether\b", original_input_text, re.I)):
+        text = re.sub(r"\bcurious whether\b", "curious if", text, flags=re.I)
 
     # 2. Contractions — only expanded if the user's own baseline doesn't use them
     if not keep_contractions:
