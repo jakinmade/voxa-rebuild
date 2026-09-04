@@ -243,13 +243,47 @@ def run_render_stage(
     correction_prompt = pr.build_correction_prompt(correction_delta, semantic)
     correction_applied = False
     if correction_prompt:
+        # Parity fix, 4 Sept 2026: this used to be a plain-text
+        # completion with no contamination check, no retry, and an
+        # incomplete _regex_sweep call (missing original_input_text/
+        # keep_dashes) - a real breadth-benchmark run on this exact
+        # code path produced a response with the model's own reasoning
+        # leaked into the output ("Wait, let me re-read the
+        # instructions... Let me redo:") that nothing here would have
+        # caught. Production's app.py has three protections this
+        # lacked: the forced CORRECTION_TOOL tool-call schema (no
+        # free-text channel for reasoning to leak into), a bounded
+        # retry against response_looks_contaminated, and complete
+        # _regex_sweep parameters. All three now mirrored exactly so
+        # this harness reflects what a real user would actually see,
+        # not a weaker, unprotected path — every finding from this
+        # harness is only as trustworthy as its fidelity to production.
+        pre_llm_correction = clean
+        corrected = None
         try:
-            correction_response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=max_tokens, temperature=0,
-                system=correction_prompt, messages=[{"role": "user", "content": clean}],
+            for attempt in range(2):
+                correction_response = client.messages.create(
+                    model="claude-sonnet-4-6", max_tokens=max_tokens, temperature=0,
+                    system=correction_prompt,
+                    messages=[{"role": "user", "content": clean}],
+                    tools=[pr.CORRECTION_TOOL],
+                    tool_choice={"type": "tool", "name": "return_correction"},
+                )
+                tool_use_block = next(
+                    (b for b in correction_response.content if b.type == "tool_use"), None,
+                )
+                if tool_use_block is None:
+                    continue
+                candidate = tool_use_block.input.get("corrected_text", "")
+                if candidate and not pr.response_looks_contaminated(candidate):
+                    corrected = candidate
+                    break
+            if corrected is None:
+                corrected = pre_llm_correction
+            corrected = pr._regex_sweep(
+                corrected, keep_contractions=keep_contractions,
+                original_input_text=input_text, keep_dashes=keep_dashes,
             )
-            corrected = correction_response.content[0].text
-            corrected = pr._regex_sweep(corrected, keep_contractions=keep_contractions)
             if locale == "uk":
                 corrected = pr._apply_uk_english(corrected)
             clean = corrected
