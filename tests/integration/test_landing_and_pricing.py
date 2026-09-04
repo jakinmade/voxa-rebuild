@@ -88,12 +88,24 @@ def test_landing_shows_check_a_draft_as_fourth_step():
     """29 Aug 2026 copy update: landing page previously only described
     the rewrite flow (Paste/Calibrate/Write). Check a Draft is now
     surfaced as a fourth step, matching its elevated position inside
-    the app itself."""
+    the app itself.
+
+    Was: asserted the literal joined string "4. Check" in the
+    rendered markdown. The 31 Aug 2026 "How it works" styling pass
+    (see app.py's step-card CSS comment) split the step number and
+    label into separate <span class="step-num">4</span> and
+    <span class="step-label">Check</span> elements for visual
+    hierarchy - the content never changed, but the joined substring
+    stopped existing, so this assertion went stale and has failed on
+    every CI run since without any real regression behind it. Fixed
+    to check for the actual markup shape instead of an incidental
+    string concatenation."""
     at = AppTest.from_file(_APP_PATH)
     at.run()
     assert not at.exception
     body = " ".join(m.value for m in at.markdown)
-    assert "4. Check" in body
+    assert '<span class="step-num">4</span>' in body
+    assert '<span class="step-label">Check</span>' in body
     assert "still sounds like you" in body
 
 
