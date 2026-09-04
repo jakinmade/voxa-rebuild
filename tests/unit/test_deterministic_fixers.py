@@ -241,6 +241,120 @@ def test_hedge_density_output_has_no_orphan_punctuation():
 
 
 # ---------------------------------------------------------------------------
+# _fix_scaffolding_density — added 4 Sept 2026, closing a gap flagged the
+# same day: conclusion_opener_ratio and scaffolding_density were added as
+# scored, enforced dimensions (PR #20) but neither had an auto-fixer,
+# unlike the original four. This covers the scaffolding_density half.
+# ---------------------------------------------------------------------------
+
+def test_scaffolding_density_removes_basically_sentence_opener():
+    text = "Basically, this won't work."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "This won't work."
+
+
+def test_scaffolding_density_removes_as_you_know():
+    text = "As you know, the deadline is Friday."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "The deadline is Friday."
+
+
+def test_scaffolding_density_removes_in_other_words():
+    text = "In other words, it's broken."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "It's broken."
+
+
+def test_scaffolding_density_removes_what_this_means_is():
+    text = "What this means is we need more time."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "We need more time."
+
+
+def test_scaffolding_density_removes_mid_sentence_basically():
+    text = "It's basically broken."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "It's broken."
+
+
+def test_scaffolding_density_declines_reason_is_that_rather_than_break_grammar():
+    """Real bug found by direct testing before this fixer ever shipped:
+    deleting 'the reason is' from 'The reason is that X' leaves 'That
+    X', an orphaned subordinating conjunction with no clause to attach
+    to. Must decline this specific deletion rather than ship broken
+    grammar the caller has no way to catch downstream."""
+    text = "The reason is that we ran out of time."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_scaffolding_density_removes_let_me_explain_colon():
+    """Real bug found by direct testing: this originally left an
+    orphaned leading colon (': the vendor missed the deadline') before
+    _clean_after_delete was extended to handle colons the same way it
+    already handled commas."""
+    text = "Let me explain: the vendor missed the deadline."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "The vendor missed the deadline."
+
+
+def test_scaffolding_density_removes_background_colon():
+    """Real pre-existing bug found by direct testing: _SCAFFOLDING_
+    PATTERN's background(:|,) alternative required a \\b right after
+    the colon/comma, which can never be satisfied when followed by
+    whitespace (colon and space are both non-word characters, so
+    there's no boundary transition) - 'Background:' silently never
+    matched at all until the pattern was restructured."""
+    text = "Background: the project started in March."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "The project started in March."
+
+
+def test_scaffolding_density_handles_multiple_matches_in_one_sentence():
+    """Real bug found by direct testing: right-to-left deletion of two
+    matches in the same sentence ('As you know, background: X') left
+    a mid-sentence orphaned colon ('As you know, : X') that the
+    sentence-start-only safety check didn't catch - required extending
+    _clean_after_delete itself rather than the start-of-sentence check
+    alone."""
+    text = "As you know, background: the project started."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert fixed == "The project started."
+    assert ":" not in fixed
+    assert ",," not in fixed
+
+
+def test_scaffolding_density_does_not_fire_under_target():
+    text = "This is a clean sentence."
+    fixed, applied = df._fix_scaffolding_density(text, target=5.0, current=2.0)
+    assert applied is False
+    assert fixed == text
+
+
+def test_scaffolding_density_output_has_no_orphan_punctuation():
+    """Same regression-guard shape as the hedge fixer's own orphan-
+    punctuation test above, extended to cover colons too."""
+    text = "Basically, as you know, the numbers are in."
+    fixed, applied = df._fix_scaffolding_density(text, target=0.0, current=5.0)
+    assert applied is True
+    assert ",," not in fixed
+    assert "::" not in fixed
+    assert "  " not in fixed
+    assert not fixed.startswith(",")
+    assert not fixed.startswith(":")
+    assert fixed[0].isupper()
+
+
+# ---------------------------------------------------------------------------
 # _fix_modal_hedge — might/could removal via verb promotion
 # ---------------------------------------------------------------------------
 

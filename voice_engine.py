@@ -97,7 +97,8 @@ _HEDGE_PATTERN = re.compile(
 _SCAFFOLDING_PATTERN = re.compile(
     r"\b(as you (know|may know|will know)|let me (explain|be clear|clarify)|"
     r"what (this|that) means (is|for you)|in other words|to put it (simply|another way)|"
-    r"basically|simply put|the reason (is|being)|background(:|,))\b", re.I
+    r"basically|simply put|the reason (is|being))\b|\bbackground(?=[:,])",
+    re.I
 )
 
 _DOTTED_ABBREV = re.compile(r'\b(?:[A-Za-z]\.){2,}')
@@ -2744,8 +2745,27 @@ def compute_risk(
 
     missed = sum(1 for d in (delta or {}).values() if d.get("verdict") == "MISSED")
     semantic_match = (semantic or {}).get("semantic_match", 100)
+    entity_preservation = (semantic or {}).get("entity_preservation", 0)
 
-    if semantic_match < RISK_HIGH_SEMANTIC_MATCH_BELOW or missed >= RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST:
+    # Real finding, 4 Sept 2026 breadth benchmark (3 diverse personas): a
+    # low semantic_match can be driven ENTIRELY by content_score (word-
+    # overlap) even with perfect entity preservation (100% facts/names
+    # intact). Confirmed directly: content_overlap of 12-19% on renders
+    # where heavy AI-slop-stripping or a large register conversion
+    # correctly replaced nearly every word - the CORRECT, desired outcome
+    # of that kind of rewrite, not concerning drift. A word-overlap
+    # metric mechanically scores low whenever most words genuinely change,
+    # regardless of how right that change was. Facts surviving intact is
+    # the harder, more reliable signal (already a hard fail on its own,
+    # above, when they DON'T survive) - word-choice divergence alone, with
+    # facts fully intact, should not carry the same confirmation-gating
+    # severity as a genuine hard fail. Only gates semantic_match's HIGH
+    # threshold on entity preservation being less than perfect; a perfect-
+    # entity render can still read Medium via the same number below, so
+    # the signal isn't discarded, just not escalated past what the
+    # evidence supports.
+    if (semantic_match < RISK_HIGH_SEMANTIC_MATCH_BELOW and entity_preservation < 100) \
+            or missed >= RISK_HIGH_MISSED_DIMENSIONS_AT_LEAST:
         return "High"
     if semantic_match < RISK_MEDIUM_SEMANTIC_MATCH_BELOW or missed >= RISK_MEDIUM_MISSED_DIMENSIONS_AT_LEAST:
         return "Medium"

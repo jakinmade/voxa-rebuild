@@ -68,7 +68,7 @@ from components.paste_guard import paste_guard
 from deterministic_fixers import (
     _fix_hedge_density, _fix_sentence_length_sd,
     _fix_first_person_ratio, _fix_first_person_over_ratio,
-    _fix_directive_ratio, _fix_modal_hedge,
+    _fix_directive_ratio, _fix_modal_hedge, _fix_scaffolding_density,
     _check_uncorrected_insertions, _fix_entity_casing,
     ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
 )
@@ -2741,11 +2741,23 @@ def _run_render(
             )
         else:
             directive_fixed = False
+        # Added 4 Sept 2026 alongside conclusion_opener_ratio/
+        # scaffolding_density being enforced as scored dimensions
+        # (PR #20) — those two had no auto-fixer until now, unlike the
+        # original four. This closes the scaffolding_density half only;
+        # see _fix_scaffolding_density's own docstring for why
+        # conclusion_opener_ratio (reordering sentences, not deleting
+        # words) is deliberately left unfixed rather than rushed.
+        if correction_delta.get("scaffolding_density", {}).get("verdict") == "MISSED":
+            d = correction_delta["scaffolding_density"]
+            clean, scaffolding_fixed = _fix_scaffolding_density(clean, d["baseline"], d["output"])
+        else:
+            scaffolding_fixed = False
         log.info(
             "deterministic_fixers_applied",
             hedge_density=hedge_fixed, modal_hedge=modal_fixed,
             sentence_length_sd=rhythm_fixed, first_person_ratio=ownership_fixed,
-            directive_ratio=directive_fixed,
+            directive_ratio=directive_fixed, scaffolding_density=scaffolding_fixed,
         )
 
         # Re-score after the deterministic pass so the LLM correction
@@ -2949,6 +2961,9 @@ def _run_render(
                 clean, _ = _fix_directive_ratio(
                     clean, d["baseline"], d["output"], input_has_directive_content
                 )
+            if "scaffolding_density" in still_missed:
+                d = delta["scaffolding_density"]
+                clean, _ = _fix_scaffolding_density(clean, d["baseline"], d["output"])
             clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
             if st.session_state.get("locale", "uk") == "uk":
                 clean = _apply_uk_english(clean)

@@ -154,6 +154,42 @@ def test_reason_is_aggregate_band_when_only_the_score_is_low():
     assert ve.compute_risk_reason(delta, semantic, ai_tells) == "aggregate_band"
 
 
+def test_low_semantic_match_downgrades_to_medium_when_entities_fully_preserved():
+    """Real finding, 4 Sept 2026 breadth benchmark: 3 diverse personas
+    scored semantic_match 65-69 (High territory) driven entirely by
+    content_score (word-overlap) even with 100% entity preservation -
+    confirmed as the CORRECT outcome of heavy AI-slop-stripping or a
+    large register conversion, not concerning drift. A low semantic_
+    match should not carry High severity when facts/names are fully
+    intact - the harder, more reliable signal."""
+    semantic = {"semantic_match": 65, "entity_preservation": 100,
+                "attribution_swaps": [], "dropped_entities": []}
+    assert ve.compute_risk({}, semantic, {"clean": True}) == "Medium"
+
+
+def test_low_semantic_match_still_high_when_entities_not_fully_preserved():
+    """Regression guard for the fix above: the leniency must be scoped
+    to PERFECT entity preservation only - anything less than 100%
+    (a genuine, if partial, entity loss) still gets the full High
+    severity, unchanged from before this fix."""
+    semantic = {"semantic_match": 65, "entity_preservation": 80,
+                "attribution_swaps": [], "dropped_entities": ["Acme"]}
+    assert ve.compute_risk({}, semantic, {"clean": True}) == "High"
+
+
+def test_low_semantic_match_stays_high_when_entity_preservation_unknown():
+    """Regression guard: a caller that never confirms entity
+    preservation (an incomplete dict, as several pre-existing tests in
+    this file construct) must not silently receive the new leniency -
+    the default is 'not proven perfect', preserving old, stricter
+    behaviour for anyone who hasn't explicitly claimed otherwise. Real
+    production data from score_semantic_drift always includes this
+    field, so this default only matters for incomplete test fixtures
+    or callers, never real renders."""
+    semantic = {"semantic_match": 65, "attribution_swaps": [], "dropped_entities": []}
+    assert ve.compute_risk({}, semantic, {"clean": True}) == "High"
+
+
 def test_reason_is_clean_when_nothing_fires():
     delta = {}
     semantic = {"semantic_match": 100, "attribution_swaps": [], "dropped_entities": []}
@@ -182,6 +218,31 @@ def test_reason_checks_same_priority_order_as_compute_risk():
 # a trivial absolute move into a 100% pct_diff. Pinned here as a
 # regression test, not just documented in the CHANGELOG.
 # ---------------------------------------------------------------------------
+
+def test_lexical_fidelity_carves_out_casual_filler_not_in_baseline():
+    """Real finding, 4 Sept 2026 breadth benchmark: a rushed casual
+    draft ('OMG this proposal is honestly kind of a mess lol...')
+    rewritten toward a formal calibrated voice left 'OMG' sitting
+    untouched in an otherwise-formal output, because the LEXICAL
+    FIDELITY instruction told the model to preserve the writer's own
+    words with no carve-out for filler that plainly doesn't fit any
+    reasonable register. Confirms the carve-out text is actually
+    present in a realistically-built system prompt, not just that it
+    exists somewhere in prompts.py as a string literal."""
+    voice_dna = pr._build_voice_dna(
+        observations=[{"headline": "Direct opener", "body": "Gets straight to it."}],
+        raw_text="I have reviewed the proposal and have concerns about the timeline.",
+        baseline=None, ai_score=0.0,
+        current_input_text="OMG this proposal is honestly kind of a mess lol, thoughts??",
+    )
+    system = pr._build_system_prompt(
+        voice_dna=voice_dna, mode_instruction="Rewrite this in their voice.",
+        word_count_input=10, ai_score=0.0, baseline=None,
+    )
+    assert "OMG" in system  # the concrete example, not just the general principle
+    assert "throwaway filler" in system
+    assert "UNLESS the voice profile above shows" in system  # the baseline-check carve-out
+
 
 def test_near_zero_baseline_trivial_move_is_hit_not_missed():
     """The actual bug: hedge_density baseline 0.5, output 0.0 - an
