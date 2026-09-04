@@ -251,9 +251,15 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
             for s in density["peak_density_sentences"]:
                 lines.append(f'  "{s}"')
 
-    # Em dash usage in source writing
+    # Em dash usage in source writing. Tightened 4 Sept 2026 to match
+    # prompts.uses_em_dashes' 2+ occurrence bar (product decision: a
+    # single dash is thin evidence of a real habit, not proof of one) -
+    # kept as a local re.findall count here rather than importing
+    # uses_em_dashes to avoid a circular import (this function lives in
+    # the same module uses_em_dashes does), same pattern this block
+    # already used before today.
     em_dashes_in_source = len(re.findall(r"[—–\u2014\u2013]", structural_text))
-    if em_dashes_in_source == 0:
+    if em_dashes_in_source < 2:
         lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
     else:
         lines.append("PUNCTUATION: uses em dashes — this is part of their voice, preserve them where the input has them, don't strip them out")
@@ -781,23 +787,30 @@ _DASH_DEPENDENT_STARTERS = {
 }
 
 
-def uses_em_dashes(text: str) -> bool:
+def uses_em_dashes(text: str, min_count: int = 2) -> bool:
     """
-    Does this person's own writing use em dashes? Same reasoning as
-    voice_engine.uses_contractions: em dashes are a well-known AI tell
-    on AVERAGE, but for a specific person they can be a genuine,
-    consistent stylistic choice (a clipped, confident opener like
-    "Scott — following up..." rather than "Scott, following up...").
-    Stripping them unconditionally, with no check against the
-    person's own baseline or the actual text being rewritten, pushes
-    the output away from their voice for exactly the people whose
-    voice already uses one. Threshold matches uses_contractions'
-    reasoning (roughly one instance is enough to count as a real,
-    repeatable habit, not noise) rather than reusing its 1-per-100-words
-    density bar, since dashes are naturally far rarer per word than
-    contractions even for someone who uses them habitually.
+    Does this person's own writing use em dashes as a genuine, repeated
+    habit — not just once? Same reasoning as voice_engine.uses_contractions:
+    em dashes are a well-known AI tell on AVERAGE, but for a specific
+    person they can be a genuine, consistent stylistic choice (a
+    clipped, confident opener like "Scott — following up..." rather
+    than "Scott, following up...").
+
+    Threshold tightened 4 Sept 2026 (product decision): a single dash
+    in one email is thin evidence of a real habit — it could just as
+    easily be a one-off slip, and in 2026 an em dash is a strong enough
+    AI signal that protecting a single occurrence risks the opposite
+    failure (an AI-tell false negative) more than it risks the
+    contraction-style false positive this whole mechanism exists to
+    fix. min_count=2 requires the dash to show up more than once
+    across the evidence given to this function (callers combine
+    calibration + current input before counting, so genuine repeated
+    use across two different pieces of writing counts even if neither
+    alone reaches 2) before treating it as the person's real voice
+    rather than noise. Below that bar, default behaviour is strip —
+    the safer default per the same reasoning.
     """
-    return bool(_DASH_VARIANTS_PATTERN.search(text))
+    return len(_DASH_VARIANTS_PATTERN.findall(text)) >= min_count
 
 
 def _split_dashes_deterministic(text: str, keep_dashes: bool = False) -> str:
