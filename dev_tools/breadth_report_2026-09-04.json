@@ -1,0 +1,113 @@
+{
+  "personas_tested": 4,
+  "flagged_count": 3,
+  "flagged": [
+    {
+      "persona_name": "terse_engineer",
+      "status": "ok",
+      "risk": "High",
+      "voice_match": 90,
+      "voice_match_tier": "Strong",
+      "semantic_match": 65,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "Pipeline failed on a config issue. Team got it fixed fast. Audit the CI/CD process to make sure it holds up better than this going forward."
+    },
+    {
+      "persona_name": "narrative_storyteller",
+      "status": "ok",
+      "risk": "High",
+      "voice_match": 69,
+      "voice_match_tier": "Good",
+      "semantic_match": 66,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "Three days before launch, the payment integration failed. Root cause was a config mismatch. We need better pre-launch testing. Not just a checklist. A proper end-to-end run through every integration point before we sign off on anything. Config mismatches like this one should be caught weeks out, not days before go-live. I'd rather slow down the process than absorb that kind of risk again."
+    },
+    {
+      "persona_name": "formal_civil_servant",
+      "status": "ok",
+      "risk": "High",
+      "voice_match": 66,
+      "voice_match_tier": "Good",
+      "semantic_match": 68,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "I have reviewed the proposal and have a number of concerns. Anyway, the timeline does not hold up, and the procurement implications have not been addressed. OMG. Let me know if we can get a short call before this goes to the board."
+    }
+  ],
+  "all_results": [
+    {
+      "persona_name": "terse_engineer",
+      "status": "ok",
+      "risk": "High",
+      "voice_match": 90,
+      "voice_match_tier": "Strong",
+      "semantic_match": 65,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "Pipeline failed on a config issue. Team got it fixed fast. Audit the CI/CD process to make sure it holds up better than this going forward."
+    },
+    {
+      "persona_name": "hedging_academic",
+      "status": "ok",
+      "risk": "Medium",
+      "voice_match": 78,
+      "voice_match_tier": "Good",
+      "semantic_match": 75,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "The findings clearly demonstrate that the intervention worked, and users responded positively. I do not think this constitutes sufficient grounds to roll out without further testing, however compelling the initial results are."
+    },
+    {
+      "persona_name": "narrative_storyteller",
+      "status": "ok",
+      "risk": "High",
+      "voice_match": 69,
+      "voice_match_tier": "Good",
+      "semantic_match": 66,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "Three days before launch, the payment integration failed. Root cause was a config mismatch. We need better pre-launch testing. Not just a checklist. A proper end-to-end run through every integration point before we sign off on anything. Config mismatches like this one should be caught weeks out, not days before go-live. I'd rather slow down the process than absorb that kind of risk again."
+    },
+    {
+      "persona_name": "formal_civil_servant",
+      "status": "ok",
+      "risk": "High",
+      "voice_match": 66,
+      "voice_match_tier": "Good",
+      "semantic_match": 68,
+      "confidence": "Low",
+      "ai_tell_clean": true,
+      "content_integrity_hard_fail": false,
+      "dropped_entities": [],
+      "attribution_swaps": [],
+      "correction_pass_applied": true,
+      "output": "I have reviewed the proposal and have a number of concerns. Anyway, the timeline does not hold up, and the procurement implications have not been addressed. OMG. Let me know if we can get a short call before this goes to the board."
+    }
+  ]
+}
