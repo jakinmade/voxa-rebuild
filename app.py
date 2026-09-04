@@ -2986,10 +2986,10 @@ def _run_render(
         # false-positive this fixes ("curious whether", "i suspect",
         # "i would push back" all appeared verbatim in a real original
         # input and were flagged anyway).
-        ai_tells = score_ai_tells(clean, original_input_text=input_text)
+        ai_tells = score_ai_tells(clean, original_input_text=input_text, calibration_text=fingerprint_corpus or "")
         if not ai_tells["clean"]:
             clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-            ai_tells = score_ai_tells(clean, original_input_text=input_text)
+            ai_tells = score_ai_tells(clean, original_input_text=input_text, calibration_text=fingerprint_corpus or "")
 
         # Downgrade MISSED -> SKIPPED for dimensions the input never
         # had content for in the first place (input_has_opinion_content
@@ -3510,8 +3510,16 @@ def _clean_ai_tells_and_rescore():
     keep_contractions = st.session_state.get("render_keep_contractions", False)
     keep_dashes = st.session_state.get("render_keep_dashes", False)
     input_text = st.session_state.get("render_input_text", "")
+    # Same corpus reconstruction as the main render flow (raw_text +
+    # sample2_completions) - available via session_state here rather
+    # than a local variable, since this function runs from a later
+    # user click, not inline with the original render.
+    calibration_text = (
+        st.session_state.get("raw_text", "") + " "
+        + " ".join(st.session_state.get("sample2_completions", []))
+    ).strip()
     cleaned = _regex_sweep(current, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-    new_ai_tells = score_ai_tells(cleaned, original_input_text=input_text)
+    new_ai_tells = score_ai_tells(cleaned, original_input_text=input_text, calibration_text=calibration_text)
 
     st.session_state.render_output = cleaned
     report = st.session_state.get("voice_report")

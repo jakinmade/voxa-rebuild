@@ -293,10 +293,10 @@ def run_render_stage(
         except Exception as e:
             correction_applied = f"failed: {e}"
 
-    ai_tells = ve.score_ai_tells(clean, original_input_text=input_text)
+    ai_tells = ve.score_ai_tells(clean, original_input_text=input_text, calibration_text=persona.get("sample1_text", ""))
     if not ai_tells["clean"]:
         clean = pr._regex_sweep(clean, keep_contractions=keep_contractions)
-        ai_tells = ve.score_ai_tells(clean, original_input_text=input_text)
+        ai_tells = ve.score_ai_tells(clean, original_input_text=input_text, calibration_text=persona.get("sample1_text", ""))
 
     confidence = ve.compute_confidence(fingerprint["fitness"], baseline, len(observations))
     risk = ve.compute_risk(delta, semantic, ai_tells)
@@ -326,7 +326,7 @@ def run_render_stage(
 
         delta2 = ve.score_render_delta(baseline, clean2)
         semantic2 = ve.score_semantic_drift(refined_input, clean2)
-        ai_tells2 = ve.score_ai_tells(clean2, original_input_text=refined_input)
+        ai_tells2 = ve.score_ai_tells(clean2, original_input_text=refined_input, calibration_text=persona.get("sample1_text", ""))
         risk2 = ve.compute_risk(delta2, semantic2, ai_tells2)
         report2 = ve.build_voice_report(delta2, semantic2, confidence, risk2, ai_tells2)
 
