@@ -2540,7 +2540,7 @@ def _run_render(
             st.session_state.voice_profile_summary = summary
             save_profile_if_available()
 
-    voice_dna = _build_voice_dna(observations, fingerprint_corpus or raw_text, baseline, ai_score)
+    voice_dna = _build_voice_dna(observations, fingerprint_corpus or raw_text, baseline, ai_score, current_input_text=input_text)
     mode_instruction = apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
 

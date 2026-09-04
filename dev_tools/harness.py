@@ -210,7 +210,7 @@ def run_render_stage(
 
     detected_mode = pr._detect_mode(input_text)
     ai_score = ve._score_ai_signal(input_text)
-    voice_dna = pr._build_voice_dna(observations, persona["sample1_text"], baseline, ai_score)
+    voice_dna = pr._build_voice_dna(observations, persona["sample1_text"], baseline, ai_score, current_input_text=input_text)
     mode_instruction = pr.apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
 

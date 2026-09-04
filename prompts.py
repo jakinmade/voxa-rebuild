@@ -183,20 +183,45 @@ def apply_intent_mode(text: str, mode: str) -> str:
         ),
     }
     return mode_prompts.get(mode, mode_prompts["GET_IT_DONE"])
-def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | None = None, ai_score: float = 0.0) -> str:
+def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | None = None, ai_score: float = 0.0,
+                      current_input_text: str = "") -> str:
     """
     Builds a rich, structured voice DNA string for the render prompt.
     Goes far beyond observation headlines — extracts structural metrics
     and evidence quotes to give Claude concrete anchors.
+
+    current_input_text: the actual text being rewritten THIS render.
+    Added 4 Sept 2026 — previously every structural signal below
+    (sentence length, hedging density, em-dash usage) was computed
+    ONLY from raw_text (the one-time onboarding calibration sample),
+    with the current render's own input never considered at all. That
+    meant the instruction sent to Claude — literally "do not introduce
+    any [em dashes]" — could actively steer generation away from the
+    person's real voice whenever calibration happened not to capture
+    something the actual input plainly demonstrates. Confirmed live:
+    a real email opening "Scott — following up..." lost its em dash in
+    generation, not just in post-processing, traced to this exact
+    instruction being built from calibration text that had none. Every
+    structural line below now measures raw_text + current_input_text
+    together where current_input_text is available, so today's actual
+    evidence always has a say, not just whatever was pasted once at
+    onboarding — same principle as the keep_contractions/keep_dashes
+    fix in app.py, applied here to the pre-generation instruction
+    layer rather than the post-generation cleanup layer.
     """
     if not observations:
         return "No fingerprint available. Apply a plain, direct, compressed register. UK English. Short sentences."
 
     lines = []
 
-    # Structural metrics from raw text
+    # Structural metrics — calibration blended with the actual current
+    # input where available (see docstring). raw_text alone as fallback
+    # keeps every existing caller that doesn't pass current_input_text
+    # working exactly as before.
+    structural_text = f"{raw_text} {current_input_text}".strip() if current_input_text else raw_text
+
     import re
-    sentences = [s.strip() for s in re.split(r"[.!?]+", raw_text) if s.strip() and len(s.split()) >= 2]
+    sentences = [s.strip() for s in re.split(r"[.!?]+", structural_text) if s.strip() and len(s.split()) >= 2]
     if sentences:
         lengths = [len(s.split()) for s in sentences]
         avg = sum(lengths) / len(lengths)
@@ -206,8 +231,8 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
 
     # Hedging density
     hedge = re.compile(r"\b(might|could|perhaps|possibly|maybe|somewhat|quite|rather|potentially)\b", re.I)
-    hedge_count = len(hedge.findall(raw_text))
-    total_words = max(len(raw_text.split()), 1)
+    hedge_count = len(hedge.findall(structural_text))
+    total_words = max(len(structural_text.split()), 1)
     hedge_density = hedge_count / total_words
     if hedge_density < 0.02:
         lines.append("HEDGING: none — states things directly, no cushioning")
@@ -217,8 +242,8 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
         lines.append("HEDGING: occasional — hedges selectively")
 
     # Thought density — how much this writer compresses into each sentence
-    if raw_text and len(raw_text.split()) >= 80:
-        density = _score_thought_density(raw_text)
+    if structural_text and len(structural_text.split()) >= 80:
+        density = _score_thought_density(structural_text)
         if density["density_instruction"]:
             lines.append(f"\n{density['density_instruction']}")
         if density["peak_density_sentences"]:
@@ -227,11 +252,11 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
                 lines.append(f'  "{s}"')
 
     # Em dash usage in source writing
-    em_dashes_in_source = len(re.findall(r"[—–\u2014\u2013]", raw_text))
+    em_dashes_in_source = len(re.findall(r"[—–\u2014\u2013]", structural_text))
     if em_dashes_in_source == 0:
         lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
     else:
-        lines.append("PUNCTUATION: uses some em dashes — match sparingly")
+        lines.append("PUNCTUATION: uses em dashes — this is part of their voice, preserve them where the input has them, don't strip them out")
 
     # Observations — headline + evidence quote where available
     lines.append("\nVOICE OBSERVATIONS (from their own writing):")
