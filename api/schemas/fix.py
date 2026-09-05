@@ -60,6 +60,16 @@ class FixRequest(BaseModel):
     dimensions_to_address: list[str] | None = None
     user_context: str | None = None
     client_version: str | None = None
+    # Independent architecture review, finding #5: without this,
+    # a double-click, two open tabs, a browser-level retry, or an
+    # extension-messaging duplicate can each trigger a separate paid
+    # render for what was really one user action. Required, not
+    # optional — see routes/fix.py and migrations/2026_09_05_fix_
+    # idempotency.sql. Client generates one fresh value per actual Fix
+    # button click (crypto.randomUUID() — see shared/panel.js's own
+    # comment on why a fresh key per click, not a reused correlation
+    # id like check_request_id, is the right scope for this).
+    idempotency_key: str = Field(..., min_length=1)
     # The extension always knows which composer surface it's running
     # in — required on check-draft's schema for the same reason, kept
     # consistent here since a Fix-it call always follows a Check call

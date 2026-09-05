@@ -43,6 +43,43 @@ function _getDraftText(composer) {
   return textArea ? textArea.innerText.trim() : "";
 }
 
+// Replaces a rich-text editor's content the way a real user's typing
+// or paste would, rather than by writing to the DOM directly.
+//
+// Quill (like ProseMirror, Draft.js, Lexical) keeps its own internal
+// model and only stays in sync with the DOM by reacting to native
+// browser edit events. Setting `.innerText`/`.innerHTML` changes what
+// the screen shows but never reaches that internal model — so what
+// the user sees and what the editor will actually submit on Post can
+// silently diverge. This content script also has no access to
+// LinkedIn's own Quill instance to call its API directly: that object
+// lives in the page's own JS world, not the extension's isolated one.
+//
+// document.execCommand("insertText", ...) sidesteps both problems: it
+// performs a real native text edit, which fires the same
+// beforeinput/input events a live keystroke or paste would — the
+// exact events Quill's own change-tracking is built to handle. This
+// is the same approach production extensions (e.g. Grammarly) use to
+// edit third-party rich-text editors they don't control.
+//
+// Selecting the full contents first makes the insertion a replacement
+// rather than an append. Deprecated-but-universally-supported in
+// Chrome; a readback afterwards confirms the DOM actually changed
+// rather than trusting execCommand's own (unreliable) return value.
+function _replaceEditorText(editableEl, newText) {
+  editableEl.focus();
+
+  const range = document.createRange();
+  range.selectNodeContents(editableEl);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  document.execCommand("insertText", false, newText);
+
+  return editableEl.innerText.trim() === newText.trim();
+}
+
 function _injectControl(composer) {
   if (_attachedComposers.has(composer)) return;
   _attachedComposers.add(composer);
@@ -66,11 +103,28 @@ function _injectControl(composer) {
         type: "FIX_DRAFT",
         text,
         surface: "linkedin",
+        // Generated HERE, not in service_worker.js where the request
+        // is actually built (Architecture Section 6.4's own "content
+        // scripts never construct a request themselves" principle,
+        // which this deliberately steps outside of, for one reason):
+        // idempotency only works if a genuinely duplicated MESSAGE —
+        // the exact failure mode this key exists to guard against —
+        // carries the same key both times. Generating it downstream,
+        // after a duplicate message has already been sent twice,
+        // would produce two different keys and dedupe nothing. This
+        // is per-action input data, the same category as `text` and
+        // `surface` above, not a protocol/auth decision — those still
+        // belong to api_client.js alone.
+        idempotencyKey: crypto.randomUUID(),
       });
     },
     onAcceptFix: (correctedText) => {
       const textArea = composer.querySelector(CONFIG.textAreaSelector);
-      if (textArea) textArea.innerText = correctedText; // never auto-inserted before this point (Section 3.4)
+      if (!textArea) return false;
+      // never auto-inserted before this point (Section 3.4) — see
+      // _replaceEditorText's own comment for why this isn't a plain
+      // innerText assignment.
+      return _replaceEditorText(textArea, correctedText);
     },
   });
 
@@ -96,4 +150,11 @@ _findComposers().forEach(_injectControl); // in case the composer is already pre
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "TOKEN_INVALIDATED") VoicovaPanel.notifyAuthRequired();
 });
+
+// Exposed for automated testing only (tests/js/test_linkedin_editor.js)
+// — same convention as VoicovaStorage/VoicovaApiClient/VoicovaStateMachine
+// exporting their own internals via `self.X`. Not consumed by any other
+// runtime file; the content script itself only calls these privately
+// above.
+self.VoicovaLinkedInInternal = { _replaceEditorText, _getDraftText };
 })();

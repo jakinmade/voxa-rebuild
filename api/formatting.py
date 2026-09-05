@@ -141,14 +141,23 @@ def content_lock_result(
     return {"pass": not content_integrity_hard_fail, "reasons": reasons}
 
 
-def seal_result_from_voice_report(report: dict) -> dict:
-    """Adapts render_pipeline.RenderResult.voice_report into the
-    shape api/evidence/seal.py's `result` parameter expects — the
-    same shape score_draft_check already returns natively (verdict,
-    tier, evidence, ai_tells_clean, ai_tells_flagged, burrows_delta),
-    so seal.py stays a single, unmodified implementation shared by
-    both /api/check-draft and /api/fix (Section 5.4's canonicalisation
-    is only meaningful if every caller feeds it the same shapes).
+def seal_result_from_voice_report(report: dict, delta: dict) -> dict:
+    """Adapts render_pipeline.RenderResult.voice_report (plus its
+    sibling .delta field — the same object build_voice_report derived
+    biggest_changes from, not duplicated inside voice_report itself)
+    into the shape api/evidence/seal.py's `result` parameter expects.
+
+    match_pct and dimension_scores are included specifically so the
+    seal can hash the actual displayed match percentage and per-
+    dimension scores (independent architecture review, finding #4:
+    the seal previously covered only the verdict/tier/evidence
+    SUMMARY, not the number a user actually sees — see seal.py's own
+    comment on why that's now fixed). dimension_scores reuses this
+    module's own dimension_scores() so the sealed shape is identical
+    to what score_draft_check's native result already carries for
+    check_draft.py's call into the same seal() function — one
+    canonical per-dimension shape, not two that could quietly drift
+    apart.
 
     verdict here uses voice_match_badge, the exact same "PASS iff the
     badge is green" rule score_draft_check's own docstring documents
@@ -167,4 +176,6 @@ def seal_result_from_voice_report(report: dict) -> dict:
         "ai_tells_clean": report.get("ai_tell_clean"),
         "ai_tells_flagged": report.get("ai_tell_flags"),
         "burrows_delta": burrows,
+        "match_pct": report.get("voice_match"),
+        "dimension_scores": dimension_scores(delta),
     }

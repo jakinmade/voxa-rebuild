@@ -69,7 +69,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "FIX_DRAFT") {
-    VoicovaApiClient.fixDraft(message.text, message.surface).then(sendResponse);
+    VoicovaApiClient.fixDraft(message.text, message.surface, message.idempotencyKey).then(sendResponse);
     return true;
   }
   if (message?.type === "DISCONNECT") {

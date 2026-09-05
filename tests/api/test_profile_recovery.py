@@ -75,6 +75,10 @@ def test_register_and_recover_end_to_end(client):
     body = r.json()
     for field in ("installation_id", "access_token", "refresh_handle"):
         assert field in body and body[field]
+    # This response body carries live bearer credentials — it must
+    # never be cacheable by a browser, proxy, or CDN on the path
+    # (see api/routes/profile_recovery.py's own comment on why).
+    assert r.headers["cache-control"] == "no-store"
 
     # Single-use: the same token must not work twice.
     r = client.get(f"/api/profile/recover?token={raw_token}")

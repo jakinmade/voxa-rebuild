@@ -30,7 +30,18 @@ import json
 # doesn't try to derive it automatically from the engine; whoever
 # changes the scoring logic is responsible for bumping this alongside
 # that change, same discipline as CLEARANCE's engine_version field.
-SCORING_VERSION = "voice-engine-2026-09-05"
+#
+# .1 (independent architecture review, finding #4): the ruleset itself
+# is unchanged — this bump is because output_payload below now covers
+# match_pct and dimension_scores, which it previously didn't despite
+# this module's own prior comment claiming it did (a genuine code/
+# comment mismatch, not a stale comment tolerated on purpose). A seal
+# computed under the old version attested to a materially narrower
+# claim than one computed now, so a version bump — not a silent
+# behaviour change under the same version string — is the honest way
+# to mark that boundary; a later dispute over an old seal can still be
+# checked against exactly what that version actually covered.
+SCORING_VERSION = "voice-engine-2026-09-05.1"
 
 
 def _canonical_json(payload: dict) -> bytes:
@@ -76,14 +87,15 @@ def seal(
 
     input_hash = _sha256_hex(input_text.encode("utf-8"))
 
-    # Output hash covers dimension scores, and Content Lock's result
-    # only when one exists (Section 5.4) — the things this specific
-    # action's result actually asserts. Deliberately not the full
-    # result/content_lock dicts verbatim: those may carry fields
-    # (timestamps, internal bookkeeping) that vary run-to-run without
-    # the underlying determination changing, which would make the
-    # seal fragile to things that were never part of the claim being
-    # sealed.
+    # Output hash covers match_pct and dimension_scores (the actual
+    # number and per-dimension breakdown shown to the user), plus the
+    # verdict/tier/evidence summary and Content Lock's result when one
+    # exists (Section 5.4) — the things this specific action's result
+    # actually asserts. Deliberately not the full result/content_lock
+    # dicts verbatim: those may carry fields (timestamps, internal
+    # bookkeeping) that vary run-to-run without the underlying
+    # determination changing, which would make the seal fragile to
+    # things that were never part of the claim being sealed.
     output_payload = {
         "verdict": result.get("verdict"),
         "tier": result.get("tier"),
@@ -91,6 +103,8 @@ def seal(
         "ai_tells_clean": result.get("ai_tells_clean"),
         "ai_tells_flagged": result.get("ai_tells_flagged"),
         "burrows_delta_tier": (result.get("burrows_delta") or {}).get("tier"),
+        "match_pct": result.get("match_pct"),
+        "dimension_scores": result.get("dimension_scores"),
     }
     if content_lock is not None:
         output_payload["content_lock_pass"] = content_lock.get("pass")

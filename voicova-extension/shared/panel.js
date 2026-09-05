@@ -62,7 +62,15 @@ function mount(container, { onCheck, onFix, onAcceptFix }) {
   }
 
   function handleAccept() {
-    onAcceptFix(lastResult.corrected_text);
+    // onAcceptFix now reports whether the DOM edit actually verified
+    // (see linkedin.js's _replaceEditorText) — showing "Applied."
+    // unconditionally would tell the user their post was corrected
+    // when the editor's own model might not have changed at all.
+    const applied = onAcceptFix(lastResult.corrected_text);
+    if (!applied) {
+      setState(STATES.ERROR_OFFLINE);
+      return;
+    }
     setState(STATES.ACCEPTED);
     setTimeout(() => setState(STATES.IDLE), 1500); // brief confirmation, then back to idle (Section 3.4)
   }

@@ -38,6 +38,11 @@ _fake_lifetime_counts: dict = {}
 # exercises the profile-recovery routes.
 _fake_recovery_emails: dict = {}
 _fake_recovery_requests: dict = {}
+# idempotency_key -> row, backing the fake fix_idempotency_keys table
+# and its three RPCs below (migrations/2026_09_05_fix_idempotency.sql)
+# — needed once a test exercises /api/fix's duplicate-submission
+# protection.
+_fake_fix_idempotency: dict = {}
 _fake_profiles = {
     "device-abc": {
         "device_id": "device-abc",
@@ -87,6 +92,12 @@ class _FakeRPC:
             return self._release_lifetime_render()
         if self.name == "consume_recovery_request":
             return self._consume_recovery_request()
+        if self.name == "reserve_fix_idempotency_key":
+            return self._reserve_fix_idempotency_key()
+        if self.name == "complete_fix_idempotency_key":
+            return self._complete_fix_idempotency_key()
+        if self.name == "release_fix_idempotency_key":
+            return self._release_fix_idempotency_key()
         return _FakeResult([])
 
     def _rotate_refresh_handle(self):
@@ -136,6 +147,42 @@ class _FakeRPC:
             return _FakeResult([])
         row["used_at"] = datetime.now(timezone.utc).isoformat()
         return _FakeResult([{"profile_id": row["profile_id"], "email": row["email"]}])
+
+    def _reserve_fix_idempotency_key(self):
+        # Mirrors reserve_fix_idempotency_key's real atomic contract
+        # (single INSERT ... ON CONFLICT DO NOTHING, FOUND-checked)
+        # closely enough for route-level tests: insert-if-absent
+        # against the in-memory dict, keyed on the idempotency key
+        # itself — a dict assignment is Python's own atomic-enough
+        # equivalent for a single-threaded test process.
+        key = self.params["p_key"]
+        profile_id = self.params["p_profile_id"]
+        existing = _fake_fix_idempotency.get(key)
+        if existing is None:
+            _fake_fix_idempotency[key] = {
+                "profile_id": profile_id, "status": "pending", "response_json": None,
+            }
+            return _FakeResult([{"is_new": True, "status": "pending", "response_json": None}])
+        return _FakeResult([{
+            "is_new": False,
+            "status": existing["status"],
+            "response_json": existing["response_json"],
+        }])
+
+    def _complete_fix_idempotency_key(self):
+        key = self.params["p_key"]
+        row = _fake_fix_idempotency.get(key)
+        if row is not None:
+            row["status"] = "completed"
+            row["response_json"] = self.params["p_response"]
+        return _FakeResult([])
+
+    def _release_fix_idempotency_key(self):
+        key = self.params["p_key"]
+        row = _fake_fix_idempotency.get(key)
+        if row is not None and row["status"] == "pending":
+            del _fake_fix_idempotency[key]
+        return _FakeResult([])
 
 
 class _FakeTable:
@@ -259,17 +306,19 @@ def fake_supabase(monkeypatch):
     _fake_lifetime_counts.clear()
     _fake_recovery_emails.clear()
     _fake_recovery_requests.clear()
+    _fake_fix_idempotency.clear()
 
     fake_client_factory = lambda: _FakeClient()
 
     import lifetime_cap
     monkeypatch.setattr(lifetime_cap, "get_supabase_client", fake_client_factory)
 
-    from api.db import extension_installations, evidence_seals, profile_lookup, profile_recovery
+    from api.db import extension_installations, evidence_seals, profile_lookup, profile_recovery, fix_idempotency
     monkeypatch.setattr(extension_installations, "get_supabase_client", fake_client_factory)
     monkeypatch.setattr(evidence_seals, "get_supabase_client", fake_client_factory)
     monkeypatch.setattr(profile_lookup, "get_supabase_client", fake_client_factory)
     monkeypatch.setattr(profile_recovery, "get_supabase_client", fake_client_factory)
+    monkeypatch.setattr(fix_idempotency, "get_supabase_client", fake_client_factory)
 
     from api.telemetry import events as telemetry_events
     monkeypatch.setattr(telemetry_events, "get_supabase_client", fake_client_factory)

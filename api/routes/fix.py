@@ -53,6 +53,7 @@ from api.auth.middleware import Identity, resolve_identity
 from api.auth import rate_limit
 from api.db.profile_lookup import get_profile_bundle
 from api.db.evidence_seals import create_seal
+from api.db import fix_idempotency
 from api.evidence import seal as evidence
 from api.telemetry import events as telemetry
 from api import formatting
@@ -90,105 +91,148 @@ def fix(req: FixRequest, identity: Identity = Depends(resolve_identity)):
         # one). Mapped the same way: engine_error, not a new code.
         raise HTTPException(status_code=500, detail={"error_code": "engine_error"})
 
-    # Entitlement gate BEFORE the daily spend guard, before any API
-    # call — see module docstring. Section 11.7 defines exactly one
-    # error_code for this state (render_cap_exhausted, 402); reused
-    # for both this device's lifetime cap and the site-wide daily cap
-    # below rather than inventing a second code the extension's fixed
-    # state machine doesn't know how to handle.
-    lifetime_allowed, lifetime_used, lifetime_limit = check_and_reserve_lifetime_render(
-        identity.profile_id
-    )
-    if not lifetime_allowed:
-        log.info(
-            "fix_blocked", reason="lifetime_cap_reached",
-            used=lifetime_used, limit=lifetime_limit,
-        )
-        raise HTTPException(status_code=402, detail={"error_code": "render_cap_exhausted"})
-
-    daily_allowed, daily_used, daily_limit = check_and_reserve_render()
-    if not daily_allowed:
-        log.info("fix_blocked", reason="daily_cap_reached", used=daily_used, limit=daily_limit)
-        release_reserved_lifetime_render(identity.profile_id)
-        raise HTTPException(status_code=402, detail={"error_code": "render_cap_exhausted"})
-
-    request_id = str(uuid.uuid4())
-    started = time.monotonic()
-    log.info(
-        "fix_start", request_id=request_id,
-        check_request_id=req.check_request_id, surface=req.surface,
-    )
-
-    result = run_voice_render(
-        input_text=req.original_draft,
-        api_key=api_key,
-        raw_text=profile["raw_text"],
-        sample2_completions=profile["sample2_completions"],
-        baseline=profile["baseline_fingerprint"],
-        baseline_texts=profile["baseline_texts"],
-        voice_profile_summary=profile.get("voice_profile_summary"),
-        starter_baseline=profile.get("starter_baseline"),
-        baseline_fingerprints_by_format=profile.get("baseline_fingerprints_by_format"),
-        render_context=req.user_context or "",
-        # platform_format ("social" | "email") is a distinct,
-        # voicova.com-only opt-in (app.py's "elevate" line-editing
-        # toggle) — NOT a mapping from req.surface (linkedin | gmail,
-        # Section 3.2). Section 11.2's Fix-it contract has no field
-        # for it, so it's left at its default (None) here rather than
-        # guessed from the composer surface.
-    )
-
-    if not result.success:
-        # Release-on-failure — see module docstring. Never a daily-cap
-        # release: that guard is a product-wide spend limit unrelated
-        # to this device's own entitlement, and a failed call still
-        # consumed the API attempt it was reserved for.
-        release_reserved_lifetime_render(identity.profile_id)
-        log.error("fix_failed", reason="render_failed", request_id=request_id)
+    # Independent architecture review, finding #5: this must happen
+    # BEFORE any credit is reserved or the LLM is called — the whole
+    # point is that a duplicate submission never reaches either.
+    # Fail-closed (see api/db/fix_idempotency.py's module docstring):
+    # an unreachable reservation store is treated the same as any
+    # other reason this route can't safely proceed, not silently
+    # skipped.
+    reservation = fix_idempotency.reserve(req.idempotency_key, identity.profile_id)
+    if reservation is None:
+        log.error("fix_failed", reason="idempotency_store_unavailable")
         raise HTTPException(status_code=500, detail={"error_code": "engine_error"})
 
-    report = result.voice_report or {}
-    content_lock = formatting.content_lock_result(
-        report, result.insertion_check, result.content_integrity_hard_fail
-    )
+    if not reservation["is_new"]:
+        if reservation["status"] == "completed":
+            # A prior call with this exact key already ran and
+            # produced this response — hand it back unchanged. No
+            # credit touched, no LLM call, same contract a client
+            # retrying a request it isn't sure landed should get.
+            log.info("fix_idempotent_replay", idempotency_key=req.idempotency_key)
+            return FixResponse(**reservation["response_json"])
+        # status == "pending": a genuinely simultaneous duplicate is
+        # still being processed by another request RIGHT NOW (this is
+        # not the same case as "completed" above) — reject rather than
+        # wait or guess at an outcome that hasn't happened yet.
+        raise HTTPException(status_code=409, detail={"error_code": "fix_already_in_progress"})
 
-    seal_result = formatting.seal_result_from_voice_report(report)
-    receipt = evidence.seal(
-        request_id=request_id,
-        profile_id=identity.profile_id,
-        action="fix",
-        input_text=req.original_draft,
-        result=seal_result,
-        content_lock=content_lock,
-    )
-    create_seal(receipt)
+    # Everything from here on has a real, reserved idempotency key
+    # behind it — any exit from this block other than the successful
+    # return at the bottom must release it, so a legitimate retry with
+    # the SAME key (the client's own retry-on-failure, not a new user
+    # action) isn't permanently stuck behind a reservation that will
+    # never resolve. One release point instead of one per failure
+    # branch: an HTTPException raised deliberately below is still an
+    # Exception, so this catches every exit uniformly, including ones
+    # that don't exist yet if this function grows more failure cases
+    # later.
+    try:
+        # Entitlement gate BEFORE the daily spend guard, before any API
+        # call — see module docstring. Section 11.7 defines exactly one
+        # error_code for this state (render_cap_exhausted, 402); reused
+        # for both this device's lifetime cap and the site-wide daily cap
+        # below rather than inventing a second code the extension's fixed
+        # state machine doesn't know how to handle.
+        lifetime_allowed, lifetime_used, lifetime_limit = check_and_reserve_lifetime_render(
+            identity.profile_id
+        )
+        if not lifetime_allowed:
+            log.info(
+                "fix_blocked", reason="lifetime_cap_reached",
+                used=lifetime_used, limit=lifetime_limit,
+            )
+            raise HTTPException(status_code=402, detail={"error_code": "render_cap_exhausted"})
 
-    latency_ms = int((time.monotonic() - started) * 1000)
-    classified_verdict = formatting.classify_result(
-        seal_result["verdict"], seal_result["ai_tells_clean"]
-    )
-    telemetry.emit(
-        installation_id=identity.installation_id,
-        profile_id=identity.profile_id,
-        surface=req.surface,
-        action="fix",
-        request_id=request_id,
-        scoring_version=evidence.SCORING_VERSION,
-        extension_version=req.client_version,
-        result=classified_verdict,
-        fix_requested=True,
-        render_credit_consumed=True,
-        latency_ms=latency_ms,
-        draft_length=len(req.original_draft),
-    )
+        daily_allowed, daily_used, daily_limit = check_and_reserve_render()
+        if not daily_allowed:
+            log.info("fix_blocked", reason="daily_cap_reached", used=daily_used, limit=daily_limit)
+            release_reserved_lifetime_render(identity.profile_id)
+            raise HTTPException(status_code=402, detail={"error_code": "render_cap_exhausted"})
 
-    return FixResponse(
-        request_id=request_id,
-        corrected_text=result.output_text,
-        what_changed=report.get("biggest_changes", []),
-        post_fix_predicted_score=round(report.get("voice_match", 0)),
-        content_lock_result=ContentLockResult(**content_lock),
-        render_consumed=True,
-        scoring_version=evidence.SCORING_VERSION,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
+        request_id = str(uuid.uuid4())
+        started = time.monotonic()
+        log.info(
+            "fix_start", request_id=request_id,
+            check_request_id=req.check_request_id, idempotency_key=req.idempotency_key,
+            surface=req.surface,
+        )
+
+        result = run_voice_render(
+            input_text=req.original_draft,
+            api_key=api_key,
+            raw_text=profile["raw_text"],
+            sample2_completions=profile["sample2_completions"],
+            baseline=profile["baseline_fingerprint"],
+            baseline_texts=profile["baseline_texts"],
+            voice_profile_summary=profile.get("voice_profile_summary"),
+            starter_baseline=profile.get("starter_baseline"),
+            baseline_fingerprints_by_format=profile.get("baseline_fingerprints_by_format"),
+            render_context=req.user_context or "",
+            # platform_format ("social" | "email") is a distinct,
+            # voicova.com-only opt-in (app.py's "elevate" line-editing
+            # toggle) — NOT a mapping from req.surface (linkedin | gmail,
+            # Section 3.2). Section 11.2's Fix-it contract has no field
+            # for it, so it's left at its default (None) here rather than
+            # guessed from the composer surface.
+        )
+
+        if not result.success:
+            # Release-on-failure — see module docstring. Never a daily-cap
+            # release: that guard is a product-wide spend limit unrelated
+            # to this device's own entitlement, and a failed call still
+            # consumed the API attempt it was reserved for.
+            release_reserved_lifetime_render(identity.profile_id)
+            log.error("fix_failed", reason="render_failed", request_id=request_id)
+            raise HTTPException(status_code=500, detail={"error_code": "engine_error"})
+
+        report = result.voice_report or {}
+        content_lock = formatting.content_lock_result(
+            report, result.insertion_check, result.content_integrity_hard_fail
+        )
+
+        seal_result = formatting.seal_result_from_voice_report(report, result.delta)
+        receipt = evidence.seal(
+            request_id=request_id,
+            profile_id=identity.profile_id,
+            action="fix",
+            input_text=req.original_draft,
+            result=seal_result,
+            content_lock=content_lock,
+        )
+        create_seal(receipt)
+
+        latency_ms = int((time.monotonic() - started) * 1000)
+        classified_verdict = formatting.classify_result(
+            seal_result["verdict"], seal_result["ai_tells_clean"]
+        )
+        telemetry.emit(
+            installation_id=identity.installation_id,
+            profile_id=identity.profile_id,
+            surface=req.surface,
+            action="fix",
+            request_id=request_id,
+            scoring_version=evidence.SCORING_VERSION,
+            extension_version=req.client_version,
+            result=classified_verdict,
+            fix_requested=True,
+            render_credit_consumed=True,
+            latency_ms=latency_ms,
+            draft_length=len(req.original_draft),
+        )
+
+        response = FixResponse(
+            request_id=request_id,
+            corrected_text=result.output_text,
+            what_changed=report.get("biggest_changes", []),
+            post_fix_predicted_score=round(report.get("voice_match", 0)),
+            content_lock_result=ContentLockResult(**content_lock),
+            render_consumed=True,
+            scoring_version=evidence.SCORING_VERSION,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        fix_idempotency.complete(req.idempotency_key, response.model_dump())
+        return response
+    except Exception:
+        fix_idempotency.release(req.idempotency_key)
+        raise
