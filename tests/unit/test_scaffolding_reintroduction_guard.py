@@ -22,11 +22,14 @@ the property under test is "is this guard still written in the code
 near the correction pass", not "does it produce a particular output"
 (deterministic_fixers.py's own test suite covers the fixer's actual
 behaviour).
+
+UPDATED 5 Sept 2026: this guard moved from app.py to render_pipeline.py
+during the _run_render extraction — same guard, new location.
 """
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-APP_PY = (_REPO_ROOT / "app.py").read_text()
+RENDER_PIPELINE_PY = (_REPO_ROOT / "render_pipeline.py").read_text()
 HARNESS_PY = (_REPO_ROOT / "dev_tools" / "harness.py").read_text()
 
 
@@ -39,13 +42,13 @@ def _lines_around(source: str, anchor: str, before: int = 5, after: int = 40) ->
     return "\n".join(lines[start:end])
 
 
-def test_app_py_rechecks_scaffolding_density_after_correction_pass():
-    window = _lines_around(APP_PY, "insertion_check = full_check", before=0, after=25)
+def test_render_pipeline_rechecks_scaffolding_density_after_correction_pass():
+    window = _lines_around(RENDER_PIPELINE_PY, "insertion_check = full_check", before=0, after=25)
     assert 'delta.get("scaffolding_density", {}).get("verdict") == "MISSED"' in window, (
-        "app.py's correction pass no longer re-checks scaffolding_density "
-        "after recomputing delta — this is the guard against the "
-        "correction pass reintroducing scaffolding phrases it (or an "
-        "earlier fixer pass) had already removed."
+        "render_pipeline.py's correction pass no longer re-checks "
+        "scaffolding_density after recomputing delta — this is the guard "
+        "against the correction pass reintroducing scaffolding phrases it "
+        "(or an earlier fixer pass) had already removed."
     )
     assert "_fix_scaffolding_density(clean, d[\"baseline\"], d[\"output\"])" in window
 

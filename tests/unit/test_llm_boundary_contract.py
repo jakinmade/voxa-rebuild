@@ -27,12 +27,21 @@ Reads the actual source files as text rather than importing and
 exercising behaviour — the property under test is "is this guard
 still written in the code", not "does it produce a particular output"
 (that's what the rest of the test suite already covers per-function).
+
+UPDATED 5 Sept 2026: four of the five call sites (main render,
+correction pass, voice profile summary, fabrication correction pass)
+moved from app.py to render_pipeline.py during the _run_render
+extraction (see that module's docstring). Only the grammar-fix pass
+call site remains in prompts.py, untouched. This file was updated to
+look in the new locations — the guards themselves are unchanged, only
+where they live moved.
 """
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_PY = (_REPO_ROOT / "app.py").read_text()
 PROMPTS_PY = (_REPO_ROOT / "prompts.py").read_text()
+RENDER_PIPELINE_PY = (_REPO_ROOT / "render_pipeline.py").read_text()
 
 
 def _lines_around(source: str, anchor: str, before: int = 5, after: int = 25) -> str:
@@ -56,7 +65,7 @@ def _lines_around(source: str, anchor: str, before: int = 5, after: int = 25) ->
 # ---------------------------------------------------------------------------
 
 def test_main_render_call_is_followed_by_deterministic_sweep():
-    window = _lines_around(APP_PY, 'system=system, messages=[{"role": "user", "content": input_text}]')
+    window = _lines_around(RENDER_PIPELINE_PY, 'system=system, messages=[{"role": "user", "content": input_text}]')
     assert "_regex_sweep(" in window, (
         "Main render call site no longer followed by _regex_sweep — the "
         "deterministic cleanup pass may have been removed or moved out of "
@@ -72,7 +81,7 @@ def test_main_render_call_is_followed_by_deterministic_sweep():
 # ---------------------------------------------------------------------------
 
 def test_correction_pass_is_schema_constrained_not_plain_text():
-    window = _lines_around(APP_PY, "correction_response = client.messages.create(")
+    window = _lines_around(RENDER_PIPELINE_PY, "correction_response = client.messages.create(")
     assert 'tool_choice={"type": "tool", "name": "return_correction"}' in window, (
         "Correction pass no longer forces a tool call — this reopens the "
         "free-text channel the schema constraint exists to close."
@@ -80,7 +89,7 @@ def test_correction_pass_is_schema_constrained_not_plain_text():
 
 
 def test_correction_pass_result_is_independently_verified():
-    window = _lines_around(APP_PY, "correction_response = client.messages.create(")
+    window = _lines_around(RENDER_PIPELINE_PY, "correction_response = client.messages.create(")
     assert "response_looks_contaminated(" in window, (
         "Correction pass no longer checked with response_looks_contaminated "
         "— the schema constraint alone was never meant to be the only guard "
@@ -89,7 +98,7 @@ def test_correction_pass_result_is_independently_verified():
 
 
 def test_correction_pass_fails_closed_not_open():
-    window = _lines_around(APP_PY, "correction_response = client.messages.create(", after=35)
+    window = _lines_around(RENDER_PIPELINE_PY, "correction_response = client.messages.create(", after=35)
     assert "pre_llm_correction" in window, (
         "Correction pass's fail-closed fallback (pre_llm_correction) not "
         "found nearby — a twice-failed correction must fall back to the "
@@ -117,7 +126,7 @@ def test_grammar_fix_pass_is_explicitly_scoped_to_errors_only():
 # ---------------------------------------------------------------------------
 
 def test_voice_profile_summary_is_swept_through_the_same_deterministic_backstop():
-    window = _lines_around(APP_PY, "system=build_voice_profile_summary_prompt()")
+    window = _lines_around(RENDER_PIPELINE_PY, "system=build_voice_profile_summary_prompt()")
     assert "_regex_sweep(" in window, (
         "Voice profile summary generation no longer swept through "
         "_regex_sweep — free-text generation still needs the same "
@@ -139,7 +148,7 @@ def test_voice_profile_summary_is_swept_through_the_same_deterministic_backstop(
 # ---------------------------------------------------------------------------
 
 def test_fabrication_pass_is_schema_constrained_not_plain_text():
-    window = _lines_around(APP_PY, "fab_response = client.messages.create(")
+    window = _lines_around(RENDER_PIPELINE_PY, "fab_response = client.messages.create(")
     assert 'tool_choice={"type": "tool", "name": "return_correction"}' in window, (
         "Fabrication correction pass no longer forces a tool call — this "
         "reopens the free-text channel the schema constraint exists to close."
@@ -147,7 +156,7 @@ def test_fabrication_pass_is_schema_constrained_not_plain_text():
 
 
 def test_fabrication_pass_result_is_independently_verified():
-    window = _lines_around(APP_PY, "fab_response = client.messages.create(")
+    window = _lines_around(RENDER_PIPELINE_PY, "fab_response = client.messages.create(")
     assert "response_looks_contaminated(" in window, (
         "Fabrication correction pass no longer checked with "
         "response_looks_contaminated — the schema constraint alone was "
@@ -156,7 +165,7 @@ def test_fabrication_pass_result_is_independently_verified():
 
 
 def test_fabrication_pass_only_adopts_result_if_it_actually_improved():
-    window = _lines_around(APP_PY, "fab_response = client.messages.create(", after=60)
+    window = _lines_around(RENDER_PIPELINE_PY, "fab_response = client.messages.create(", after=60)
     assert 'recheck["sentence_growth"] < insertion_check["sentence_growth"]' in window, (
         "Fabrication correction pass no longer re-checks and compares "
         "sentence_growth before/after — this is the guard that stops a "
@@ -166,7 +175,7 @@ def test_fabrication_pass_only_adopts_result_if_it_actually_improved():
 
 
 def test_fabrication_pass_fails_closed_not_open():
-    window = _lines_around(APP_PY, "fab_response = client.messages.create(", after=60)
+    window = _lines_around(RENDER_PIPELINE_PY, "fab_response = client.messages.create(", after=60)
     assert "return clean, insertion_check, False" in window, (
         "Fabrication correction pass's fail-closed fallback (returning "
         "the untouched clean/insertion_check) not found nearby — a "
@@ -186,11 +195,14 @@ def test_fabrication_pass_fails_closed_not_open():
 def test_known_llm_call_site_count_has_not_silently_grown():
     app_count = APP_PY.count("client.messages.create(")
     prompts_count = PROMPTS_PY.count("client.messages.create(")
-    total = app_count + prompts_count
+    render_pipeline_count = RENDER_PIPELINE_PY.count("client.messages.create(")
+    total = app_count + prompts_count + render_pipeline_count
     assert total == 5, (
         f"Expected 5 known client.messages.create() call sites (main render, "
         f"correction pass, grammar-fix pass, voice profile summary, "
-        f"fabrication correction pass), found "
+        f"fabrication correction pass — the first four now in "
+        f"render_pipeline.py, grammar-fix pass still in prompts.py, per the "
+        f"5 Sept 2026 _run_render extraction), found "
         f"{total}. If this is a deliberate new call site, add a test for its "
         f"guard above and update this count in the same change — that's the "
         f"whole point of this file."
