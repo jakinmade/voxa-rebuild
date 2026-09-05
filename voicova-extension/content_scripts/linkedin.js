@@ -103,6 +103,19 @@ function _injectControl(composer) {
         type: "FIX_DRAFT",
         text,
         surface: "linkedin",
+        // Generated HERE, not in service_worker.js where the request
+        // is actually built (Architecture Section 6.4's own "content
+        // scripts never construct a request themselves" principle,
+        // which this deliberately steps outside of, for one reason):
+        // idempotency only works if a genuinely duplicated MESSAGE —
+        // the exact failure mode this key exists to guard against —
+        // carries the same key both times. Generating it downstream,
+        // after a duplicate message has already been sent twice,
+        // would produce two different keys and dedupe nothing. This
+        // is per-action input data, the same category as `text` and
+        // `surface` above, not a protocol/auth decision — those still
+        // belong to api_client.js alone.
+        idempotencyKey: crypto.randomUUID(),
       });
     },
     onAcceptFix: (correctedText) => {

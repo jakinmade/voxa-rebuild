@@ -147,8 +147,12 @@ function checkDraft(draftText, surface) {
   return _authedRequest("/api/check-draft", { draft_text: draftText, surface });
 }
 
-function fixDraft(originalDraft, surface) {
-  return _authedRequest("/api/fix", { original_draft: originalDraft, surface });
+function fixDraft(originalDraft, surface, idempotencyKey) {
+  return _authedRequest("/api/fix", {
+    original_draft: originalDraft,
+    surface,
+    idempotency_key: idempotencyKey,
+  });
 }
 
 function disconnect() {

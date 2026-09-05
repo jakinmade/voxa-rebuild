@@ -81,7 +81,18 @@ def check_draft(req: CheckDraftRequest, identity: Identity = Depends(resolve_ide
         profile_id=identity.profile_id,
         action="check",
         input_text=req.draft_text,
-        result=result,
+        # Independent architecture review, finding #4: the seal must
+        # cover the actual displayed match percentage and per-dimension
+        # scores, not just the verdict/tier/evidence summary — see
+        # seal.py's own comment. score_draft_check's native result
+        # already carries match_pct and delta separately (used below
+        # to build the response); dimension_scores is added here as a
+        # non-invasive merge, matching the exact shape
+        # seal_result_from_voice_report's own fix.py call produces via
+        # this same formatting.dimension_scores(), rather than
+        # reshaping score_draft_check's return contract in
+        # voice_engine.py just for this.
+        result={**result, "dimension_scores": formatting.dimension_scores(result.get("delta") or {})},
     )
     create_seal(receipt)
 
