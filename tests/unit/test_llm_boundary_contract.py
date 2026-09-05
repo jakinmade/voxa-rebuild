@@ -126,7 +126,59 @@ def test_voice_profile_summary_is_swept_through_the_same_deterministic_backstop(
 
 
 # ---------------------------------------------------------------------------
-# Inventory check — if this ever fails, someone added a fifth
+# Call site 5: fabrication correction pass (_run_render, app.py), added
+# 5 Sept 2026 — schema-constrained like call site 2, but decides WHAT
+# to fix from deterministic evidence (get_fabricated_blocks, the exact
+# spans _check_uncorrected_insertions already counted as invented
+# content) rather than a free-form voice-dimension miss. Guard: forced
+# tool_choice, response_looks_contaminated, AND a re-check
+# (_check_uncorrected_insertions again) that only adopts the result if
+# it actually reduced flagged growth — a candidate that doesn't
+# measurably improve on the original problem is rejected, not trusted
+# on the model's say-so.
+# ---------------------------------------------------------------------------
+
+def test_fabrication_pass_is_schema_constrained_not_plain_text():
+    window = _lines_around(APP_PY, "fab_response = client.messages.create(")
+    assert 'tool_choice={"type": "tool", "name": "return_correction"}' in window, (
+        "Fabrication correction pass no longer forces a tool call — this "
+        "reopens the free-text channel the schema constraint exists to close."
+    )
+
+
+def test_fabrication_pass_result_is_independently_verified():
+    window = _lines_around(APP_PY, "fab_response = client.messages.create(")
+    assert "response_looks_contaminated(" in window, (
+        "Fabrication correction pass no longer checked with "
+        "response_looks_contaminated — the schema constraint alone was "
+        "never meant to be the only guard."
+    )
+
+
+def test_fabrication_pass_only_adopts_result_if_it_actually_improved():
+    window = _lines_around(APP_PY, "fab_response = client.messages.create(", after=60)
+    assert 'recheck["sentence_growth"] < insertion_check["sentence_growth"]' in window, (
+        "Fabrication correction pass no longer re-checks and compares "
+        "sentence_growth before/after — this is the guard that stops a "
+        "candidate that didn't actually fix anything (or made it worse) "
+        "from being trusted on the model's own say-so."
+    )
+
+
+def test_fabrication_pass_fails_closed_not_open():
+    window = _lines_around(APP_PY, "fab_response = client.messages.create(", after=60)
+    assert "return clean, insertion_check, False" in window, (
+        "Fabrication correction pass's fail-closed fallback (returning "
+        "the untouched clean/insertion_check) not found nearby — a "
+        "failed or unproven fabrication fix must fall back to the "
+        "pre-pass text, not ship a response that failed the check, and "
+        "must leave the existing content_integrity_hard_fail gate to "
+        "catch it downstream."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Inventory check — if this ever fails, someone added a sixth
 # client.messages.create() call site with no corresponding test above.
 # Update the count AND add a test for the new call site in the same PR.
 # ---------------------------------------------------------------------------
@@ -135,9 +187,10 @@ def test_known_llm_call_site_count_has_not_silently_grown():
     app_count = APP_PY.count("client.messages.create(")
     prompts_count = PROMPTS_PY.count("client.messages.create(")
     total = app_count + prompts_count
-    assert total == 4, (
-        f"Expected 4 known client.messages.create() call sites (main render, "
-        f"correction pass, grammar-fix pass, voice profile summary), found "
+    assert total == 5, (
+        f"Expected 5 known client.messages.create() call sites (main render, "
+        f"correction pass, grammar-fix pass, voice profile summary, "
+        f"fabrication correction pass), found "
         f"{total}. If this is a deliberate new call site, add a test for its "
         f"guard above and update this count in the same change — that's the "
         f"whole point of this file."

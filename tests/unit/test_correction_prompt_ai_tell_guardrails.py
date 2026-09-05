@@ -53,3 +53,17 @@ def test_correction_prompt_rules_apply_to_new_wording_not_just_the_input():
     prompt = build_correction_prompt(_delta_with_one_miss())
     lowered = prompt.lower()
     assert "reintroduce" in lowered or "new wording" in lowered or "you introduce" in lowered
+
+
+def test_correction_prompt_bans_fabrication():
+    """Added 5 Sept 2026: this correction pass is itself a place
+    fabrication can be reintroduced as a side effect of paraphrasing
+    while fixing an unrelated dimension - confirmed live the same day
+    (see PR history) that it reintroduced an invented CI/CD directive
+    after a dedicated fabrication-fix pass had already cleared one.
+    The general correction prompt needs its own explicit guard, not
+    just the two render-path prompts."""
+    prompt = build_correction_prompt(_delta_with_one_miss())
+    lowered = prompt.lower()
+    assert "do not invent specifics" in lowered
+    assert "fabricat" in lowered

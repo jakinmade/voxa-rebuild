@@ -178,6 +178,104 @@ def run_fingerprint_stage(persona: dict) -> dict:
     }
 
 
+def _run_fabrication_correction_pass(
+    client, input_text: str, clean: str, insertion_check: dict,
+    keep_contractions: bool, keep_dashes: bool, locale: str, max_tokens: int,
+) -> tuple:
+    """
+    Dedicated fabrication correction pass (added 5 Sept 2026) — local
+    helper so both call sites in this file (after the initial render,
+    and again after the general dimension-correction pass below) share
+    one implementation instead of a second hand-copy. Kept in parity
+    with app.py's own local helper of the same name; not a shared
+    module-level function because prompts.py and deterministic_
+    fixers.py both explicitly rule out LLM calls (see their module
+    docstrings and test_llm_boundary_contract.py) — this glue stays in
+    the two files already allowed to call the API, same as the
+    pre-existing correction pass, which is likewise independently
+    duplicated between app.py and this file rather than shared.
+
+    Second call site exists because of a real finding, live-tested 5
+    Sept 2026: this pass correctly cleared a fabricated sentence after
+    the initial render (sentence_growth 1 -> 0), but the general
+    dimension-correction pass that runs afterward has no fabrication
+    guard of its own and reintroduced a fresh, different invented
+    directive on the same persona. Two correction passes can each
+    invent content; both need this guard, not just the first.
+
+    KNOWN LIMITATION, confirmed live 5 Sept 2026: when the general
+    correction pass paraphrases heavily enough that difflib finds no
+    unchanged anchor sentence anywhere (see get_fabricated_blocks'
+    underlying _diff_growth_blocks docstring), the whole document
+    collapses into one diff block. A candidate from THIS pass can then
+    genuinely fix the fabrication — confirmed directly, in one real
+    case the model's corrected candidate reverted the invented
+    directive back to the original's own vague wording, verbatim — but
+    the sentence_growth re-check still can't tell that improvement
+    apart from ordinary heavy paraphrase once alignment has collapsed
+    this broadly, so the strict-improvement gate below declines to
+    adopt it. This is a real gap, not yet solved: the fix worked but
+    the verifier couldn't confirm it. Left as-is (failing closed, same
+    as any other unconfirmed case) rather than loosening the adoption
+    gate, since a looser gate would also start trusting cases that
+    genuinely didn't improve.
+
+    Only targets sentence_growth - new_hedges has its own deterministic
+    fixer, called separately by the caller exactly as before.
+
+    Fails closed: any exception, no usable candidate, or a re-check
+    that doesn't show STRICT improvement over the passed-in
+    insertion_check returns the inputs unchanged and applied=False.
+    Callers should treat that the same as if this pass had never run -
+    the existing content_integrity_hard_fail gate downstream is the
+    final backstop, not this function.
+
+    Returns (clean, insertion_check, applied).
+    """
+    if insertion_check.get("sentence_growth", 0) <= 0:
+        return clean, insertion_check, False
+
+    flagged_blocks = df.get_fabricated_blocks(input_text, clean)
+    if not flagged_blocks:
+        return clean, insertion_check, False
+
+    try:
+        fabrication_prompt = pr.build_fabrication_correction_prompt(input_text, flagged_blocks)
+        fixed_candidate = None
+        for attempt in range(2):
+            fab_response = client.messages.create(
+                model="claude-sonnet-4-6", max_tokens=max_tokens, temperature=0,
+                system=fabrication_prompt,
+                messages=[{"role": "user", "content": clean}],
+                tools=[pr.CORRECTION_TOOL],
+                tool_choice={"type": "tool", "name": "return_correction"},
+            )
+            tool_use_block = next(
+                (b for b in fab_response.content if b.type == "tool_use"), None,
+            )
+            if tool_use_block is None:
+                continue
+            candidate = tool_use_block.input.get("corrected_text", "")
+            if candidate and not pr.response_looks_contaminated(candidate):
+                fixed_candidate = candidate
+                break
+        if not fixed_candidate:
+            return clean, insertion_check, False
+
+        fixed_candidate = pr._regex_sweep(
+            fixed_candidate, keep_contractions=keep_contractions,
+            original_input_text=input_text, keep_dashes=keep_dashes,
+        )
+        if locale == "uk":
+            fixed_candidate = pr._apply_uk_english(fixed_candidate)
+        recheck = df._check_uncorrected_insertions(input_text, fixed_candidate)
+        if recheck["sentence_growth"] < insertion_check["sentence_growth"]:
+            return fixed_candidate, recheck, True
+        return clean, insertion_check, False
+    except Exception:
+        return clean, insertion_check, False
+
+
 def run_render_stage(
     persona: dict, fingerprint: dict, api_key: str,
     max_tokens: int = 4096, skip_refinement: bool = False,
@@ -249,6 +347,12 @@ def run_render_stage(
     # result from this harness could have shown "clean"/"Low risk" on
     # a render production would have gated for genuine fabrication.
     initial_insertion_check = df._check_uncorrected_insertions(input_text, clean)
+
+    clean, initial_insertion_check, _ = _run_fabrication_correction_pass(
+        client, input_text, clean, initial_insertion_check,
+        keep_contractions=keep_contractions, keep_dashes=keep_dashes,
+        locale=locale, max_tokens=max_tokens,
+    )
 
     # Second, independent check against the starter-only baseline -
     # mirrors app.py exactly. Rule-based, no extra API call.
@@ -381,6 +485,23 @@ def run_render_stage(
                 "sentence_growth": initial_insertion_check["sentence_growth"] + correction_insertion_check["sentence_growth"],
                 "flagged": initial_insertion_check["flagged"] or correction_insertion_check["flagged"],
             }
+            # Second fabrication-pass call site — see
+            # _run_fabrication_correction_pass's docstring for why the
+            # general dimension-correction pass above needs this guard
+            # too, not just the initial render, and for the known
+            # whole-document-collapse limitation confirmed live here.
+            # Checked against input_text directly (not pre_llm_
+            # correction) since this asks the same question as
+            # content_integrity_hard_fail ultimately will: is there
+            # anything in the CURRENT clean not traceable back to the
+            # ORIGINAL input, not just what this one call added.
+            full_check = df._check_uncorrected_insertions(input_text, clean)
+            clean, full_check, _ = _run_fabrication_correction_pass(
+                client, input_text, clean, full_check,
+                keep_contractions=keep_contractions, keep_dashes=keep_dashes,
+                locale=locale, max_tokens=max_tokens,
+            )
+            initial_insertion_check = full_check
         except Exception as e:
             correction_applied = f"failed: {e}"
 

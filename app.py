@@ -63,6 +63,7 @@ from prompts import (
     build_correction_prompt, merge_starter_evidence,
     build_voice_profile_summary_prompt, uses_em_dashes,
     CORRECTION_TOOL, response_looks_contaminated,
+    build_fabrication_correction_prompt,
 )
 from components.paste_guard import paste_guard
 from deterministic_fixers import (
@@ -71,6 +72,7 @@ from deterministic_fixers import (
     _fix_directive_ratio, _fix_modal_hedge, _fix_scaffolding_density,
     _check_uncorrected_insertions, _fix_entity_casing,
     ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
+    get_fabricated_blocks,
 )
 from logging_config import get_logger
 from persistence import restore_profile_if_available, save_profile_if_available, get_or_create_device_id, set_device_id_cookie
@@ -2365,6 +2367,109 @@ def _generate_voice_profile_summary(corpus_text: str) -> str | None:
         return None
 
 
+def _run_fabrication_correction_pass(
+    client, input_text: str, clean: str, insertion_check: dict,
+    keep_contractions: bool, keep_dashes: bool, locale: str,
+) -> tuple:
+    """
+    Dedicated fabrication correction pass (added 5 Sept 2026) — local
+    helper so both call sites in this file (after the initial render,
+    and again after the general dimension-correction pass below) share
+    one implementation instead of a second hand-copy. Kept in parity
+    with dev_tools/harness.py's own local helper of the same name; not
+    a shared module-level function because prompts.py and
+    deterministic_fixers.py both explicitly rule out LLM calls (see
+    their module docstrings and test_llm_boundary_contract.py) — this
+    glue stays in the two files already allowed to call the API, same
+    as the pre-existing correction pass, which is likewise
+    independently duplicated between app.py and harness.py rather than
+    shared.
+
+    Second call site exists because of a real finding, live-tested 5
+    Sept 2026: this pass correctly cleared a fabricated sentence after
+    the initial render (sentence_growth 1 -> 0), but the general
+    dimension-correction pass that runs afterward has no fabrication
+    guard of its own and reintroduced a fresh, different invented
+    directive on the same persona. Two correction passes can each
+    invent content; both need this guard, not just the first.
+
+    Only targets sentence_growth - new_hedges has its own deterministic
+    fixer, called separately by the caller exactly as before.
+
+    Fails closed: any exception, no usable candidate, or a re-check
+    that doesn't show STRICT improvement over the passed-in
+    insertion_check returns the inputs unchanged and applied=False.
+    Callers should treat that the same as if this pass had never run -
+    the existing content_integrity_hard_fail gate downstream is the
+    final backstop, not this function.
+
+    Returns (clean, insertion_check, applied).
+    """
+    if insertion_check.get("sentence_growth", 0) <= 0:
+        return clean, insertion_check, False
+
+    flagged_blocks = get_fabricated_blocks(input_text, clean)
+    if not flagged_blocks:
+        return clean, insertion_check, False
+
+    try:
+        fabrication_prompt = build_fabrication_correction_prompt(input_text, flagged_blocks)
+        fixed_candidate = None
+        for attempt in range(2):
+            with st.spinner("Checking for invented content..."):
+                fab_response = client.messages.create(
+                    model="claude-sonnet-4-6", max_tokens=4096, temperature=0,
+                    system=fabrication_prompt,
+                    messages=[{"role": "user", "content": clean}],
+                    tools=[CORRECTION_TOOL],
+                    tool_choice={"type": "tool", "name": "return_correction"},
+                )
+            tool_use_block = next(
+                (b for b in fab_response.content if b.type == "tool_use"),
+                None,
+            )
+            if tool_use_block is None:
+                log.error(
+                    "fabrication_pass_no_tool_use",
+                    attempt=attempt,
+                    stop_reason=fab_response.stop_reason,
+                )
+                continue
+            candidate = tool_use_block.input.get("corrected_text", "")
+            if candidate and not response_looks_contaminated(candidate):
+                fixed_candidate = candidate
+                break
+            log.error(
+                "fabrication_pass_contaminated_response",
+                attempt=attempt,
+                candidate_preview=candidate[:200],
+            )
+        if not fixed_candidate:
+            log.error("fabrication_pass_failed_both_attempts")
+            return clean, insertion_check, False
+
+        fixed_candidate = _regex_sweep(
+            fixed_candidate, keep_contractions=keep_contractions,
+            original_input_text=input_text, keep_dashes=keep_dashes,
+        )
+        if locale == "uk":
+            fixed_candidate = _apply_uk_english(fixed_candidate)
+        recheck = _check_uncorrected_insertions(input_text, fixed_candidate)
+        log.info(
+            "fabrication_pass_result",
+            pre_sentence_growth=insertion_check["sentence_growth"],
+            post_sentence_growth=recheck["sentence_growth"],
+            cleared=recheck["sentence_growth"] == 0,
+        )
+        if recheck["sentence_growth"] < insertion_check["sentence_growth"]:
+            return fixed_candidate, recheck, True
+        log.error("fabrication_pass_did_not_improve")
+        return clean, insertion_check, False
+    except Exception:
+        log.error("fabrication_pass_llm_failed", exc_info=True)
+        return clean, insertion_check, False
+
+
 def _run_render(
     input_text: str, is_refinement: bool = False, render_context: str = "",
     render_mode: str = "preserve", platform_format: str | None = None,
@@ -2672,6 +2777,21 @@ def _run_render(
         flagged=initial_insertion_check["flagged"],
         scoring_rules_version=scoring_rules_version(),
     )
+
+    # Dedicated fabrication correction pass, added 5 Sept 2026 — see
+    # _run_fabrication_correction_pass's docstring for the full
+    # rationale, including why this is a different mechanism to the
+    # general DO NOT INVENT SPECIFICS prompt instruction (PR #31/#33)
+    # confirmed live to not be enough on its own. Runs here, before
+    # delta/semantic are scored below, so the rest of the pipeline
+    # (dimension correction pass included) starts from de-fabricated
+    # content.
+    clean, initial_insertion_check, _ = _run_fabrication_correction_pass(
+        client, input_text, clean, initial_insertion_check,
+        keep_contractions=keep_contractions, keep_dashes=keep_dashes,
+        locale=st.session_state.get("locale", "uk"),
+    )
+
     st.session_state.render_insertion_check = initial_insertion_check
 
     if baseline:
@@ -2913,6 +3033,23 @@ def _run_render(
                     sentence_growth=correction_insertion_check["sentence_growth"],
                     flagged=correction_insertion_check["flagged"],
                 )
+
+                # Second fabrication-pass call site — see
+                # _run_fabrication_correction_pass's docstring for why
+                # the general dimension-correction pass above needs
+                # this guard too, not just the initial render. Checked
+                # against input_text directly (not pre_llm_correction)
+                # since this asks the same question as content_
+                # integrity_hard_fail ultimately will: is there
+                # anything in the CURRENT clean not traceable back to
+                # the ORIGINAL input, not just what this one call added.
+                full_check = _check_uncorrected_insertions(input_text, clean)
+                clean, full_check, _ = _run_fabrication_correction_pass(
+                    client, input_text, clean, full_check,
+                    keep_contractions=keep_contractions, keep_dashes=keep_dashes,
+                    locale=st.session_state.get("locale", "uk"),
+                )
+                insertion_check = full_check
 
                 delta = score_render_delta(baseline, clean)
                 semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)

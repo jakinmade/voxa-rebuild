@@ -1857,6 +1857,93 @@ def response_looks_contaminated(text: str) -> bool:
     return bool(_CONTAMINATION_PATTERNS.search(text))
 
 
+def build_fabrication_correction_prompt(input_text: str, flagged_blocks: list[dict]) -> str:
+    """
+    Dedicated correction pass for content fabrication, added 5 Sept
+    2026 as a follow-up to the DO NOT INVENT SPECIFICS prompt
+    instruction (added 4 Sept, PR #31; found to be in the wrong prompt
+    branch and fixed, PR #33; confirmed via live test that even
+    reaching the model correctly, the instruction alone does not stop
+    the behaviour — both terse_engineer and data_analyst personas
+    still fabricated a specific invented directive/commitment with the
+    instruction present in the prompt that generated them).
+
+    Different mechanism to the general voice-correction pass in
+    build_correction_prompt: that pass tells the model which
+    AGGREGATE DIMENSION missed a target band (hedge_density too low,
+    etc) and lets it edit freely to hit it. A general "don't invent
+    specifics" instruction sitting in that same free-editing context
+    evidently isn't a strong enough signal — the model is already
+    mid-rewrite, optimising for voice-match and directness, and the
+    instruction has to compete with that pull on every sentence at
+    once.
+
+    This pass is narrower and points at the actual evidence instead:
+    flagged_blocks (from deterministic_fixers.get_fabricated_blocks)
+    identifies the EXACT before/after sentence span(s)
+    _check_uncorrected_insertions already counted as fabricated
+    growth — real content words in the output with no budget in the
+    input. Rather than "don't do this in general", the model is shown
+    its own specific output span next to the specific input it came
+    from and asked to fix only that.
+
+    Untested assumption, flagged honestly: pointing at concrete
+    evidence rather than issuing a general instruction is a reasonable
+    hypothesis for why this might succeed where PR #31's instruction
+    didn't, but it is unconfirmed until run live. If this pass also
+    fails to clear the flagged block, the caller falls back to the
+    pre-existing behaviour (content_integrity_hard_fail gates the
+    render behind manual confirmation) rather than looping or
+    guessing further — this is one attempt at a real fix, not a
+    guaranteed one.
+    """
+    block_descriptions = []
+    for i, block in enumerate(flagged_blocks, 1):
+        block_descriptions.append(
+            f"FLAGGED SPAN {i}:\n"
+            f"  Original input said: \"{block['before']}\"\n"
+            f"  Your output said: \"{block['after']}\"\n"
+        )
+    blocks_text = "\n".join(block_descriptions)
+
+    return (
+        "You are checking a voice-rendered piece of text for fabricated content — "
+        "specific claims, directives, or details that the model invented while "
+        "rewriting, which were never actually present in the original input.\n\n"
+        "ORIGINAL INPUT (the only source of truth for what content is allowed to exist):\n"
+        f"<ORIGINAL_INPUT>\n{input_text}\n</ORIGINAL_INPUT>\n\n"
+        "The rewritten text below has been checked against that original input. "
+        "The following specific span(s) were flagged because the rewritten wording "
+        "contains real content words — not just rephrasing, actual new claims, "
+        "directives, or specifics — that have no basis anywhere in the original "
+        "input:\n\n"
+        f"{blocks_text}\n"
+        "This is fabrication, not paraphrase: converting a vague or abstract "
+        "statement into a punchier, more direct one is expected and correct, but "
+        "supplying the SPECIFIC content that would make it sharp — when the input "
+        "never actually said that specific thing — is inventing information, the "
+        "same category of error as adding a new sentence. A famous real example "
+        "from this exact failure mode: an input saying only 'this underscores the "
+        "importance of a seamless CI/CD process' became 'audit the CI/CD config "
+        "validation steps' — a specific instruction (audit, validation steps) that "
+        "sounds plausible but was never stated.\n\n"
+        "YOUR TASK: rewrite ONLY the flagged span(s) above so they no longer "
+        "contain any claim, directive, or detail beyond what the original input "
+        "actually said. If the original input was vague or abstract at that point, "
+        "the honest correction is a vague or abstract sentence in the same voice — "
+        "not a specific one, even a plausible-sounding one. It is fine for the "
+        "corrected span to be less punchy or less specific than what you wrote "
+        "before; honesty to the source takes priority over impact.\n\n"
+        "Every other sentence in the rewritten text — anything not listed as a "
+        "flagged span above — is already correct and must be preserved EXACTLY as "
+        "given, character for character. Do not re-edit, polish, or improve "
+        "anything outside the flagged span(s), even if you think you could improve "
+        "it. Do not add any new sentence anywhere. Return the FULL corrected text "
+        "(the complete piece, with only the flagged span(s) changed), not just the "
+        "corrected span in isolation."
+    )
+
+
 def build_correction_prompt(
     delta: dict,
     semantic: dict | None = None,
@@ -2231,6 +2318,18 @@ def build_correction_prompt(
         "('furthermore', 'moreover', 'additionally'). No corporate filler ('leverage', "
         "'robust', 'holistic', 'seamlessly'). These apply to any new wording you introduce "
         "while correcting — the text you're given has already had these stripped once; do "
-        "not reintroduce them while fixing something else. Return only the corrected text."
+        "not reintroduce them while fixing something else. "
+        "DO NOT INVENT SPECIFICS — critical, added 5 Sept 2026, real finding: this correction "
+        "call is itself a place fabrication can be introduced as a side effect of paraphrasing "
+        "while fixing an unrelated target above. Making a sentence hit a hedge-density, "
+        "rhythm, or ownership target must never involve supplying a specific claim, directive, "
+        "or detail that isn't already in the text you're given. 'This underscores the "
+        "importance of a seamless CI/CD process moving forward' must never become 'Audit the "
+        "CI/CD config validation steps' or 'Review your configuration checks' while you fix "
+        "something else about that sentence — those are invented specifics, not a correction "
+        "to the target you were asked to hit. If a target instruction above would require "
+        "adding new specific content to satisfy it, satisfy it some other way or leave that "
+        "sentence closer to its current wording — hitting every numeric target is never worth "
+        "inventing content to get there. Return only the corrected text."
     )
 
