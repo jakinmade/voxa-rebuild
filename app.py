@@ -3053,6 +3053,29 @@ def _run_render(
 
                 delta = score_render_delta(baseline, clean)
                 semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
+
+                # Scaffolding-density re-check, added 5 Sept 2026 — same
+                # side-effect class as the new_hedges catch above, found
+                # live: the correction pass, run here to fix an unrelated
+                # dimension (directive_ratio in the confirming test),
+                # reintroduced scaffolding phrases (e.g. "Basically,",
+                # "Background:") that _fix_scaffolding_density had
+                # already correctly removed earlier in this same render.
+                # _check_uncorrected_insertions's new_hedges/sentence_
+                # growth checks don't catch this — a reintroduced
+                # scaffolding phrase is neither a hedge nor sentence
+                # growth. Re-running the same fixer unconditionally
+                # against the freshly-recomputed delta above is safe
+                # (same deletion-only contract as its first call) and
+                # catches a regression from ANY cause, not just this one
+                # call, same as re-running _fix_hedge_density above does
+                # for hedges.
+                if delta.get("scaffolding_density", {}).get("verdict") == "MISSED":
+                    d = delta["scaffolding_density"]
+                    clean, scaffolding_refixed = _fix_scaffolding_density(clean, d["baseline"], d["output"])
+                    if scaffolding_refixed:
+                        log.info("scaffolding_density_reintroduced_and_refixed")
+                        delta = score_render_delta(baseline, clean)
             except Exception:
                 log.error("correction_pass_llm_failed", stage="correction", exc_info=True)
                 pass  # correction pass failed — keep the original render

@@ -476,6 +476,23 @@ def run_render_stage(
             delta = ve.score_render_delta(baseline, clean)
             semantic = ve.score_semantic_drift(input_text, clean)
             correction_applied = True
+
+            # Scaffolding-density re-check, added 5 Sept 2026 — mirrors
+            # app.py's equivalent block exactly. Real finding, live-
+            # confirmed: the correction pass, run here to fix an
+            # unrelated dimension, reintroduced scaffolding phrases
+            # (e.g. "Basically,", "Background:") that _fix_scaffolding_
+            # density had already correctly removed earlier in this
+            # same render. Neither new_hedges nor sentence_growth catch
+            # this class of regression. Re-running the same fixer
+            # unconditionally is safe (same deletion-only contract as
+            # its first call).
+            if delta.get("scaffolding_density", {}).get("verdict") == "MISSED":
+                d = delta["scaffolding_density"]
+                clean, scaffolding_refixed = df._fix_scaffolding_density(clean, d["baseline"], d["output"])
+                if scaffolding_refixed:
+                    delta = ve.score_render_delta(baseline, clean)
+
             # Merged with the initial-render check rather than replacing
             # it, mirroring app.py exactly, so growth/hedges from either
             # stage carry through to compute_risk below.

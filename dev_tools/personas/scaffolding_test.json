@@ -1,0 +1,12 @@
+{
+  "persona_name": "scaffolding_test",
+  "sample1_text": "Build broke on merge. Root cause was the env var rename in the last PR, nobody updated the CI config. Fixed now. Deploy blocked until QA signs off. Will not ship on a Friday again, learned that one twice now.",
+  "sample2_completions": [
+    "Not what was asked for. Doesn't match spec. Needs a rewrite, not a patch. Will explain what's missing.",
+    "I keep systems from breaking, and fix them fast when they do anyway.",
+    "Deploy's delayed a week. QA needs more time. Telling the team now, no sugar coating it.",
+    "Review comments with no reason attached. Just say what's wrong. Every single time."
+  ],
+  "render_input": "Basically, what this means is that the deployment pipeline failed overnight. Let me explain: the root cause was a misconfigured environment variable that nobody caught before merge. In other words, the CI config was out of sync with the actual environment. To put it simply, we shipped a config mismatch. The reason is that the review process didn't catch it. As you know, this has happened before. Background: this is the third incident this quarter tied to environment drift.",
+  "refinement": null
+}
