@@ -191,3 +191,35 @@ def test_default_behaviour_unchanged_when_calibration_text_omitted():
     with_explicit_empty = ve.score_ai_tells(text, calibration_text="")
     assert with_default == with_explicit_empty
     assert with_default["clean"] is False
+
+
+def test_i_think_that_exempted_when_calibration_shows_the_verb_family():
+    """Real finding: a warm-hedging-manager persona's calibration
+    sample opened 'I think, on balance, the draft is...' (the genuine
+    device) and a rewrite using the same device with a different
+    continuation ('I think that is what gives the initiative its
+    value') still got flagged, because 'I think that' and 'I think, on
+    balance' share the verb-opener but not the exact phrase a verbatim
+    check requires. Same pattern-level exemption shape as the fragment-
+    emphasis fix above, applied to the plausibility-shield family."""
+    calibration = "I think, on balance, the draft is mostly there, though I wonder if the opening could land a little softer."
+    render = "Stakeholder alignment might come more naturally through a data-driven methodology, and I think that is what gives the initiative its value."
+    result = ve.score_ai_tells(render, calibration_text=calibration)
+    assert result["clean"] is True
+
+
+def test_i_think_that_still_flagged_without_calibration_evidence():
+    render = "Stakeholder alignment might come more naturally through a data-driven methodology, and I think that is what gives the initiative its value."
+    result = ve.score_ai_tells(render)
+    assert result["clean"] is False
+    assert any("i think that" in f.lower() for f in result["flagged"])
+
+
+def test_i_think_that_still_flagged_with_unrelated_calibration():
+    """The exemption must stay narrow - calibration text with no
+    hedge-verb-opener device at all, no matter how long, must not
+    accidentally exempt a real shield hit in the render."""
+    calibration = "I write in complete, plain sentences with no unusual hedging devices at all."
+    render = "Stakeholder alignment might come more naturally through a data-driven methodology, and I think that is what gives the initiative its value."
+    result = ve.score_ai_tells(render, calibration_text=calibration)
+    assert result["clean"] is False

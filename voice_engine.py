@@ -3482,6 +3482,26 @@ _PLAUSIBILITY_SHIELD_PHRASES = re.compile(
     r"I see it as|I see this as|I view it as|I view this as|I take it as)\b",
     re.IGNORECASE,
 )
+# Broader version of the same vocabulary, WITHOUT requiring "that" to
+# follow - added 4 Sept 2026, same reasoning as _FRAGMENT_EMPHASIS_
+# PATTERN's calibration check below. Real finding: a warm-hedging-
+# manager persona's calibration sample opened "I think, on balance,
+# the draft is..." (the genuine device - hedging via "I think" as a
+# sentence-opener) and a rewrite using the SAME device with a
+# different continuation ("...and I think that is what gives the
+# initiative its value") still got flagged, because "I think that"
+# and "I think, on balance" share the verb-opener but not the exact
+# phrase _matches_excluding_genuine checks for. Used ONLY to detect
+# whether this person's calibration demonstrates the underlying
+# device at all - never used for the actual flagging pass, which
+# still uses the precise, "that"-anchored phrases above.
+_PLAUSIBILITY_SHIELD_VERB_FAMILY = re.compile(
+    r"\b(I think|I believe|I would argue|I would say|I'd say|"
+    r"my view is|my take is|my sense is|it seems to me|"
+    r"in my view|in my opinion|as I see it|as I view it|"
+    r"I see it as|I see this as|I view it as|I view this as|I take it as)\b",
+    re.IGNORECASE,
+)
 
 _AI_TELL_PHRASES = re.compile(
     r"\b(it is (important|worth|essential|crucial|critical|key) to (note|recognise|recognize|understand)|"
@@ -3793,7 +3813,17 @@ def score_ai_tells(text: str, original_input_text: str = "", calibration_text: s
     em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
-    shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)
+    # Pattern-level exemption, same reasoning as _FRAGMENT_EMPHASIS_
+    # PATTERN below: "I think that X" and "I think, on balance, X" are
+    # the same underlying device (hedging via a hedge-verb opener),
+    # not the same phrase - a verbatim check can never connect them.
+    # Checks whether the person's calibration demonstrates the VERB
+    # FAMILY at all (regardless of what follows it), and if so, exempts
+    # every shield hit in this render, not just an identical one.
+    if not (calibration_text and _PLAUSIBILITY_SHIELD_VERB_FAMILY.search(calibration_text)):
+        shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)
+    else:
+        shield_hits = []
     fragment_hits = _detect_sentence_fragments(text)
 
     register = _classify_register(text)
