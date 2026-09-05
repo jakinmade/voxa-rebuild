@@ -41,6 +41,7 @@ from firm_signal import extract_domain, log_firm_signal
 from storage import init_state, go_to, reset_all, generate_receipt, export_profile
 from authenticity_report import build_authenticity_report, export_authenticity_report_json, export_authenticity_report_text, export_authenticity_report_pdf
 from voice_dna_card import build_voice_dna_card_png
+from render_pipeline import run_voice_render
 from voice_engine import (
     analyse_writing, _analyse_intro,
     compute_baseline_metrics, _merge_baseline,
@@ -2304,229 +2305,28 @@ def screen_sample2():
 # Screen 4 — Render, Voice Report, one refinement
 # ============================================================
 
-def _generate_voice_profile_summary(corpus_text: str) -> str | None:
-    """
-    One-time distillation call: condenses a person's raw writing corpus
-    into a short natural-language profile of their distinctive habits.
-    See build_voice_profile_summary_prompt's own docstring for the
-    research basis — generating from a distilled profile measurably
-    outperforms generating from raw context directly.
-
-    Generated lazily on the FIRST render call after a baseline exists,
-    not at Screen 3 completion — deliberately. An earlier version of
-    this called it synchronously right before the Screen 3 -> 4
-    transition, which would have added a real API round-trip's worth
-    of latency to the exact "zero friction" onboarding flow this
-    product has been built around. Generating on first render instead
-    means onboarding completion stays instant; the one-time cost is
-    paid at the point where the person is already waiting on an API
-    call anyway (the render itself), not added as a new wait on top of
-    a step that was previously instant. Cached in session_state
-    (voice_profile_summary) from then on — subsequent renders and the
-    deepen-fingerprint panel both check for an existing value before
-    calling this again.
-
-    Cost guardrail, per standing rule, checked before this was built:
-    minimum viable max_tokens (200 — this only needs to hold 3-5
-    sentences), no auto-retry on failure, cached rather than
-    regenerated on every render.
-
-    Returns None on any failure — this is a quality enhancement, not
-    a required part of the pipeline. A render with no distilled
-    profile falls back to exactly what already existed before this
-    feature: anchor sentences and numeric targets alone.
-    """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    try:
-        api_key = st.secrets["ANTHROPIC_API_KEY"] or api_key
-    except Exception:
-        pass
-    if not api_key or not corpus_text or not corpus_text.strip():
-        return None
-
-    import anthropic
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=200, temperature=0,
-            system=build_voice_profile_summary_prompt(),
-            messages=[{"role": "user", "content": corpus_text}],
-        )
-        summary = response.content[0].text.strip()
-        # Same deterministic backstop the render output gets (em dashes,
-        # corporate filler, verbose openers, Claude-isms) - the prompt
-        # guardrails above are the first line of defence, this is the
-        # second. keep_contractions=True: this is a synthesised
-        # description, not a copy of the person's own words, so there's
-        # no baseline to check contraction usage against either way.
-        summary = _regex_sweep(summary, keep_contractions=True)
-        log.info("voice_profile_summary_generated", summary_length=len(summary))
-        return summary
-    except Exception:
-        log.error("voice_profile_summary_generation_failed", exc_info=True)
-        return None
-
-
-def _run_fabrication_correction_pass(
-    client, input_text: str, clean: str, insertion_check: dict,
-    keep_contractions: bool, keep_dashes: bool, locale: str,
-) -> tuple:
-    """
-    Dedicated fabrication correction pass (added 5 Sept 2026) — local
-    helper so both call sites in this file (after the initial render,
-    and again after the general dimension-correction pass below) share
-    one implementation instead of a second hand-copy. Kept in parity
-    with dev_tools/harness.py's own local helper of the same name; not
-    a shared module-level function because prompts.py and
-    deterministic_fixers.py both explicitly rule out LLM calls (see
-    their module docstrings and test_llm_boundary_contract.py) — this
-    glue stays in the two files already allowed to call the API, same
-    as the pre-existing correction pass, which is likewise
-    independently duplicated between app.py and harness.py rather than
-    shared.
-
-    Second call site exists because of a real finding, live-tested 5
-    Sept 2026: this pass correctly cleared a fabricated sentence after
-    the initial render (sentence_growth 1 -> 0), but the general
-    dimension-correction pass that runs afterward has no fabrication
-    guard of its own and reintroduced a fresh, different invented
-    directive on the same persona. Two correction passes can each
-    invent content; both need this guard, not just the first.
-
-    Only targets sentence_growth - new_hedges has its own deterministic
-    fixer, called separately by the caller exactly as before.
-
-    Fails closed: any exception, no usable candidate, or a re-check
-    that doesn't show STRICT improvement over the passed-in
-    insertion_check returns the inputs unchanged and applied=False.
-    Callers should treat that the same as if this pass had never run -
-    the existing content_integrity_hard_fail gate downstream is the
-    final backstop, not this function.
-
-    Returns (clean, insertion_check, applied).
-    """
-    if insertion_check.get("sentence_growth", 0) <= 0:
-        return clean, insertion_check, False
-
-    flagged_blocks = get_fabricated_blocks(input_text, clean)
-    if not flagged_blocks:
-        return clean, insertion_check, False
-
-    try:
-        fabrication_prompt = build_fabrication_correction_prompt(input_text, flagged_blocks)
-        fixed_candidate = None
-        for attempt in range(2):
-            with st.spinner("Checking for invented content..."):
-                fab_response = client.messages.create(
-                    model="claude-sonnet-4-6", max_tokens=4096, temperature=0,
-                    system=fabrication_prompt,
-                    messages=[{"role": "user", "content": clean}],
-                    tools=[CORRECTION_TOOL],
-                    tool_choice={"type": "tool", "name": "return_correction"},
-                )
-            tool_use_block = next(
-                (b for b in fab_response.content if b.type == "tool_use"),
-                None,
-            )
-            if tool_use_block is None:
-                log.error(
-                    "fabrication_pass_no_tool_use",
-                    attempt=attempt,
-                    stop_reason=fab_response.stop_reason,
-                )
-                continue
-            candidate = tool_use_block.input.get("corrected_text", "")
-            if candidate and not response_looks_contaminated(candidate):
-                fixed_candidate = candidate
-                break
-            log.error(
-                "fabrication_pass_contaminated_response",
-                attempt=attempt,
-                candidate_preview=candidate[:200],
-            )
-        if not fixed_candidate:
-            log.error("fabrication_pass_failed_both_attempts")
-            return clean, insertion_check, False
-
-        fixed_candidate = _regex_sweep(
-            fixed_candidate, keep_contractions=keep_contractions,
-            original_input_text=input_text, keep_dashes=keep_dashes,
-        )
-        if locale == "uk":
-            fixed_candidate = _apply_uk_english(fixed_candidate)
-        recheck = _check_uncorrected_insertions(input_text, fixed_candidate)
-        log.info(
-            "fabrication_pass_result",
-            pre_sentence_growth=insertion_check["sentence_growth"],
-            post_sentence_growth=recheck["sentence_growth"],
-            cleared=recheck["sentence_growth"] == 0,
-        )
-        if recheck["sentence_growth"] < insertion_check["sentence_growth"]:
-            return fixed_candidate, recheck, True
-        log.error("fabrication_pass_did_not_improve")
-        return clean, insertion_check, False
-    except Exception:
-        log.error("fabrication_pass_llm_failed", exc_info=True)
-        return clean, insertion_check, False
-
-
 def _run_render(
     input_text: str, is_refinement: bool = False, render_context: str = "",
     render_mode: str = "preserve", platform_format: str | None = None,
 ) -> bool:
-    """The actual generation pipeline. Kept as one function so the
-    refinement re-render below can call the same path.
+    """Streamlit wrapper (shell) around render_pipeline.run_voice_render
+    (the core) — extracted 5 Sept 2026 so the same generation pipeline
+    is callable outside Streamlit (api/routes/fix.py). This function
+    now owns only Streamlit-specific concerns: session_state
+    read/write, st.secrets, st.spinner, the device-cookie identity,
+    the free-tier lifetime/daily render caps, persisting a newly
+    generated voice-profile summary, and writing render history. All
+    actual generation/correction/scoring logic lives in
+    render_pipeline.py — see that module's docstring for the full
+    account of what moved and why.
 
-    render_context: optional, per-render audience/purpose text ("who's
-    this for, what's it for") from the field above the paste box on
-    Screen 4. Steers generation only — deliberately never touches the
-    numeric baseline targets (hedge_density, ownership, etc.), which
-    stay verifying against the person's own blended voice regardless
-    of register. See the field's own comment in screen_render() for
-    why these are kept as two separate signals.
-
-    render_mode: "preserve" (default) or "elevate", from the toggle
-    above the paste box on Screen 4. Passed straight through to
-    build_correction_prompt's mode parameter — see that function's
-    docstring for what elevate mode actually does (line-editing only:
-    old-to-new sentence ordering and economy, never restructuring).
-
-    platform_format: opt-in, one of "social" or "email" (or None,
-    off), only offered in the UI once "elevate" is selected (see
-    screen_render) — passed straight through to build_correction_
-    prompt, which itself re-checks mode == "elevate" before honouring
-    it, so this parameter can never trigger paragraph restructuring
-    through the preserve path even if a future caller passes it
-    incorrectly. Originally LinkedIn-only, then generalised once it
-    became clear the underlying convention wasn't LinkedIn-specific
-    (see build_correction_prompt's docstring). Same as render_context,
-    this doesn't touch the baseline targets.
-
-    Returns True on success, False on failure. Callers must check this
-    before treating the render as having happened (e.g. before marking
-    the one-time refinement as used) — previously that flag was set
-    unconditionally before this ran, so a failed call still burned the
-    user's one refinement. Failure is reported via
-    st.session_state.render_error rather than a direct st.error() call
-    here, because the caller immediately triggers st.rerun() afterwards,
-    which would wipe an error shown before it — session_state survives
-    the rerun, a bare st.error() call does not.
-
-    is_refinement / render_last_attempt / render_last_is_refinement are
-    recorded here (not by each caller separately) so the retry button
-    shown alongside render_error always has an exact copy of what was
-    actually sent, whichever path failed — the original paste or a
-    refinement request — without duplicating that bookkeeping at every
-    call site.
+    Returns True on success, False on failure — same contract as
+    before this extraction. See render_pipeline.run_voice_render's
+    docstring for what render_mode/platform_format/is_refinement mean.
     """
     st.session_state.render_last_attempt = input_text
     st.session_state.render_last_is_refinement = is_refinement
     st.session_state.render_error = None
-    # Reset unconditionally here, not just inside the platform_format
-    # branch further down — otherwise a True from an earlier
-    # platform-formatted render could leak into a later render that
-    # never touches platform_format at all (e.g. a subsequent
-    # preserve-mode render).
     st.session_state.restructure_declined = False
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     try:
@@ -2539,33 +2339,9 @@ def _run_render(
         log.error("render_failed", reason="api_key_missing", is_refinement=is_refinement)
         return False
 
-    # Order matters here (27 Aug 2026 hardening pass): entitlement is
-    # checked BEFORE the daily spend cap is reserved, not after. Was
-    # the other way round until this fix — check_and_reserve_render()
-    # (render_cap.py) reserves the daily counter optimistically,
-    # before any API call, by its own design ("so a render that fails
-    # partway through still counts"). With the old order, a free user
-    # who'd already used all 15 lifetime renders would still reserve a
-    # daily-cap slot on every retry, even though the lifetime check
-    # right after it would immediately block the render and no API
-    # call would ever happen — someone repeatedly hitting the paywall
-    # could exhaust the site-wide daily budget with zero completions.
-    # Resolving the free-or-lifetime-or-refinement question first, and
-    # only reserving daily spend once a render is actually going to be
-    # attempted, closes that.
-    #
-    # Step 4 (Section 5.2 / Section 13): the 15-lifetime-render free
-    # tier. Resolved here, once, not just inside this check - the same
-    # device_id is reused for the render_history write later in this
-    # function (see the success path below), rather than each call
-    # site resolving its own copy.
     device_id = st.session_state.get("_device_id") or get_or_create_device_id()
     st.session_state["_device_id"] = device_id
-    # Render accounting: "one user render = original generation + its
-    # included refinement, one lifetime-counter decrement, not two."
-    # Only the ORIGINAL generation reserves a lifetime render; a
-    # refinement of that same render is included in the one already
-    # spent, not a second draw against the person's 15.
+
     if is_refinement:
         lifetime_allowed, lifetime_used, lifetime_limit = True, 0, 0
     else:
@@ -2591,749 +2367,100 @@ def _run_render(
         log.error("render_blocked", reason="daily_cap_reached", used=used, limit=limit, is_refinement=is_refinement)
         return False
 
-    import anthropic
-
-    detected_mode = _detect_mode(input_text)
-    st.session_state.intent_mode = detected_mode
-    log.info(
-        "render_start", input_words=len(input_text.split()),
-        is_refinement=is_refinement, detected_mode=detected_mode,
-    )
-
-    raw_text = st.session_state.get("raw_text", "")
-    user_uses_em_dashes = len(re.findall(r"[—–\u2014\u2013]", raw_text)) > 0 if raw_text else False
-    ai_score = _score_ai_signal(input_text, user_uses_em_dashes=user_uses_em_dashes)
-    observations = st.session_state.observations
     baseline = st.session_state.get("baseline_fingerprint")
-    # Per-register baseline (30 Aug 2026): if this render targets a
-    # specific platform_format and a compounding baseline for that
-    # exact format has accumulated enough words to be "established"
-    # (>=800 words, the same threshold _build_restoration_targets
-    # already uses to distinguish provisional from established), use
-    # that instead of the blended one -- a person's email voice and
-    # social voice compound independently rather than being flattened
-    # into one register. Falls back to the existing blended baseline
-    # unchanged whenever there's no platform_format, no per-format
-    # data yet, or it's still too thin to trust over the established
-    # blended one -- so this only ever changes behaviour once real
-    # per-register data exists, never regresses the existing path.
-    if platform_format:
-        by_format = st.session_state.get("baseline_fingerprints_by_format") or {}
-        format_baseline = by_format.get(platform_format)
-        if format_baseline and format_baseline.get("word_count", 0) >= 800:
-            baseline = format_baseline
+    raw_text = st.session_state.get("raw_text", "")
+    sample2_completions = st.session_state.get("sample2_completions", [])
+    baseline_texts = st.session_state.get("fingerprint_sample_texts", [])
+    voice_profile_summary = st.session_state.get("voice_profile_summary")
+    starter_baseline = st.session_state.get("starter_baseline")
+    baseline_fingerprints_by_format = st.session_state.get("baseline_fingerprints_by_format")
 
-    # Full corpus for voice DNA extraction: screen 1 paste + the four
-    # starter completions. The starters used to feed only the numeric
-    # baseline and the contraction check - their sentences never reached
-    # anchor-sentence, vocabulary-fingerprint, or function-pattern
-    # extraction. Fixed: they're candid, unperformed writing and belong
-    # in the same corpus that shapes the render.
-    fingerprint_corpus = raw_text + " " + " ".join(st.session_state.get("sample2_completions", []))
-    fingerprint_corpus = fingerprint_corpus.strip()
+    _spinner_text = {
+        "writing": "Writing as you...",
+        "refining": "Refining...",
+        "checking_invented_content": "Checking for invented content...",
+    }
+    _active_spinner = {"cm": None}
 
-    # Lazy, cached distillation call — see _generate_voice_profile_summary's
-    # docstring for why this happens here (first render) rather than at
-    # Screen 3 completion (would add latency to what's meant to be an
-    # instant onboarding step). Only fires once per baseline; a render
-    # while it's still None just proceeds without it (fail-open, same
-    # standard as everywhere else new this session — this is a quality
-    # enhancement, never a blocker).
-    if baseline and not st.session_state.get("voice_profile_summary"):
-        summary = _generate_voice_profile_summary(fingerprint_corpus or raw_text)
-        if summary:
-            st.session_state.voice_profile_summary = summary
-            save_profile_if_available()
+    def _on_stage(stage: str) -> None:
+        # One spinner context manager reused across stage changes —
+        # closes the previous one (if any) before opening the next,
+        # so only one is ever active, matching the original code's
+        # nested-but-sequential `with st.spinner(...)` blocks.
+        if _active_spinner["cm"] is not None:
+            _active_spinner["cm"].__exit__(None, None, None)
+        text = _spinner_text.get(stage, "Working...")
+        cm = st.spinner(text)
+        cm.__enter__()
+        _active_spinner["cm"] = cm
 
-    voice_dna = _build_voice_dna(observations, fingerprint_corpus or raw_text, baseline, ai_score, current_input_text=input_text)
-    mode_instruction = apply_intent_mode(input_text, detected_mode)
-    word_count_input = len(input_text.split())
-
-    # Baseline-driven, not assumed: does this person's own writing use
-    # contractions? Only strip them from the output if their own writing
-    # doesn't have them either.
-    #
-    # Fixed 4 Sept 2026: this used to check ONLY fingerprint_corpus (the
-    # onboarding calibration text - Sample 1 paste + Screen 3 starters,
-    # captured once, reused for every render since). That meant a
-    # render input that itself used contractions consistently still had
-    # them stripped, if the calibration sample happened to fall under
-    # the 1-per-100-words threshold - a real, confirmed case where a
-    # genuine four-contraction business email had every one expanded
-    # ("it's"->"it is", "didn't"->"did not", "you're"->"you are") because
-    # calibration alone said no, even though the actual input said yes.
-    # Now checked against EITHER signal: the input being rewritten right
-    # now is direct evidence of voice too, not just the onboarding
-    # sample, and it should never be overridden by a stale or
-    # context-mismatched calibration verdict.
-    keep_contractions = (
-        (uses_contractions(fingerprint_corpus) if fingerprint_corpus else False)
-        or uses_contractions(input_text)
-    )
-
-    # Same fix, same reasoning, for em dashes - previously stripped
-    # unconditionally with no check against baseline OR input at all
-    # (unlike contractions, there wasn't even a partial guard). Confirmed
-    # in the same real example: "Scott — following up..." became
-    # "Scott, following up..." even though the em dash was the user's
-    # own genuine opener, not an AI tell.
-    #
-    # Tightened 4 Sept 2026 (product decision, see uses_em_dashes'
-    # docstring): combine calibration and current input into one pool
-    # of evidence and require 2+ total occurrences, rather than OR-ing
-    # two single-instance checks. A single dash anywhere is treated as
-    # a possible one-off slip, not a confirmed habit - the safer
-    # default is strip until the evidence is repeated.
-    _dash_evidence = f"{fingerprint_corpus} {input_text}" if fingerprint_corpus else input_text
-    keep_dashes = uses_em_dashes(_dash_evidence)
-
-    # Same signal used to gate the Ownership/Directness restoration targets
-    # and their correction-pass counterparts: does THIS input (not the
-    # user's baseline corpus) have any first-person or directive content
-    # of its own to convert? Computed once, reused at both gates each so
-    # they can't drift apart on the same render.
-    input_metrics_signal = compute_baseline_metrics(input_text)
-    input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
-    input_has_directive_content = input_metrics_signal["directive_ratio"] > 0
-
-    system = _build_system_prompt(
-        voice_dna=voice_dna, mode_instruction=mode_instruction,
-        word_count_input=word_count_input, ai_score=ai_score, baseline=baseline,
-        input_text=input_text, render_context=render_context,
-        voice_profile_summary=st.session_state.get("voice_profile_summary", ""),
-        platform_format=platform_format,
-        locale=st.session_state.get("locale", "uk"),
-    )
-
-    client = anthropic.Anthropic(api_key=api_key)
     try:
-        with st.spinner("Writing as you..."):
-            response = client.messages.create(
-                model="claude-sonnet-4-6", max_tokens=4096, temperature=0,
-                system=system, messages=[{"role": "user", "content": input_text}],
-            )
-            clean = response.content[0].text
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-            if st.session_state.get("locale", "uk") == "uk":
-                clean = _apply_uk_english(clean)
-            clean = _grammar_fix_pass(clean, client, locale=st.session_state.get("locale", "uk"), original_input_text=input_text)
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-    except Exception:
-        st.session_state.render_error = (
-            "That didn't go through. Your text is safe, try again."
+        result = run_voice_render(
+            input_text=input_text,
+            api_key=api_key,
+            raw_text=raw_text,
+            sample2_completions=sample2_completions,
+            baseline=baseline,
+            baseline_texts=baseline_texts,
+            voice_profile_summary=voice_profile_summary,
+            starter_baseline=starter_baseline,
+            baseline_fingerprints_by_format=baseline_fingerprints_by_format,
+            render_mode=render_mode,
+            render_context=render_context,
+            platform_format=platform_format,
+            is_refinement=is_refinement,
+            on_stage=_on_stage,
         )
-        log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
-        # Release-on-failure: the lifetime cap reserved this render
-        # optimistically, before this API call ran (see
-        # check_and_reserve_lifetime_render's own docstring). If the
-        # call itself failed, the person never got a render out of it
-        # and shouldn't lose one of their 15 for VOICOVA's own API
-        # failure. release_reserved_lifetime_render is self-contained
-        # and safe to call unconditionally for an original render — it
-        # no-ops for an active subscriber and fails open silently on
-        # any Supabase error, same as the rest of that module.
-        # Guarded on is_refinement: a refinement never reserved a
-        # lifetime render in the first place, so releasing one on its
-        # failure would wrongly hand back a slot from an earlier,
-        # successful original render instead.
+    finally:
+        if _active_spinner["cm"] is not None:
+            _active_spinner["cm"].__exit__(None, None, None)
+
+    if not result.success:
+        st.session_state.render_error = result.error
+        # Release-on-failure: see check_and_reserve_lifetime_render's
+        # own docstring for why an API failure must not cost the
+        # person one of their 15 free renders.
         if not is_refinement:
             release_reserved_lifetime_render(device_id)
         return False
 
-    # Case-only entity drift — deterministic, runs before ANY scoring so
-    # a defect that's mechanically fixable never reaches score_semantic_
-    # drift's dropped_entities check (and therefore never trips compute_
-    # risk's dropped_entities hard-fail, never gets sent to the LLM
-    # correction pass, never appears to the user at all). Confirmed live:
-    # a render kept a brand name's letters but not its casing ("CLEARANCE"
-    # -> "Clearance") and that alone was enough to force a High risk
-    # verdict on an otherwise clean render. See _fix_entity_casing's
-    # docstring for why this is safe to apply unconditionally (whole-word,
-    # case-only substitution, never touches word choice or count).
-    clean, casing_restored, casing_still_dropped = _fix_entity_casing(clean, input_text)
-    if casing_restored:
-        log.info(
-            "entity_casing_restored",
-            restored=casing_restored,
-            still_dropped=casing_still_dropped,
-        )
+    # New voice-profile summary generated this call — persist it the
+    # same way the pre-extraction code did (session_state + existing
+    # save_profile_if_available()), just triggered from the result
+    # instead of a side effect buried inside the render call itself.
+    if result.voice_profile_summary_generated:
+        st.session_state.voice_profile_summary = result.voice_profile_summary_generated
+        save_profile_if_available()
 
-    # Diff-preserving guard on the initial render pass — same check the
-    # correction pass already runs (see _check_uncorrected_insertions's
-    # docstring), applied here for the first time. Two LLM calls sit
-    # upstream of this point (the voice-transformation render and the
-    # grammar-fix pass) and neither had a diff against the true source
-    # text before now — score_render_delta below is an aggregate band
-    # check against the baseline fingerprint, not a diff against THIS
-    # input, so a fabricated sentence or an invented hedge can land
-    # inside a passing band and go unflagged. Diffing against input_text
-    # (not an intermediate) catches both calls in one pass, and catches
-    # it at the earliest point content exists to diff.
-    initial_insertion_check = _check_uncorrected_insertions(input_text, clean)
-    log.info(
-        "initial_render_insertion_check",
-        new_hedges=initial_insertion_check["new_hedges"],
-        sentence_growth=initial_insertion_check["sentence_growth"],
-        flagged=initial_insertion_check["flagged"],
-        scoring_rules_version=scoring_rules_version(),
-    )
-
-    # Dedicated fabrication correction pass, added 5 Sept 2026 — see
-    # _run_fabrication_correction_pass's docstring for the full
-    # rationale, including why this is a different mechanism to the
-    # general DO NOT INVENT SPECIFICS prompt instruction (PR #31/#33)
-    # confirmed live to not be enough on its own. Runs here, before
-    # delta/semantic are scored below, so the rest of the pipeline
-    # (dimension correction pass included) starts from de-fabricated
-    # content.
-    clean, initial_insertion_check, _ = _run_fabrication_correction_pass(
-        client, input_text, clean, initial_insertion_check,
-        keep_contractions=keep_contractions, keep_dashes=keep_dashes,
-        locale=st.session_state.get("locale", "uk"),
-    )
-
-    st.session_state.render_insertion_check = initial_insertion_check
+    st.session_state.intent_mode = result.intent_mode
+    st.session_state.restructure_declined = result.restructure_declined
+    st.session_state.render_insertion_check = result.insertion_check
+    st.session_state.render_keep_contractions = result.keep_contractions
+    st.session_state.render_keep_dashes = result.keep_dashes
+    st.session_state.render_delta = result.delta
+    st.session_state.semantic_drift = result.semantic_drift
+    st.session_state.confidence = result.confidence
+    st.session_state.risk = result.risk
+    st.session_state.risk_reason = result.risk_reason
+    st.session_state.ai_tells = result.ai_tells
+    st.session_state.function_word_delta = result.burrows_delta
+    st.session_state.voice_report = result.voice_report
+    st.session_state.render_id = result.render_id
+    st.session_state.render_completed_at = result.render_completed_at
 
     if baseline:
-        delta = score_render_delta(baseline, clean)
-        semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
-
-        # Second, independent check against the starter-only baseline
-        # (unblended with sample1) - catches drift the blended average
-        # can dilute below the correction threshold. Rule-based, no
-        # extra API call: reuses score_render_delta, only widens what
-        # feeds the one correction call that already fires conditionally.
-        starter_baseline = st.session_state.get("starter_baseline")
-        starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
-        correction_delta = merge_starter_evidence(delta, starter_delta)
-
-        # Deterministic fixer pass — runs before the LLM correction call,
-        # not instead of it. Each fixer only fires on the one direction
-        # it can safely handle (see deterministic_fixers.py); anything
-        # it declines is left for build_correction_prompt() below, same
-        # as before this pass existed. No API call, no meaning risk
-        # beyond what each fixer's own docstring already accepts.
-        if correction_delta.get("hedge_density", {}).get("verdict") == "MISSED":
-            d = correction_delta["hedge_density"]
-            clean, hedge_fixed = _fix_hedge_density(clean, d["baseline"], d["output"])
-            clean, modal_fixed = _fix_modal_hedge(clean, d["baseline"], d["output"])
-        else:
-            hedge_fixed = modal_fixed = False
-        if correction_delta.get("sentence_length_sd", {}).get("verdict") == "MISSED":
-            d = correction_delta["sentence_length_sd"]
-            clean, rhythm_fixed = _fix_sentence_length_sd(clean, d["baseline"], d["output"])
-        else:
-            rhythm_fixed = False
-        if correction_delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
-            d = correction_delta["first_person_ratio"]
-            clean, ownership_fixed = _fix_first_person_ratio(
-                clean, d["baseline"], d["output"], input_has_opinion_content
-            )
-            # Companion fixer, opposite direction — see its own
-            # docstring for why this gap existed. Each fixer declines
-            # independently based on current vs target, so calling
-            # both unconditionally is safe: at most one actually fires.
-            clean, ownership_over_fixed = _fix_first_person_over_ratio(
-                clean, d["baseline"], d["output"], input_text
-            )
-            # General, alignment-based fallback — runs after the
-            # pattern-based fixer above, not instead of it, since it
-            # needs the same sentence-alignment machinery but answers
-            # a structurally different question (does this sentence
-            # have a marker the original didn't have at all, regardless
-            # of specific wording) rather than matching a known verb
-            # pattern. Catches whatever the pattern fixer's enumerated
-            # list doesn't — see restore_fabricated_ownership_sentences'
-            # own docstring for why pattern enumeration alone can never
-            # be complete for this failure class. Safe to always run:
-            # it only ever touches a sentence where the aligned
-            # original had zero first-person markers, so it can't
-            # touch anything the fixer above already correctly left
-            # alone.
-            clean, ownership_restored = restore_fabricated_ownership_sentences(clean, input_text)
-            ownership_fixed = ownership_fixed or ownership_over_fixed or ownership_restored
-        else:
-            ownership_fixed = False
-        if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
-            d = correction_delta["directive_ratio"]
-            clean, directive_fixed = _fix_directive_ratio(
-                clean, d["baseline"], d["output"], input_has_directive_content
-            )
-        else:
-            directive_fixed = False
-        # Added 4 Sept 2026 alongside conclusion_opener_ratio/
-        # scaffolding_density being enforced as scored dimensions
-        # (PR #20) — those two had no auto-fixer until now, unlike the
-        # original four. This closes the scaffolding_density half only;
-        # see _fix_scaffolding_density's own docstring for why
-        # conclusion_opener_ratio (reordering sentences, not deleting
-        # words) is deliberately left unfixed rather than rushed.
-        if correction_delta.get("scaffolding_density", {}).get("verdict") == "MISSED":
-            d = correction_delta["scaffolding_density"]
-            clean, scaffolding_fixed = _fix_scaffolding_density(clean, d["baseline"], d["output"])
-        else:
-            scaffolding_fixed = False
-        log.info(
-            "deterministic_fixers_applied",
-            hedge_density=hedge_fixed, modal_hedge=modal_fixed,
-            sentence_length_sd=rhythm_fixed, first_person_ratio=ownership_fixed,
-            directive_ratio=directive_fixed, scaffolding_density=scaffolding_fixed,
-        )
-
-        # Re-score after the deterministic pass so the LLM correction
-        # call — if still needed — only targets what genuinely survived
-        # (residual modal hedges, noun-phrase subjects, non-imperative
-        # wrappers, etc. — the directions each fixer declines on
-        # purpose), not dimensions the deterministic pass already fixed.
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-        if st.session_state.get("locale", "uk") == "uk":
-            clean = _apply_uk_english(clean)
-        delta = score_render_delta(baseline, clean)
-        semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
-        starter_delta = score_render_delta(starter_baseline, clean) if starter_baseline else None
-        correction_delta = merge_starter_evidence(delta, starter_delta)
-
-        # Only computed in elevate mode — preserve mode does none of
-        # this extra work and build_correction_prompt's own params
-        # default to None, so preserve-mode behaviour is byte-for-byte
-        # what it was before these signals existed.
-        sentence_economy = None
-        passive_voice = None
-        if render_mode == "elevate":
-            sentence_economy = compute_sentence_economy(clean)
-            passive_voice = compute_passive_voice(clean)
-
-        correction_prompt = build_correction_prompt(
-            correction_delta, semantic, input_has_opinion_content, input_has_directive_content,
-            mode=render_mode, sentence_economy=sentence_economy, passive_voice=passive_voice,
-            platform_format=platform_format,
-            locale=st.session_state.get("locale", "uk"),
-            user_uses_em_dashes=user_uses_em_dashes,
-        )
-        log.info(
-            "correction_pass_decision",
-            llm_correction_needed=bool(correction_prompt),
-            missed_dimensions=[k for k, d in correction_delta.items() if d["verdict"] == "MISSED"],
-        )
-        # Seeded from the initial-render check above, not None — that
-        # check already covers the voice-transformation and grammar-fix
-        # calls; this block, if it runs, adds what the correction call
-        # introduces on top. Merged rather than overwritten below so a
-        # sentence fabricated at either stage still surfaces as risk —
-        # whichever call invented it, compute_risk needs to see it.
-        insertion_check = initial_insertion_check
-        if correction_prompt:
-            try:
-                pre_llm_correction = clean
-                corrected = None
-                # Forced tool call, not a plain text completion — the
-                # model returns corrected_text as a schema field, so
-                # there's no free-text channel for it to narrate
-                # reasoning into. One bounded retry underneath as a
-                # safety net (response_looks_contaminated), then fail
-                # closed to pre_llm_correction rather than ship a
-                # response that failed the check twice. Flagged: not
-                # verified against live model behaviour in this
-                # session — no Anthropic key available here — needs a
-                # real render on Railway to confirm the tool call
-                # behaves as expected before this is trusted.
-                for attempt in range(2):
-                    with st.spinner("Refining..."):
-                        correction_response = client.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=4096, temperature=0,
-                            system=correction_prompt,
-                            messages=[{"role": "user", "content": clean}],
-                            tools=[CORRECTION_TOOL],
-                            tool_choice={"type": "tool", "name": "return_correction"},
-                        )
-                    tool_use_block = next(
-                        (b for b in correction_response.content if b.type == "tool_use"),
-                        None,
-                    )
-                    if tool_use_block is None:
-                        log.error(
-                            "correction_pass_no_tool_use",
-                            attempt=attempt,
-                            stop_reason=correction_response.stop_reason,
-                        )
-                        continue
-                    candidate = tool_use_block.input.get("corrected_text", "")
-                    if candidate and not response_looks_contaminated(candidate):
-                        corrected = candidate
-                        break
-                    log.error(
-                        "correction_pass_contaminated_response",
-                        attempt=attempt,
-                        candidate_preview=candidate[:200],
-                    )
-                if corrected is None:
-                    log.error("correction_pass_failed_both_attempts")
-                    corrected = pre_llm_correction
-                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-                if st.session_state.get("locale", "uk") == "uk":
-                    corrected = _apply_uk_english(corrected)
-                clean = corrected
-
-                # Word-level fidelity check, platform_format only:
-                # verifies the model actually obeyed "rearrange, don't
-                # rewrite" rather than trusting the instruction alone.
-                # Confirmed necessary against a real render that
-                # restructured two declarative sentences into a "When
-                # X... When Y..." conditional, introducing "when" and
-                # "occurs" — real rewriting, not rearrangement, despite
-                # the explicit instruction against it. Fails CLOSED on
-                # the restructuring specifically, not the whole render:
-                # reverts to pre_llm_correction (already voice-correct,
-                # ownership-fixed, just not platform-formatted) rather
-                # than ship fabricated wording. Surfaced honestly to
-                # the user below (restructure_declined), not silently
-                # swapped. Applies to both platform_format targets
-                # (social and email) equally — the check itself is
-                # generic (any new word is a problem), it doesn't care
-                # which instruction produced the restructuring.
-                if platform_format in ("social", "email"):
-                    fidelity = score_restructure_fidelity(pre_llm_correction, clean)
-                    if not fidelity["clean"]:
-                        log.error(
-                            "platform_restructure_fidelity_failed",
-                            platform_format=platform_format,
-                            fabricated_words=fidelity["fabricated_words"],
-                        )
-                        clean = pre_llm_correction
-                        st.session_state.restructure_declined = True
-
-                # Catches collateral the LLM correction call introduced
-                # as a side effect of fixing its target dimension — see
-                # _check_uncorrected_insertions's docstring for why the
-                # delta re-score two lines below can't catch this on its
-                # own (aggregate band check, not a before/after diff).
-                # Merged with the initial-render check rather than
-                # replacing it, so growth/hedges from either stage carry
-                # through to compute_risk below.
-                correction_insertion_check = _check_uncorrected_insertions(pre_llm_correction, clean)
-                insertion_check = {
-                    "new_hedges": insertion_check["new_hedges"] + correction_insertion_check["new_hedges"],
-                    "sentence_growth": insertion_check["sentence_growth"] + correction_insertion_check["sentence_growth"],
-                    "flagged": insertion_check["flagged"] or correction_insertion_check["flagged"],
-                }
-                if correction_insertion_check["new_hedges"]:
-                    # Same fixers already used earlier in this pass, same
-                    # safe-deletion-only contract — no new correction
-                    # logic, just running them again on what the LLM call
-                    # added. Targets are irrelevant here (recompute from
-                    # the diff itself: any new hedge is by definition over
-                    # whatever the LLM was told to hold), so pass current
-                    # count vs 0 to force the over-hedged branch.
-                    new_hedge_count = len(correction_insertion_check["new_hedges"])
-                    clean, _ = _fix_hedge_density(clean, 0, new_hedge_count)
-                    clean, _ = _fix_modal_hedge(clean, 0, new_hedge_count)
-                log.info(
-                    "correction_pass_side_effect_caught",
-                    new_hedges=correction_insertion_check["new_hedges"],
-                    sentence_growth=correction_insertion_check["sentence_growth"],
-                    flagged=correction_insertion_check["flagged"],
-                )
-
-                # Second fabrication-pass call site — see
-                # _run_fabrication_correction_pass's docstring for why
-                # the general dimension-correction pass above needs
-                # this guard too, not just the initial render. Checked
-                # against input_text directly (not pre_llm_correction)
-                # since this asks the same question as content_
-                # integrity_hard_fail ultimately will: is there
-                # anything in the CURRENT clean not traceable back to
-                # the ORIGINAL input, not just what this one call added.
-                full_check = _check_uncorrected_insertions(input_text, clean)
-                clean, full_check, _ = _run_fabrication_correction_pass(
-                    client, input_text, clean, full_check,
-                    keep_contractions=keep_contractions, keep_dashes=keep_dashes,
-                    locale=st.session_state.get("locale", "uk"),
-                )
-                insertion_check = full_check
-
-                delta = score_render_delta(baseline, clean)
-                semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
-
-                # Scaffolding-density re-check, added 5 Sept 2026 — same
-                # side-effect class as the new_hedges catch above, found
-                # live: the correction pass, run here to fix an unrelated
-                # dimension (directive_ratio in the confirming test),
-                # reintroduced scaffolding phrases (e.g. "Basically,",
-                # "Background:") that _fix_scaffolding_density had
-                # already correctly removed earlier in this same render.
-                # _check_uncorrected_insertions's new_hedges/sentence_
-                # growth checks don't catch this — a reintroduced
-                # scaffolding phrase is neither a hedge nor sentence
-                # growth. Re-running the same fixer unconditionally
-                # against the freshly-recomputed delta above is safe
-                # (same deletion-only contract as its first call) and
-                # catches a regression from ANY cause, not just this one
-                # call, same as re-running _fix_hedge_density above does
-                # for hedges.
-                if delta.get("scaffolding_density", {}).get("verdict") == "MISSED":
-                    d = delta["scaffolding_density"]
-                    clean, scaffolding_refixed = _fix_scaffolding_density(clean, d["baseline"], d["output"])
-                    if scaffolding_refixed:
-                        log.info("scaffolding_density_reintroduced_and_refixed")
-                        delta = score_render_delta(baseline, clean)
-            except Exception:
-                log.error("correction_pass_llm_failed", stage="correction", exc_info=True)
-                pass  # correction pass failed — keep the original render
-
-        # Verify-and-retry gate, not instruct-and-trust: the LLM
-        # correction call above is a request, not a guarantee — an
-        # instruction can be partially followed or missed entirely,
-        # which is exactly what re-scoring delta afterward is for. This
-        # was previously the one place in the correction pass that
-        # re-scored but never acted on the result — the ai_tells check
-        # a few lines below already does this correctly (measure, and
-        # if still not clean, run one more free deterministic pass
-        # rather than reporting a result that didn't actually land).
-        # Mirrors that same pattern here: bounded to one extra pass, no
-        # additional API call, so this can't run away on cost. Each
-        # fixer already independently checks its own dimension's
-        # verdict and declines outright if it isn't MISSED or the
-        # direction isn't its safe one, so this is safe to call
-        # unconditionally rather than gating per-dimension twice.
-        still_missed = [k for k, d in delta.items() if d["verdict"] == "MISSED"]
-        if still_missed:
-            if "hedge_density" in still_missed:
-                d = delta["hedge_density"]
-                clean, _ = _fix_hedge_density(clean, d["baseline"], d["output"])
-                clean, _ = _fix_modal_hedge(clean, d["baseline"], d["output"])
-            if "sentence_length_sd" in still_missed:
-                d = delta["sentence_length_sd"]
-                clean, _ = _fix_sentence_length_sd(clean, d["baseline"], d["output"])
-            if "first_person_ratio" in still_missed:
-                d = delta["first_person_ratio"]
-                clean, _ = _fix_first_person_ratio(
-                    clean, d["baseline"], d["output"], input_has_opinion_content
-                )
-                clean, _ = _fix_first_person_over_ratio(
-                    clean, d["baseline"], d["output"], input_text
-                )
-                # See the initial-pass call site above for why this
-                # general fallback runs unconditionally after the
-                # pattern-based fixer, not instead of it.
-                clean, _ = restore_fabricated_ownership_sentences(clean, input_text)
-            if "directive_ratio" in still_missed:
-                d = delta["directive_ratio"]
-                clean, _ = _fix_directive_ratio(
-                    clean, d["baseline"], d["output"], input_has_directive_content
-                )
-            if "scaffolding_density" in still_missed:
-                d = delta["scaffolding_density"]
-                clean, _ = _fix_scaffolding_density(clean, d["baseline"], d["output"])
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-            if st.session_state.get("locale", "uk") == "uk":
-                clean = _apply_uk_english(clean)
-            delta = score_render_delta(baseline, clean)
-            semantic = score_semantic_drift(input_text, clean, platform_format=platform_format)
-            log.info(
-                "post_correction_verify_pass",
-                still_missed_before=still_missed,
-                still_missed_after=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
-            )
-
-        # Measured verification gate, not a trusted fix-and-hope step.
-        # If anything survived the sweeps, run one more deterministic
-        # pass (free, no API call) and re-measure. If it's still not
-        # clean after that, say so honestly in the report rather than
-        # shipping AI-tell contaminated text as if it were verified.
-        # original_input_text=input_text: exempts phrases genuinely
-        # present in the person's own input from being flagged as an
-        # AI tell — see score_ai_tells' docstring for the real
-        # false-positive this fixes ("curious whether", "i suspect",
-        # "i would push back" all appeared verbatim in a real original
-        # input and were flagged anyway).
-        ai_tells = score_ai_tells(clean, original_input_text=input_text, calibration_text=fingerprint_corpus or "")
-        if not ai_tells["clean"]:
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-            ai_tells = score_ai_tells(clean, original_input_text=input_text, calibration_text=fingerprint_corpus or "")
-
-        # Downgrade MISSED -> SKIPPED for dimensions the input never
-        # had content for in the first place (input_has_opinion_content
-        # / input_has_directive_content, same signals that already gate
-        # whether a correction is even attempted, see line ~1077). A
-        # genuine 86% ownership "miss" on a product-pitch email with
-        # zero first-person content in the original isn't a defect —
-        # it's the correction pass correctly refusing to fabricate
-        # first-person claims that would misrepresent authorship. Risk/
-        # confidence and the report sentence should say so, not flag it
-        # identically to an achievable target the system failed to hit.
-        if not input_has_opinion_content and delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
-            delta["first_person_ratio"]["verdict"] = "SKIPPED"
-            delta["first_person_ratio"]["skip_reason"] = "no_content"
-        if not input_has_directive_content and delta.get("directive_ratio", {}).get("verdict") == "MISSED":
-            delta["directive_ratio"]["verdict"] = "SKIPPED"
-            delta["directive_ratio"]["skip_reason"] = "no_content"
-
-        # Mirror case, OVER-owned direction: input DOES have opinion
-        # content (so the block above didn't apply), but is more
-        # opinion-dense than the person's baseline. Confirmed against a
-        # real render: a 72% ownership drift on a genuinely opinionated
-        # email dropped to ~37% after both fixer passes ran their full
-        # course, and every remaining first-person sentence checked out
-        # as the person's own genuine wording, not a defect — an
-        # initially-proposed fix (restoring exact original wording for
-        # the unfixable sentences) turned out to change nothing, since
-        # first_person_ratio counts sentences, not words, and the
-        # original wording was ALSO first-person in every case. See
-        # ownership_miss_is_content_driven's docstring for the full
-        # reasoning. Only checked once still MISSED after everything
-        # else has already run, so this never short-circuits a genuine,
-        # achievable fix the fixer just hasn't gotten to yet.
-        #
-        # skip_reason="content_ceiling" (distinct from "no_content"
-        # above) — a real, live bug found the same session this was
-        # tested: the report was reusing "nothing to convert in the
-        # original" for THIS case too, which is actively wrong (this
-        # input has abundant opinion content, that's the whole point —
-        # it just can't be reduced further without deleting real
-        # content). voice_match_label and build_voice_report both read
-        # this field to produce distinct, accurate messaging per
-        # reason instead of one generic SKIPPED explanation for two
-        # very different situations.
-        if delta.get("first_person_ratio", {}).get("verdict") == "MISSED":
-            if ownership_miss_is_content_driven(clean, input_text):
-                delta["first_person_ratio"]["verdict"] = "SKIPPED"
-                delta["first_person_ratio"]["skip_reason"] = "content_ceiling"
-
-        confidence = compute_confidence(
-            st.session_state.get("sample_fitness"), baseline, len(observations),
-            st.session_state.get("dimension_stability"),
-        )
-        risk = compute_risk(delta, semantic, ai_tells, insertion_check)
-        risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)
-        # The ONLY thing that gates the rewritten text behind
-        # review_gate.py's confirmation wall — see
-        # has_content_integrity_hard_fail's docstring. risk above still
-        # reflects style-drift severity too (informational badge), but
-        # style drift alone must never block delivery.
-        content_integrity_hard_fail = has_content_integrity_hard_fail(semantic, ai_tells, insertion_check)
-        # Overwrite with the FINAL, merged insertion_check (initial
-        # render + correction-pass side effects) — line ~1165 above
-        # sets this to the INITIAL check only, before the correction
-        # pass runs, and was never updated afterward. compute_risk
-        # above already correctly uses the merged version; nothing
-        # previously persisted it anywhere the UI could read it back,
-        # so any check built on "did the correction pass add a
-        # sentence" would have silently seen only half the picture.
-        # Found while scoping Content Lock's "no sentences invented"
-        # check — this gap existed before that feature, not
-        # introduced by it.
-        st.session_state.render_insertion_check = insertion_check
-        # Persisted (not recomputed at click-time) for the same reason
-        # as render_insertion_check above: the AI-Slop Firewall "Clean
-        # it up" action needs the exact keep_contractions value THIS
-        # render actually used, not a fresh recomputation that could
-        # drift if the underlying baseline corpus changes between the
-        # render and the click.
-        st.session_state.render_keep_contractions = keep_contractions
-        st.session_state.render_keep_dashes = keep_dashes
-        log.info(
-            "render_complete", is_refinement=is_refinement,
-            confidence=confidence.get("level") if isinstance(confidence, dict) else confidence,
-            risk=risk.get("level") if isinstance(risk, dict) else risk,
-            risk_reason=risk_reason,
-            scoring_rules_version=scoring_rules_version(),
-            ai_tells_clean=ai_tells["clean"],
-            missed_dimensions=[k for k, d in delta.items() if d["verdict"] == "MISSED"],
-        )
-        # Correction-frequency instrumentation: all four inputs are
-        # already in scope at this point in _run_render, computed
-        # earlier in this same function - hedge_fixed/modal_fixed/
-        # rhythm_fixed/ownership_fixed/directive_fixed from the
-        # deterministic fixer pass (~line 1412), correction_prompt from
-        # build_correction_prompt (~line 1488), content_integrity_
-        # hard_fail just above. Checked in this order because a hard
-        # fail is the most severe outcome regardless of what else
-        # happened during the render.
-        if content_integrity_hard_fail:
-            correction_tier = "hard_fail"
-        elif correction_prompt:
-            correction_tier = "llm_correction"
-        elif hedge_fixed or modal_fixed or rhythm_fixed or ownership_fixed or directive_fixed:
-            correction_tier = "deterministic_only"
-        else:
-            correction_tier = "none"
-        log_render_event(
-            risk=risk.get("level") if isinstance(risk, dict) else risk,
-            risk_reason=risk_reason,
-            semantic_match=semantic.get("semantic_match") if semantic else None,
-            missed_dimensions=sum(1 for d in delta.values() if d["verdict"] == "MISSED"),
-            ai_tells_clean=ai_tells["clean"],
-            is_refinement=is_refinement,
-            scoring_rules_version=scoring_rules_version(),
-            correction_tier=correction_tier,
-        )
-
-        # Second, independently-grounded voice-match signal alongside
-        # the four-heuristic delta above — see compute_burrows_delta's
-        # docstring for why function-word frequency distance is a
-        # genuinely different measurement, not a restatement. Needs
-        # 2+ raw baseline samples to compute a real reference
-        # distribution; with fewer (most users who haven't gone
-        # through the Screen 3 starters flow), it correctly reports
-        # "Insufficient baseline samples" rather than guessing.
-        baseline_texts = st.session_state.get("fingerprint_sample_texts", [])
-        burrows_delta = compute_burrows_delta(baseline_texts, clean)
-
-        st.session_state.render_delta = delta
-        st.session_state.semantic_drift = semantic
-        st.session_state.confidence = confidence
-        st.session_state.risk = risk
-        st.session_state.risk_reason = risk_reason
-        st.session_state.ai_tells = ai_tells
-        st.session_state.function_word_delta = burrows_delta
-        st.session_state.voice_report = build_voice_report(
-            delta, semantic, confidence, risk, ai_tells, burrows_delta,
-            content_integrity_hard_fail=content_integrity_hard_fail,
-        )
-        # One id + timestamp per completed render — generated here
-        # (not inside authenticity_report.py, which stays a pure
-        # function) so the authenticity report built from this render
-        # can be uniquely referenced without needing the render text
-        # itself. Regenerated on every render/refinement, same as
-        # voice_report above — never reused across renders.
-        st.session_state.render_id = str(uuid.uuid4())
-        st.session_state.render_completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Section 9.4 / Step 4 (VOICOVA_Product_2.0_Consolidated.docx):
-        # write path for the History screen. Called here, after the
-        # render has fully succeeded and the voice report is built —
-        # matches write_render_history's own docstring, which is
-        # explicit that this must never run before success is known.
-        # Fails open and silently inside write_render_history itself,
-        # so no try/except needed at this call site. device_id already
-        # resolved once, near the top of this function (see the
-        # lifetime-cap check above) - reused here, not re-resolved.
         write_render_history(
             device_id=device_id,
             input_text=input_text,
-            output_text=clean,
+            output_text=result.output_text,
             context=render_context,
             mode=render_mode,
-            # voice_match_tier, not voice_match_badge - the latter is a
-            # CSS class name (e.g. "badge-green"), not a display label.
-            # See voice_match_tier's use in screen_render's own HTML
-            # (vm_tier) for the human-readable string this mirrors.
-            voice_match=st.session_state.voice_report.get("voice_match_tier"),
-            content_lock_pass=not content_integrity_hard_fail,
+            voice_match=(result.voice_report or {}).get("voice_match_tier"),
+            content_lock_pass=not result.content_integrity_hard_fail,
         )
-    else:
-        st.session_state.render_delta = None
-        st.session_state.voice_report = None
-        st.session_state.render_id = None
-        st.session_state.render_completed_at = None
-        st.session_state.render_insertion_check = None
-        st.session_state.render_keep_contractions = None
-        st.session_state.render_keep_dashes = None
 
-    st.session_state.render_output = clean
+    st.session_state.render_output = result.output_text
     return True
-
-
 def _build_what_changed_html(biggest_changes: list[str]) -> str:
     """
     Compact 'What changed' chip row — dimension name plus direction
