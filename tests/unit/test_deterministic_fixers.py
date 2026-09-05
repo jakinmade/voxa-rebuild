@@ -729,6 +729,62 @@ def test_sentence_split_with_same_words_not_flagged_as_growth():
 
 
 # ---------------------------------------------------------------------------
+# get_fabricated_blocks — added 5 Sept 2026 for the fabrication
+# correction pass (prompts.build_fabrication_correction_prompt). Public
+# wrapper around the same diff step _check_uncorrected_insertions uses
+# for sentence_growth, but returns the specific before/after span text
+# instead of just the count. Every case here mirrors an existing
+# sentence_growth test above — same diff logic, so a block appears here
+# if and only if that same case's sentence_growth would be > 0.
+# ---------------------------------------------------------------------------
+
+def test_get_fabricated_blocks_returns_the_flagged_span():
+    before = "The point stands. It holds up under scrutiny."
+    after = "The point stands. It holds up under scrutiny. This could prove harder than either of us has acknowledged."
+    blocks = df.get_fabricated_blocks(before, after)
+    assert len(blocks) == 1
+    assert blocks[0]["after"] == "This could prove harder than either of us has acknowledged."
+
+
+def test_get_fabricated_blocks_empty_when_nothing_flagged():
+    before = "The point stands. It holds up under scrutiny. Nothing more to add."
+    after = "The point stands and holds up under scrutiny."
+    assert df.get_fabricated_blocks(before, after) == []
+
+
+def test_get_fabricated_blocks_empty_on_word_neutral_split():
+    """Mirrors test_sentence_split_with_same_words_not_flagged_as_growth
+    — a punctuation-only split must not surface as a fabricated block
+    any more than it surfaces as sentence_growth."""
+    before = (
+        'Not "the agent ran," but "here\'s the evidence it did the right '
+        'thing, and here\'s what happens when it didn\'t."'
+    )
+    after = (
+        'Not "the agent ran," but "here is the evidence it did the right '
+        'thing. And here is what happens when it did not."'
+    )
+    assert df.get_fabricated_blocks(before, after) == []
+
+
+def test_get_fabricated_blocks_real_captured_example():
+    """The actual terse_engineer fabrication this pass was built to
+    catch (see PR #31/#33 history) — a vague AI-ish input compressed
+    into a specific invented directive."""
+    before = (
+        "Pipeline failed on a config issue. Team got it resolved."
+    )
+    after = (
+        "Pipeline failed on a config issue. Team got it resolved. "
+        "Audit your CI/CD config validation so the process holds up "
+        "better than this."
+    )
+    blocks = df.get_fabricated_blocks(before, after)
+    assert len(blocks) == 1
+    assert "Audit" in blocks[0]["after"]
+
+
+# ---------------------------------------------------------------------------
 # Regression: 29 Aug 2026 — same Scott/CLEARANCE follow-up family, live
 # multi-paragraph Elevate render. Three genuinely word-neutral splits
 # (comma-to-period, same words each side) plus one unrelated, entirely

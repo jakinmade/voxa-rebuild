@@ -1284,6 +1284,74 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
         if extra > 0:
             new_hedges.extend([word] * extra)
 
+    sentence_growth = sum(g for _, _, g in _diff_growth_blocks(before, after))
+
+    return {
+        "new_hedges": new_hedges,
+        "sentence_growth": sentence_growth,
+        "flagged": bool(new_hedges) or sentence_growth > 0,
+    }
+
+
+# Function words excluded from the new-word budget — added 4 Sept
+# 2026, real-render finding. A dropped-subject restoration ("Built
+# out for X" -> "I built it out for X") and a comma-spliced list
+# gaining a conjunction ("...SR 11-7, the laws now live" -> "...SR
+# 11-7, and the laws are all live") each add a genuine word with
+# zero new information - pure grammatical connective tissue needed
+# to turn a fragment into a complete sentence, not fabricated
+# content. The word-budget check's own stated purpose is telling
+# fabrication apart from "a split that redistributes existing
+# words" (see _check_uncorrected_insertions's docstring) - a subject
+# pronoun or conjunction added at exactly the point a fragment got
+# completed is the same category of non-fabrication the check
+# already excludes for zero-word splits, just one function word
+# short of qualifying under the old all-words-count rule.
+#
+# Deliberately NARROW and ADDITIVE, not a rewrite of the alignment
+# logic this module's docstrings already warn is fragile (see KNOWN
+# LIMITATION in _check_uncorrected_insertions - a prior same-session
+# attempt at a cleverer fix broke a second real render). This only
+# filters WHICH words count toward the budget threshold; it cannot
+# introduce a new false negative on genuine fabrication, since
+# fabricated content overwhelmingly consists of actual content words
+# (nouns, verbs, adjectives, facts, names) that this list never
+# touches - only pure function words are excluded, and only ever in
+# the direction of making the check MORE lenient, never less
+# sensitive.
+_FUNCTION_WORD_BUDGET_EXCLUSIONS = frozenset({
+    "i", "it", "this", "that", "and", "is", "are", "am", "was", "were",
+    "the", "a", "an", "all",
+})
+
+
+def _diff_growth_blocks(before: str, after: str) -> list[tuple[str, str, int]]:
+    """
+    Shared diff step behind _check_uncorrected_insertions's sentence_
+    growth count and, new 5 Sept 2026, the fabrication correction pass
+    in app.py — extracted so a second caller can get at the specific
+    flagged spans (WHERE content was invented) rather than only the
+    aggregate count (THAT it was). _check_uncorrected_insertions's own
+    return contract is unchanged: it still returns only the count,
+    computed via this same step as before the extraction, same tests
+    passing confirms identical behaviour.
+
+    Sentence-boundary alignment, normalisation, function-word budget
+    exclusions and known limitations are all identical to (this
+    literally is) _check_uncorrected_insertions's own diff logic — see
+    that function's docstring for the full rationale, including why a
+    cleverer per-sentence attribution attempt was tried and reverted
+    for the REPORTED COUNT. That reversion doesn't apply here: this
+    only surfaces the block text for blocks the existing logic already
+    counts as growth, it doesn't change which blocks count or attempt
+    finer-grained attribution within a block.
+
+    Returns a list of (before_block, after_block, local_growth) for
+    every diff opcode where after_block introduces real new content
+    words beyond before's budget — the same condition
+    _check_uncorrected_insertions sums into sentence_growth, one tuple
+    per contributing block instead of one summed integer.
+    """
     before_sentences = _extract_sentences(before, min_words=1)
     after_sentences = _extract_sentences(after, min_words=1)
 
@@ -1303,37 +1371,7 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
 
     matcher = difflib.SequenceMatcher(None, before_norm, after_norm, autojunk=False)
 
-    # Function words excluded from the new-word budget — added 4 Sept
-    # 2026, real-render finding. A dropped-subject restoration ("Built
-    # out for X" -> "I built it out for X") and a comma-spliced list
-    # gaining a conjunction ("...SR 11-7, the laws now live" -> "...SR
-    # 11-7, and the laws are all live") each add a genuine word with
-    # zero new information - pure grammatical connective tissue needed
-    # to turn a fragment into a complete sentence, not fabricated
-    # content. The word-budget check's own stated purpose is telling
-    # fabrication apart from "a split that redistributes existing
-    # words" (see this function's docstring) - a subject pronoun or
-    # conjunction added at exactly the point a fragment got completed
-    # is the same category of non-fabrication the check already
-    # excludes for zero-word splits, just one function word short of
-    # qualifying under the old all-words-count rule.
-    #
-    # Deliberately NARROW and ADDITIVE, not a rewrite of the alignment
-    # logic this docstring already warns is fragile (see KNOWN
-    # LIMITATION above - a prior same-session attempt at a cleverer
-    # fix broke a second real render). This only filters WHICH words
-    # count toward the budget threshold; it cannot introduce a new
-    # false negative on genuine fabrication, since fabricated content
-    # overwhelmingly consists of actual content words (nouns, verbs,
-    # adjectives, facts, names) that this list never touches - only
-    # pure function words are excluded, and only ever in the direction
-    # of making the check MORE lenient, never less sensitive.
-    _FUNCTION_WORD_BUDGET_EXCLUSIONS = frozenset({
-        "i", "it", "this", "that", "and", "is", "are", "am", "was", "were",
-        "the", "a", "an", "all",
-    })
-
-    sentence_growth = 0
+    blocks: list[tuple[str, str, int]] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
@@ -1350,11 +1388,28 @@ def _check_uncorrected_insertions(before: str, after: str) -> dict:
             if word not in _FUNCTION_WORD_BUDGET_EXCLUSIONS
         )
         if new_word_count > 0:
-            sentence_growth += local_growth
+            blocks.append((before_block, after_block, local_growth))
 
-    return {
-        "new_hedges": new_hedges,
-        "sentence_growth": sentence_growth,
-        "flagged": bool(new_hedges) or sentence_growth > 0,
-    }
+    return blocks
+
+
+def get_fabricated_blocks(before: str, after: str) -> list[dict]:
+    """
+    Public wrapper around _diff_growth_blocks for the fabrication
+    correction pass (app.py, prompts.py's
+    build_fabrication_correction_prompt) — returns the specific
+    before/after sentence spans _check_uncorrected_insertions counts
+    toward sentence_growth, so the correction call can be told exactly
+    which spans introduced content not present in the input, instead
+    of just "something did".
+
+    Returns [{"before": str, "after": str}, ...], empty list if
+    nothing is flagged. Never flags a block _check_uncorrected_
+    insertions wouldn't also flag — same diff step, see that
+    function's docstring for the full rationale and known limitations.
+    """
+    return [
+        {"before": before_block, "after": after_block}
+        for before_block, after_block, _ in _diff_growth_blocks(before, after)
+    ]
 
