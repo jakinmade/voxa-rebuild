@@ -34,16 +34,25 @@ and trusted (confirmed directly — a fix that worked was rejected by
 the strict-improvement gate because the verifier couldn't see it).
 
 A same-day competitor benchmark (`docs/competitor-fabrication-
-benchmark-protocol.md` / `-results.md`) found at least one direct
-competitor (VoiceMoat) exhibits the same fabrication failure with
-zero gate or warning — VOICOVA's `has_content_integrity_hard_fail`
-gate looks like a genuine differentiator on this evidence, not a gap.
+benchmark-protocol.md` / `-results.md` / `VOICOVA_Competitor_
+Fabrication_Benchmark.docx`) found at least one direct competitor
+(VoiceMoat) exhibits the same fabrication failure with zero gate or
+warning; ContentIn's free tier didn't fabricate but couldn't test the
+real paywalled engine; a scorer-type tool (standing in for River)
+confirmed that category of tool checks tone/rhythm only, never
+factual fidelity. VOICOVA's `has_content_integrity_hard_fail` gate
+looks like a genuine differentiator on this evidence, not a gap.
 
-**Carried forward as:** current gated behavior (confirm-before-ship
-on suspect renders) is an acceptable, defensible position — not a bug
-to hide. The deeper fix (a semantic/word-overlap re-verification to
-replace the sentence-count-based one) remains open and needs its own
-dedicated design session, not another quick prompt attempt.
+**Decision for 2.0, based on this evidence:** current gated behavior
+(confirm-before-ship on suspect renders) is the accepted position
+going into 2.0 — not a bug to hide, a stated product strength ("tells
+you when it isn't sure"). No further fabrication-elimination work is
+required before starting 2.0. The deeper fix (a semantic/word-overlap
+re-verification to replace the sentence-count-based one that hit the
+whole-document-collapse blind spot) remains open, tracked, and
+deliberately NOT attempted again without a dedicated design session —
+three prompt-based attempts this session each failed to eliminate it,
+so a fourth quick attempt is not a good use of time.
 
 ### 2. Scaffolding-density auto-fixer — closed
 
@@ -72,12 +81,28 @@ passed. This was not previously known; Foundation Hardening's item 4
 was recorded as complete based on the workflow existing and running,
 not on it passing.
 
-Not yet diagnosed: this sandbox's network egress doesn't reach
-voicova.com or GitHub Actions' log-storage host, so the actual
-failure reason (which of the three safe-tier checks — homepage,
-WebSocket, Stripe — is failing, and why) couldn't be confirmed
-directly this session. Needs the actual CI log or a local run of
-`python scripts/smoke_test.py` against production to diagnose.
+Not fully diagnosed — this sandbox can't reach voicova.com or
+GitHub Actions' log-storage host to confirm the exact cause — but two
+concrete leads were found via Railway/GitHub tooling and are worth
+checking first next session, before guessing further:
+
+- **WebSocket lead:** Railway HTTP logs show only one `/_stcore/
+  stream` request logged in the last 11 days (traffic is very low),
+  and it returned status `0` rather than a normal `101 Switching
+  Protocols`. Suggestive of exactly what `check_websocket` tests for,
+  but with only one data point ever logged there's no historical
+  baseline to confirm `0` isn't just how Railway logs a successful
+  upgrade. Needs a live `curl`/websocket test or a fresh smoke-test
+  run compared against Railway logs at the same timestamp.
+- **Stripe lead:** `gh secret list` confirms `STRIPE_API_KEY` is
+  configured (set 2 Sept 2026) but secret values aren't readable —
+  can't confirm whether it's VOICOVA's own current live key or a
+  stale one left over from before the VOICOVA/CLEARANCE Stripe
+  account split (see that split's own history, 1 Sept 2026).
+
+Fastest resolution: run `python scripts/smoke_test.py` against
+production locally — it prints exactly which of the three checks
+fails and why, definitively, in seconds.
 
 ### Housekeeping still open
 
