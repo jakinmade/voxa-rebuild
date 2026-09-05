@@ -1,0 +1,97 @@
+/* shared/panel.css — every class is voicova-prefixed on purpose, so
+   nothing here can collide with LinkedIn's own (obfuscated, frequently
+   changing) class names. Kept deliberately small: this is a docked
+   utility control on someone else's page, not a themed product surface. */
+
+#voicova-control-container {
+  margin-top: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+}
+
+.voicova-btn,
+.voicova-btn-primary,
+.voicova-btn-secondary {
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+}
+
+.voicova-btn:hover,
+.voicova-btn-primary:hover,
+.voicova-btn-secondary:hover {
+  background: #f4f5f7;
+}
+
+.voicova-btn-primary {
+  background: #111827;
+  color: #ffffff;
+  border-color: #111827;
+}
+
+.voicova-btn-primary:hover {
+  background: #1f2937;
+}
+
+.voicova-checking {
+  color: #6b7280;
+  padding: 6px 0;
+}
+
+.voicova-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 4px;
+  max-width: 360px;
+}
+
+.voicova-result-headline {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.voicova-result-good .voicova-result-headline {
+  color: #027a48;
+}
+
+.voicova-result-borderline .voicova-result-headline {
+  color: #b54708;
+}
+
+.voicova-result-failed .voicova-result-headline {
+  color: #b42318;
+}
+
+.voicova-result-flags {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: #374151;
+}
+
+.voicova-action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.voicova-fixit-text {
+  white-space: pre-wrap;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.voicova-auth,
+.voicova-credits,
+.voicova-error {
+  color: #374151;
+}
+
+.voicova-credits a {
+  display: inline-block;
+  margin-top: 6px;
+  color: #111827;
+  font-weight: 600;
+}
