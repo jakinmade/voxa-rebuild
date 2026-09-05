@@ -56,6 +56,18 @@ Pillow==12.3.0
 # local/test runs).
 sentry-sdk==2.68.1
 
+# Access-token signing for the Chrome-First API (api/auth/tokens.py) —
+# JWT (RFC 7519) is the established industry pattern for signed bearer
+# tokens with expiry claims; PyJWT is the standard, widely-audited
+# Python implementation. Deliberately not a hand-rolled token format —
+# rolling your own auth token scheme is well-established as an
+# anti-pattern regardless of how sound the underlying crypto is.
+# Pinned >=2.10.1 per supabase-auth==2.23.0's own dependency floor
+# (already in this project via supabase==2.23.0) — no separate
+# transitive-conflict risk, this just states explicitly what was
+# already an implicit constraint.
+PyJWT==2.10.1
+
 # Smoke test tooling (scripts/smoke_test.py, hardening item 4) — not
 # needed to run the live Streamlit app itself, only to run the
 # post-deploy smoke test (CI, or manually with --full). websocket-client

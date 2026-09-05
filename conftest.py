@@ -22,10 +22,8 @@ _packages = [
     "packages/voxa-core/src",
     "packages/voxa-humanisation/src",
     "packages/voxa-profile/src",
-    "packages/voxa-rendering/src",
     "packages/voxa-calibration/src",
     "packages/voxa-governance/src",
-    "packages/voxa-api/src",
 ]
 for _pkg in _packages:
     _path = str(_root / _pkg)
