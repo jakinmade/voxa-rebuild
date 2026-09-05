@@ -5,9 +5,10 @@ Stubs supabase_client.get_supabase_client() with an in-memory fake
 rather than hitting real Supabase — these tests exercise the API's own
 logic (auth, routing, response mapping), not Supabase itself. The real
 Supabase tables (extension_installations, evidence_seals,
-telemetry_events, voice_profiles) are exercised separately, live,
-against the actual project — see the manual verification in this
-session's PR description.
+telemetry_events, voice_profiles, profile_recovery_emails,
+profile_recovery_requests) are exercised separately, live, against the
+actual project — see the manual verification in this session's PR
+description.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import os
 import sys
 import types
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -30,6 +32,12 @@ _fake_installations: dict = {}
 # through _FakeTable's catch-all empty result, i.e. "0 used", exactly
 # as before this addition).
 _fake_lifetime_counts: dict = {}
+# profile_id -> email, backing the fake profile_recovery_emails table;
+# token_hash -> row, backing the fake profile_recovery_requests table
+# and its consume_recovery_request RPC below — needed once a test
+# exercises the profile-recovery routes.
+_fake_recovery_emails: dict = {}
+_fake_recovery_requests: dict = {}
 _fake_profiles = {
     "device-abc": {
         "device_id": "device-abc",
@@ -77,6 +85,8 @@ class _FakeRPC:
             return self._reserve_lifetime_render()
         if self.name == "release_lifetime_render":
             return self._release_lifetime_render()
+        if self.name == "consume_recovery_request":
+            return self._consume_recovery_request()
         return _FakeResult([])
 
     def _rotate_refresh_handle(self):
@@ -113,6 +123,20 @@ class _FakeRPC:
         _fake_lifetime_counts[device_id] = max(0, current - 1)
         return _FakeResult([{"used_count": _fake_lifetime_counts[device_id]}])
 
+    def _consume_recovery_request(self):
+        # Mirrors consume_recovery_request's real atomic contract
+        # (single UPDATE ... WHERE used_at IS NULL AND expires_at >
+        # now() ... RETURNING) closely enough for route-level tests:
+        # check-and-mark against the in-memory store.
+        token_hash = self.params["p_token_hash"]
+        row = _fake_recovery_requests.get(token_hash)
+        if row is None or row.get("used_at") is not None:
+            return _FakeResult([])
+        if row["expires_at"] < datetime.now(timezone.utc).isoformat():
+            return _FakeResult([])
+        row["used_at"] = datetime.now(timezone.utc).isoformat()
+        return _FakeResult([{"profile_id": row["profile_id"], "email": row["email"]}])
+
 
 class _FakeTable:
     def __init__(self, name):
@@ -124,6 +148,12 @@ class _FakeTable:
 
     def insert(self, payload):
         self._insert_payload = payload
+        return self
+
+    def upsert(self, payload, on_conflict=None):
+        self._insert_payload = payload
+        self._upsert = True
+        self._on_conflict = on_conflict
         return self
 
     def update(self, payload):
@@ -170,6 +200,33 @@ class _FakeTable:
             payload = getattr(self, "_insert_payload", {})
             return _FakeResult([{**payload, "seal_id": "seal-1", "sealed_at": "2026-09-05T00:00:00Z"}])
 
+        if self.name == "profile_recovery_emails":
+            # Upsert-by-profile_id, matching the real table's own
+            # on_conflict="profile_id" — one row per profile, latest
+            # submission overwrites the last.
+            if hasattr(self, "_insert_payload"):
+                payload = self._insert_payload
+                _fake_recovery_emails[payload["profile_id"]] = payload["email"]
+                return _FakeResult([payload])
+            # Lookup path: register_recovery_email's caller never reads
+            # this table back, only get_profile_id_for_email does, by
+            # email (not profile_id) — search values, not keys.
+            wanted_email = self._filters.get("email")
+            if wanted_email is not None:
+                for pid, email in _fake_recovery_emails.items():
+                    if email == wanted_email:
+                        return _FakeResult([{"profile_id": pid}])
+                return _FakeResult([])
+            return _FakeResult([])
+
+        if self.name == "profile_recovery_requests":
+            if hasattr(self, "_insert_payload"):
+                payload = self._insert_payload
+                row = {**payload, "used_at": None, "created_at": "2026-09-05T00:00:00Z"}
+                _fake_recovery_requests[payload["token_hash"]] = row
+                return _FakeResult([row])
+            return _FakeResult([])
+
         return _FakeResult([])
 
 
@@ -200,16 +257,19 @@ def fake_supabase(monkeypatch):
     """
     _fake_installations.clear()
     _fake_lifetime_counts.clear()
+    _fake_recovery_emails.clear()
+    _fake_recovery_requests.clear()
 
     fake_client_factory = lambda: _FakeClient()
 
     import lifetime_cap
     monkeypatch.setattr(lifetime_cap, "get_supabase_client", fake_client_factory)
 
-    from api.db import extension_installations, evidence_seals, profile_lookup
+    from api.db import extension_installations, evidence_seals, profile_lookup, profile_recovery
     monkeypatch.setattr(extension_installations, "get_supabase_client", fake_client_factory)
     monkeypatch.setattr(evidence_seals, "get_supabase_client", fake_client_factory)
     monkeypatch.setattr(profile_lookup, "get_supabase_client", fake_client_factory)
+    monkeypatch.setattr(profile_recovery, "get_supabase_client", fake_client_factory)
 
     from api.telemetry import events as telemetry_events
     monkeypatch.setattr(telemetry_events, "get_supabase_client", fake_client_factory)
