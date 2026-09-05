@@ -53,19 +53,6 @@ log = get_logger(__name__)
 router = APIRouter()
 
 
-def _classify_result(verdict: str, ai_tells_clean: bool) -> str:
-    # Feeds both the response's verdict field (Section 3.5.1) and the
-    # telemetry_events.result column (Section 5.5) — one classifier,
-    # not two independently-maintained copies of the same judgment.
-    # "good" only when both signals are clean; a PASS verdict with a
-    # flagged AI-tell is "borderline", not silently rolled into "good".
-    if verdict == "PASS" and ai_tells_clean:
-        return "good"
-    if verdict == "PASS" or ai_tells_clean:
-        return "borderline"
-    return "failed"
-
-
 @router.post("/api/check-draft", response_model=CheckDraftResponse)
 def check_draft(req: CheckDraftRequest, identity: Identity = Depends(resolve_identity)):
     rate_limit.enforce(identity.installation_id)
@@ -101,7 +88,7 @@ def check_draft(req: CheckDraftRequest, identity: Identity = Depends(resolve_ide
     used, limit = get_lifetime_render_count(identity.profile_id)
     remaining = max(limit - used, 0)
 
-    classified_verdict = _classify_result(result["verdict"], result["ai_tells_clean"])
+    classified_verdict = formatting.classify_result(result["verdict"], result["ai_tells_clean"])
     latency_ms = int((time.monotonic() - started) * 1000)
     telemetry.emit(
         installation_id=identity.installation_id,

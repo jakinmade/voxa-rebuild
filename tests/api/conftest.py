@@ -21,6 +21,15 @@ import pytest
 os.environ.setdefault("TOKEN_SIGNING_SECRET", "test-signing-secret-32-bytes-long!")
 
 _fake_installations: dict = {}
+# device_id/profile_id -> count, backing the fake reserve_lifetime_render/
+# release_lifetime_render RPCs below (lifetime_cap.py's atomic Postgres
+# functions) — needed once a test exercises /api/fix, which reserves a
+# lifetime render before calling run_voice_render. check-draft-only
+# tests never touch this (get_lifetime_render_count reads the
+# lifetime_render_cap TABLE directly, which isn't faked either — falls
+# through _FakeTable's catch-all empty result, i.e. "0 used", exactly
+# as before this addition).
+_fake_lifetime_counts: dict = {}
 _fake_profiles = {
     "device-abc": {
         "device_id": "device-abc",
@@ -52,10 +61,25 @@ class _FakeResult:
 
 
 class _FakeRPC:
-    def __init__(self, params):
+    # Dispatches by RPC name (matching the three Postgres functions
+    # this codebase actually calls — see lifetime_cap.py and
+    # api/db/extension_installations.py) rather than guessing from
+    # which params keys happen to be present, which broke the moment
+    # a second RPC (reserve_lifetime_render) needed faking here too.
+    def __init__(self, name, params):
+        self.name = name
         self.params = params
 
     def execute(self):
+        if self.name == "rotate_refresh_handle":
+            return self._rotate_refresh_handle()
+        if self.name == "reserve_lifetime_render":
+            return self._reserve_lifetime_render()
+        if self.name == "release_lifetime_render":
+            return self._release_lifetime_render()
+        return _FakeResult([])
+
+    def _rotate_refresh_handle(self):
         params = self.params
         inst = _fake_installations.get(params["p_installation_id"])
         if (
@@ -68,6 +92,26 @@ class _FakeRPC:
             inst["last_refreshed_at"] = "2026-09-05T00:00:00Z"
             return _FakeResult([inst])
         return _FakeResult([])
+
+    def _reserve_lifetime_render(self):
+        # Mirrors reserve_lifetime_render's real contract (single
+        # atomic UPDATE ... WHERE count < limit ... RETURNING) closely
+        # enough for route-level tests: read-check-increment against
+        # the in-memory store, returning (allowed, used_count).
+        device_id = self.params["p_device_id"]
+        limit = self.params["p_limit"]
+        current = _fake_lifetime_counts.get(device_id, 0)
+        if current >= limit:
+            return _FakeResult([{"allowed": False, "used_count": current}])
+        current += 1
+        _fake_lifetime_counts[device_id] = current
+        return _FakeResult([{"allowed": True, "used_count": current}])
+
+    def _release_lifetime_render(self):
+        device_id = self.params["p_device_id"]
+        current = _fake_lifetime_counts.get(device_id, 0)
+        _fake_lifetime_counts[device_id] = max(0, current - 1)
+        return _FakeResult([{"used_count": _fake_lifetime_counts[device_id]}])
 
 
 class _FakeTable:
@@ -134,7 +178,7 @@ class _FakeClient:
         return _FakeTable(name)
 
     def rpc(self, name, params):
-        return _FakeRPC(params)
+        return _FakeRPC(name, params)
 
 
 @pytest.fixture(autouse=True)
@@ -155,6 +199,7 @@ def fake_supabase(monkeypatch):
     could reach it.
     """
     _fake_installations.clear()
+    _fake_lifetime_counts.clear()
 
     fake_client_factory = lambda: _FakeClient()
 
