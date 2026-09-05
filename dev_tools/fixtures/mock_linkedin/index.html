@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!--
+  Mock of LinkedIn's post-composer DOM, built to match
+  content_scripts/linkedin.js's real CONFIG selectors exactly
+  (.share-creation-state container, .ql-editor[contenteditable]
+  text area) — not LinkedIn's actual page, which this sandbox
+  cannot reach or log into. This exists to test the EXTENSION's
+  own logic (composer detection, injection, message passing,
+  panel rendering) against a faithful structural copy, per the
+  E2E harness plan — it does not and cannot prove LinkedIn's real
+  DOM still matches these selectors today.
+-->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Mock LinkedIn Feed</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; }
+    .share-creation-state { border: 1px solid #ccc; border-radius: 8px; padding: 16px; max-width: 500px; }
+    .ql-editor { min-height: 80px; border: 1px solid #eee; padding: 8px; outline: none; }
+  </style>
+</head>
+<body>
+  <h1>Mock feed</h1>
+  <div class="share-creation-state">
+    <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+  </div>
+</body>
+</html>
