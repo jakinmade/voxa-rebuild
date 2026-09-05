@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from logging_config import configure_logging, get_logger
 from api.routes.check_draft import router as check_draft_router
 from api.routes.extension_auth import router as extension_auth_router
+from api.routes.fix import router as fix_router
 
 configure_logging()
 log = get_logger(__name__)
@@ -29,6 +30,7 @@ app = FastAPI(title="VOICOVA Chrome-First API")
 
 app.include_router(check_draft_router)
 app.include_router(extension_auth_router)
+app.include_router(fix_router)
 
 
 @app.get("/")
