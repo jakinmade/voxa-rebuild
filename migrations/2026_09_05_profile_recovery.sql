@@ -61,6 +61,19 @@ create table if not exists profile_recovery_emails (
 create or replace function consume_recovery_request(p_token_hash text)
 returns table(profile_id uuid, email text)
 language plpgsql
+-- Same search_path hardening applied to reserve_lifetime_render/
+-- release_lifetime_render (migrations/2026_08_23_..._search_path.sql)
+-- — a plpgsql function's unqualified table references resolve
+-- against whatever search_path is in effect at CALL time, not
+-- definition time, so pinning it here closes the standard Postgres
+-- search_path-hijack vector regardless of caller. Checked against the
+-- live project before writing this: rotate_refresh_handle (also
+-- created this session) does not have this set — confirmed via
+-- get_advisors after applying this migration, which still flags it
+-- as a WARN (function_search_path_mutable). Flagged here, not fixed
+-- here — that function lives in an already-merged PR, out of scope
+-- for this one, but worth a follow-up.
+set search_path = public
 as $$
 declare
   v_profile_id uuid;
@@ -84,3 +97,29 @@ begin
   return query select v_profile_id, v_email;
 end;
 $$;
+
+-- Closes an ERROR-level Supabase linter finding (rls_disabled_in_public)
+-- surfaced by get_advisors right after the two tables above were first
+-- applied: five Chrome-First tables were exposed to PostgREST with RLS
+-- disabled. All backend access uses SUPABASE_SERVICE_KEY (service_role),
+-- which bypasses RLS regardless, so this never affected current
+-- functionality — but with RLS off, the project's anon key (designed to
+-- be public, safe only when paired with RLS policies) would have had
+-- full read/write access to these tables via direct PostgREST calls,
+-- bypassing the FastAPI service's auth entirely, if that key is ever
+-- embedded anywhere (e.g. a future client-side use).
+--
+-- Same remediation this exact project already applied once before
+-- (migrations/2026_08_30_enable_rls_stripe_webhook_events.sql): enable
+-- RLS with zero policies. Since service_role always bypasses RLS, this
+-- is a complete no-op for the backend's own access and a complete
+-- lockout for anon/authenticated — deny-by-default, not a partial fix.
+-- Three of these five tables predate this PR (extension_installations,
+-- evidence_seals, telemetry_events — created earlier the same day,
+-- evidently before this check was run); two are new in this PR
+-- (profile_recovery_requests, profile_recovery_emails).
+alter table extension_installations enable row level security;
+alter table evidence_seals enable row level security;
+alter table telemetry_events enable row level security;
+alter table profile_recovery_requests enable row level security;
+alter table profile_recovery_emails enable row level security;
