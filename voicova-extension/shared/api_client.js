@@ -34,7 +34,27 @@
 // constant ever changes, that permission must change with it.
 const API_BASE_URL = "https://voicova-api.up.railway.app";
 
+// Both callers (the proactive alarm, and _authedRequest's own
+// reactive retry-once path below) can land here within the same
+// instant — that's the exact race extension_auth.py's own
+// token_expired code exists for. Without this, both callers would
+// each fire a real network request; one loses the race legitimately,
+// and the previous version of this function treated that loss as
+// fatal (see git history). Caching the in-flight promise means a
+// second caller arriving before the first settles just gets the same
+// promise back — one network call, one outcome, nobody can "lose a
+// race" that never happened because there was only ever one request.
+let _refreshInFlight = null;
+
 async function refreshAccessToken() {
+  if (_refreshInFlight) return _refreshInFlight;
+  _refreshInFlight = _doRefresh().finally(() => {
+    _refreshInFlight = null;
+  });
+  return _refreshInFlight;
+}
+
+async function _doRefresh() {
   const installation = await VoicovaStorage.getInstallation();
   if (!installation) return false;
 
@@ -53,11 +73,29 @@ async function refreshAccessToken() {
   }
 
   if (!response.ok) {
-    // token_revoked here means the refresh handle itself is dead
-    // (expired, or a reuse was detected server-side) — clear
-    // everything so the panel goes to auth_required cleanly rather
-    // than retrying against credentials that will never work again.
-    await VoicovaStorage.clearAll();
+    const body = await response.json().catch(() => ({}));
+    const errorCode = body?.detail?.error_code;
+
+    if (errorCode === "token_expired") {
+      // Lost a benign concurrent refresh race (extension_auth.py's
+      // own comment: this exists specifically so a losing call has
+      // "no special response needed" — the other, winning call has
+      // already written fresh credentials to storage). Losing that
+      // race is not evidence the credentials are bad, so don't clear
+      // them — the caller re-reads storage next and picks up the
+      // winner's tokens.
+      return true;
+    }
+
+    // token_revoked (the handle is genuinely dead — expired past
+    // recovery, or a reuse was detected server-side) is the only
+    // code that actually means "these credentials will never work
+    // again." Any other/unexpected code is treated as a plain
+    // failure without destroying potentially-valid credentials on
+    // the strength of a response we don't recognise.
+    if (errorCode === "token_revoked") {
+      await VoicovaStorage.clearAll();
+    }
     return false;
   }
 

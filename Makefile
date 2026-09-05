@@ -1,9 +1,16 @@
-.PHONY: test install install-deps clean lint
+.PHONY: test test-js install install-deps clean lint
 
 # Run tests immediately — no install required
 # conftest.py adds packages to sys.path automatically
 test:
 	pytest --tb=short -q
+	$(MAKE) test-js
+
+# Extension unit tests — Node's built-in test runner, no npm install
+# needed (see tests/js/load_classic_script.js's own comment on why no
+# bundler/dependency was introduced for this).
+test-js:
+	node --test tests/js/test_api_client.js tests/js/test_linkedin_editor.js
 
 # Install runtime dependencies (optional — needed for production use)
 install-deps:

@@ -32,3 +32,11 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run extension unit tests
+        run: node --test tests/js/test_api_client.js tests/js/test_linkedin_editor.js

@@ -58,7 +58,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from logging_config import get_logger
 from api.auth import tokens
@@ -205,7 +205,18 @@ def recover_initiate(req: RecoverInitiateRequest):
 
 
 @router.get("/api/profile/recover", response_model=LinkResponse)
-def recover_complete(token: str = Query(...)):
+def recover_complete(response: Response, token: str = Query(...)):
+    # This response body carries live bearer credentials (same as
+    # POST /api/extension/link's own LinkResponse) — no-store stops
+    # any browser, proxy, or CDN on the path from caching a response
+    # that could later be replayed to an attacker sharing the same
+    # cache. Doesn't address the larger, separate gap this module's
+    # own docstring already flags (no browser landing page yet to
+    # receive this and hand it to the extension) — just stops this
+    # specific response from being retained anywhere it doesn't need
+    # to be.
+    response.headers["Cache-Control"] = "no-store"
+
     token_hash = _hash_token(token)
     row = recovery_db.consume_recovery_request(token_hash)
     if row is None:
