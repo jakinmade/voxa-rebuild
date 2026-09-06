@@ -8,7 +8,7 @@
 
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "https://voicova-api.up.railway.app/*"
+    "https://web-production-dbceb0.up.railway.app/*"
   ],
 
   "externally_connectable": {
