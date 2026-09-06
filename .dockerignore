@@ -1,0 +1,11 @@
+.git
+node_modules
+voicova-extension
+tests
+dev_tools
+docs
+.streamlit
+__pycache__
+*.pyc
+.pytest_cache
+*.md
