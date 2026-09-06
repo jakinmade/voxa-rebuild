@@ -22,6 +22,15 @@
 // on why the latter is a later option only. Change this one line to
 // point at a local dev server instead.
 //
+// Corrected 6 Sept 2026: this previously pointed at
+// "voicova-api.up.railway.app", a hostname that was never actually
+// bound to any Railway service in this project — confirmed via the
+// Railway API (list-domains on both Railway projects touching this
+// codebase returned no match for it at all). Any real request this
+// extension ever sent would have hit Railway's generic edge fallback,
+// not this backend, regardless of how correct the rest of this file
+// is. The service's actual, confirmed-live domain is below.
+//
 // Coupled to manifest.json's host_permissions: api/main.py's own
 // docstring skips CORS middleware because "a Manifest V3 extension
 // with host_permissions for this service's domain is exempt from
@@ -32,7 +41,7 @@
 // got 405, because host_permissions didn't cover this origin.
 // manifest.json here has been corrected to include it — if this
 // constant ever changes, that permission must change with it.
-const API_BASE_URL = "https://voicova-api.up.railway.app";
+const API_BASE_URL = "https://web-production-dbceb0.up.railway.app";
 
 // Both callers (the proactive alarm, and _authedRequest's own
 // reactive retry-once path below) can land here within the same
