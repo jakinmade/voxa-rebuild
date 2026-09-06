@@ -1,5 +1,22 @@
 FROM python:3.12-slim
 
+# Note for future debugging (6 Sept 2026): Railway's own `redeploy`
+# API/tool call reuses an already-built image rather than triggering
+# a fresh build — so a dockerfilePath change (or any other build-time
+# config change) applied via the API will NOT take effect via
+# redeploy alone, even though get-service-config immediately reflects
+# the new setting. Only a genuine new build — a real git push — re-
+# evaluates build config from scratch. Confirmed the hard way: two
+# consecutive redeploys after setting dockerfilePath both failed
+# identically ("couldn't locate a dockerfile at path Dockerfile"),
+# because both reused a build snapshot computed before dockerfilePath
+# existed at all. Also: this Dockerfile exists at all because Railway
+# kept deferring to the shared repo's Procfile (Streamlit) despite a
+# correctly-configured startCommand — "Railway will always build with
+# a Dockerfile if it finds one" (Railway's own docs) is the
+# deterministic override used here, rather than continuing to fight
+# Railpack's config-as-code precedence.
+
 WORKDIR /app
 
 # requirements.lock, not requirements.txt: hash-pinned, reproducible,
@@ -11,27 +28,9 @@ RUN pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 
-# sh -c, not exec form, because $PORT needs shell expansion at
-# container start (Railway injects it at runtime, not build time).
-# This is a deliberate, explicit CMD specifically so this service's
-# start command is no longer subject to Railpack/Procfile
-# auto-detection at all (see railway.api.json's own comment, and the
-# 6 Sept 2026 session notes on why that auto-detection kept silently
-# reverting this service to the shared repo's Streamlit command even
-# with an explicit startCommand configured) — "Railway will always
-# build with a Dockerfile if it finds one" (Railway's own docs) is
-# the deterministic override used here, rather than continuing to
-# fight Railpack's config-as-code precedence.
-#
-# Note for future debugging (6 Sept 2026): Railway's own `redeploy`
-# API/tool call reuses an already-built image rather than triggering
-# a fresh build — so a dockerfilePath change (or any other build-time
-# config change) applied via the API will NOT take effect via
-# redeploy alone, even though get-service-config immediately reflects
-# the new setting. Only a genuine new build — a real git push, which
-# is what this comment's own commit is — re-evaluates build config
-# from scratch. Confirmed the hard way: two consecutive redeploys
-# after setting dockerfilePath both failed identically ("couldn't
-# locate a dockerfile at path Dockerfile"), because both reused a
-# build snapshot computed before dockerfilePath existed at all.
-CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Exec form, invoking Python directly — no shell in this process at
+# all, so there is no shell-expansion step for anything to go wrong
+# in. See run_api.py's own docstring for exactly why this replaced an
+# `sh -c "uvicorn ... --port $PORT"` form that failed three times in a
+# row on real Railway deployments (6 Sept 2026).
+CMD ["python", "run_api.py"]
