@@ -22,4 +22,16 @@ COPY . .
 # build with a Dockerfile if it finds one" (Railway's own docs) is
 # the deterministic override used here, rather than continuing to
 # fight Railpack's config-as-code precedence.
+#
+# Note for future debugging (6 Sept 2026): Railway's own `redeploy`
+# API/tool call reuses an already-built image rather than triggering
+# a fresh build — so a dockerfilePath change (or any other build-time
+# config change) applied via the API will NOT take effect via
+# redeploy alone, even though get-service-config immediately reflects
+# the new setting. Only a genuine new build — a real git push, which
+# is what this comment's own commit is — re-evaluates build config
+# from scratch. Confirmed the hard way: two consecutive redeploys
+# after setting dockerfilePath both failed identically ("couldn't
+# locate a dockerfile at path Dockerfile"), because both reused a
+# build snapshot computed before dockerfilePath existed at all.
 CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
