@@ -15,27 +15,40 @@
 // "the known maintenance risk... is that LinkedIn/Gmail DOM changes
 // break these; isolating them keeps a fix to a one-file change").
 //
-// Best-effort current values, not hand-verified against a live
-// session (this sandbox has no LinkedIn login) — sourced from public
-// research on LinkedIn's own early-2026 composer migration (Quill,
-// replacing ProseMirror — .ql-editor is the real current contenteditable
-// class as of that migration) and a field-tested browser-automation
-// reference confirming .share-creation-state as the composer's
-// scoping container. Treat these as a strong starting point requiring
-// live verification, not a guarantee — exactly the risk Full Spec
-// Section 4.3's own risk table already accepts ("keep selectors
-// isolated and versioned; treat as expected maintenance, not a
-// blocker").
+// UPDATED 6 Sept 2026 after live-DOM verification via browser inspection
+// confirmed BOTH prior selectors were fully stale (zero matches):
+// LinkedIn has migrated off Quill to TipTap/ProseMirror, and the old
+// .share-creation-state container class no longer exists — the composer
+// is now a native <dialog data-testid="dialog">.
+//
+// textAreaSelector now targets `componentkey="ShareBox_textEditor"`,
+// a deliberate semantic attribute (not a hashed CSS-module class like
+// everything else on the page), so it's the most durable hook found.
+// composerSelector is deliberately no longer used to find the box
+// directly — see _findComposers below, which finds the text box first
+// (the stable hook) and walks up to its own enclosing dialog, rather
+// than trusting a container selector that isn't semantically tied to
+// the text box at all and could match unrelated dialogs.
 const CONFIG = {
-  composerSelector: ".share-creation-state",
-  textAreaSelector: '.ql-editor[contenteditable="true"]',
+  textAreaSelector: '[contenteditable="true"][componentkey="ShareBox_textEditor"]',
+  composerSelector: 'dialog[data-testid="dialog"]',
   controlContainerId: "voicova-control-container",
 };
 
 const _attachedComposers = new WeakSet();
 
+// Finds composers by locating the stable text-box hook first, then
+// walking up to its nearest enclosing dialog — more robust than
+// matching the dialog selector alone, since data-testid="dialog" is
+// generic and could match LinkedIn dialogs unrelated to the composer.
 function _findComposers() {
-  return document.querySelectorAll(CONFIG.composerSelector);
+  const textAreas = document.querySelectorAll(CONFIG.textAreaSelector);
+  const composers = new Set();
+  textAreas.forEach((textArea) => {
+    const composer = textArea.closest(CONFIG.composerSelector);
+    if (composer) composers.add(composer);
+  });
+  return Array.from(composers);
 }
 
 function _getDraftText(composer) {
