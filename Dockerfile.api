@@ -1,0 +1,25 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# requirements.lock, not requirements.txt: hash-pinned, reproducible,
+# same file CI already installs successfully (Foundation Hardening
+# item 1) — this Dockerfile installs no differently than the tested
+# path, just via `docker build` instead of Railpack.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
+
+COPY . .
+
+# sh -c, not exec form, because $PORT needs shell expansion at
+# container start (Railway injects it at runtime, not build time).
+# This is a deliberate, explicit CMD specifically so this service's
+# start command is no longer subject to Railpack/Procfile
+# auto-detection at all (see railway.api.json's own comment, and the
+# 6 Sept 2026 session notes on why that auto-detection kept silently
+# reverting this service to the shared repo's Streamlit command even
+# with an explicit startCommand configured) — "Railway will always
+# build with a Dockerfile if it finds one" (Railway's own docs) is
+# the deterministic override used here, rather than continuing to
+# fight Railpack's config-as-code precedence.
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
