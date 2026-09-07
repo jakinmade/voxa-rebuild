@@ -2118,11 +2118,36 @@ STARTERS = [
 # than invention, so anchoring to their own words instead of a free-floating
 # scenario should raise both completion rate and how genuinely-voiced the
 # sample is.
+#
+# Real bug found and fixed 7 Sept 2026, via a live user's calibration data:
+# index 3's anchored template used to read 'Keep going from where you left
+# off. "{s}" Write the next few sentences, unfiltered, first version
+# only...' - a literal continuation instruction. _extract_anchor_sentences
+# below picks anchor sentences purely mechanically (first few sentences in
+# a usable length range, no regard for tone), so {s} could be anything -
+# in the confirmed case, a dry, descriptive product sentence. "Keep going
+# from where you left off" forces the completion to continue in THAT SAME
+# register, which structurally cannot produce the "genuinely getting under
+# your skin" reaction STARTERS[3] exists to elicit - continuation-of-anchor
+# and register-shift-into-something-emotional are opposite instructions.
+# The result was a completion that was really just more calm, third-person
+# product description, folded into the person's baseline as if it were
+# their unfiltered emotional register - measurably pulling first_person_
+# ratio down on a small calibration sample.
+#
+# Templates 0-2 never had this problem: each frames the anchor as
+# something an EXTERNAL PARTY is doing WITH it (pushing back on it, asking
+# what it meant, asking to justify it) rather than asking the person to
+# extend it - that framing provokes a first-person reaction regardless of
+# the anchor sentence's own original register, which is exactly why those
+# three are left unchanged here. Index 3 is rewritten to match that same
+# reactive shape instead of a continuation shape, while still keeping the
+# "genuinely getting under your skin" trigger verbatim from STARTERS[3].
 _ANCHOR_TEMPLATES = [
     'Picture someone pushing back hard on this line you wrote: "{s}" Type your reply exactly as it comes to you, first draft, no editing...',
     'A friend just read this line of yours, "{s}", and asked what you actually meant. Answer them right now, in your own words...',
     'Someone just asked you to justify this: "{s}" What do you say...',
-    'Keep going from where you left off. "{s}" Write the next few sentences, unfiltered, first version only...',
+    'Someone just quoted this line back at you, out of context: "{s}" It\'s a small thing, but it\'s genuinely getting under your skin. Write down what you\'re thinking, unfiltered, first version only...',
 ]
 
 
