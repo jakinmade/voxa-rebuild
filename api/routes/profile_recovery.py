@@ -161,7 +161,11 @@ def _send_recovery_email(to_email: str, token: str) -> None:
         )
     except Exception as exc:
         log.error("recovery_email_send_failed", exc_info=True)
-        print(f"DIAG recovery_email_send_failed: type={type(exc).__name__} message={exc}", flush=True)
+        body = getattr(exc, "body", None)
+        print(
+            f"DIAG recovery_email_send_failed: type={type(exc).__name__} message={exc} body={body}",
+            flush=True,
+        )
 
 
 @router.post("/api/profile/recovery-email", response_model=RegisterRecoveryEmailResponse)
