@@ -1,0 +1,26 @@
+
+== POST /api/extension/link ==
+status: 200
+{'installation_id': '2a3b40e0-30f9-4be7-b8ae-89d9e5ace8b8', 'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyYTNiNDBlMC0zMGY5LTRiZTctYjhhZS04OWQ5ZTVhY2U4YjgiLCJpYXQiOjE3ODg3NzEwNTIsImV4cCI6MTc4ODc3NDY1Mn0.TeHKn3qA6QmBdrSf4CN7fyeu32aI-jjdYLYpl5tz7_o', 'refresh_handle': 'uJu8-_Ll4qpejKhPhNE9WIf6vUWIEg2JJATHMDkSpMg'}
+
+(Skipping /api/fix idempotency tests — pass --with-fix-cost to run them.)
+
+== Refresh: valid handle (expect: 200, new access_token + refresh_handle) ==
+status: 200
+{'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyYTNiNDBlMC0zMGY5LTRiZTctYjhhZS04OWQ5ZTVhY2U4YjgiLCJpYXQiOjE3ODg3NzEwNTIsImV4cCI6MTc4ODc3NDY1Mn0.TeHKn3qA6QmBdrSf4CN7fyeu32aI-jjdYLYpl5tz7_o', 'refresh_handle': 'hfdxpaphRXB7UjDzJ7_8H151OB5fD3SRJONdQMvInX4'}
+PASS: refresh rotated the handle correctly.
+
+== Refresh: reuse the now-OLD handle (expect: 401 token_revoked or token_expired) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+error_code returned: token_expired
+PASS: reused refresh handle correctly rejected.
+
+== Refresh: garbage handle (expect: 401 token_revoked) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+PASS: garbage refresh handle correctly rejected.
+
+(Skipping recovery-email test — set RECOVERY_TEST_EMAIL to run it.)
+
+ALL RUN STEPS PASSED.
