@@ -57,10 +57,26 @@ jobs:
             python3 dev_tools/api_e2e_tier1.py 2>&1 | tee result.txt
           fi
 
-      - name: Publish result as a private gist (log download isn't reachable from all environments)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish result to a dedicated results branch (raw log download isn't reachable from all environments)
         run: |
-          gh gist create result.txt --desc "api-e2e-tier1 run ${{ github.run_id }}" --filename "result-${{ github.run_id }}.txt" > gist_url.txt
-          cat gist_url.txt
-          exit "${{ steps.run_tests.outcome == 'success' && '0' || '1' }}"
+          mkdir -p /tmp/results-checkout
+          cp result.txt /tmp/result.txt
+          git config user.email "actions@github.com"
+          git config user.name "github-actions"
+          git fetch origin ci-results:ci-results 2>/dev/null || true
+          if git show-ref --verify --quiet refs/heads/ci-results; then
+            git checkout ci-results
+          else
+            git checkout --orphan ci-results
+            git rm -rf . > /dev/null 2>&1 || true
+          fi
+          mkdir -p ci_results
+          cp /tmp/result.txt "ci_results/run-${{ github.run_id }}.txt"
+          git add "ci_results/run-${{ github.run_id }}.txt"
+          git commit -m "Result for run ${{ github.run_id }}"
+          git push origin ci-results
+          echo "Result path: ci_results/run-${{ github.run_id }}.txt on branch ci-results"
+
+      - name: Fail the job if the tests themselves failed
+        if: steps.run_tests.outcome != 'success'
+        run: exit 1
