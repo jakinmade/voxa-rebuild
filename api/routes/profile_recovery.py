@@ -150,9 +150,18 @@ def _send_recovery_email(to_email: str, token: str) -> None:
             html_content=html_body,
         )
         sg = SendGridAPIClient(api_key)
-        sg.send(message)
-    except Exception:
+        response = sg.send(message)
+        # DIAG (7 Sept 2026): confirms SendGrid actually accepted the
+        # send (status 202) vs merely that our own code reached this
+        # line — see /api/fix's own DIAG additions this same session
+        # for why structlog's exc_info line isn't trusted alone here.
+        print(
+            f"DIAG recovery_email_sent: from={from_email} status_code={response.status_code}",
+            flush=True,
+        )
+    except Exception as exc:
         log.error("recovery_email_send_failed", exc_info=True)
+        print(f"DIAG recovery_email_send_failed: type={type(exc).__name__} message={exc}", flush=True)
 
 
 @router.post("/api/profile/recovery-email", response_model=RegisterRecoveryEmailResponse)
