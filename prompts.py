@@ -2134,6 +2134,24 @@ def build_correction_prompt(
                     f"already present in the input. Never reassign credit for a point, idea, or "
                     f"argument that belongs to someone else in the conversation (e.g. do not turn "
                     f"'your point' into 'my point').")
+            elif o_val > b_val:
+                # Companion to the under-owned branch above, missing
+                # until now — mirrors the asymmetry already fixed once
+                # in deterministic_fixers.py's _fix_first_person_over_ratio
+                # (2 Sept 2026), but that fix only ever reached the
+                # rule-based pass, never this LLM-correction fallback.
+                # Real gap: a render can overshoot first-person framing
+                # (e.g. baseline 0.52 -> output 1.0) and, if the narrow
+                # deterministic pattern-match doesn't happen to fire on
+                # that specific text, nothing here ever asked the model
+                # to pull it back - unlike every other scored dimension,
+                # which all have a real over-direction branch.
+                correction_instructions.append(
+                    f"Ownership is too high ({o_val:.0%} first-person, target {b_val:.0%}). "
+                    f"Convert 1-2 first-person opinion statements the rewrite itself introduced "
+                    f"back to a more direct or neutral framing. Never touch first-person language "
+                    f"that already appears in the original input — only pull back framing the "
+                    f"rewrite added.")
             # else: input has nothing of the writer's own to convert (or
             # this is a factual/third-party rewrite) - skip the correction
             # entirely rather than nudge with a caveat that can lose to
@@ -2145,6 +2163,20 @@ def build_correction_prompt(
                     f"Convert 1-2 EXISTING suggestions or recommendations in the input into direct "
                     f"action statements. No 'please', no 'could you'. Do not invent a new suggestion "
                     f"or call to action that is not already implied by the input just to hit the ratio.")
+            elif o_val > b_val:
+                # Same gap as first_person_ratio's missing over-branch,
+                # here with no deterministic fixer for this direction
+                # either (deterministic_fixers._fix_directive_ratio is
+                # under-direction only) - this is the ONLY layer that
+                # can pull an over-directive render back. Small real
+                # volume (2 of 48 in the offline production sample vs
+                # 15 under-direction), but the same shape of gap, left
+                # unhandled until now.
+                correction_instructions.append(
+                    f"Directive pattern is too strong ({o_val:.0%} action statements, target {b_val:.0%}). "
+                    f"Soften 1-2 of the most command-like statements the rewrite itself introduced back "
+                    f"toward a suggestion or observation. Never soften a directive that was already "
+                    f"phrased that directly in the original input.")
             # else: input has nothing actionable of its own to convert -
             # skip rather than risk fabricating a suggestion.
 
