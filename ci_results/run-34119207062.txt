@@ -1,0 +1,120 @@
+
+== POST /api/extension/link ==
+status: 200
+{'installation_id': 'f5913d26-bcc9-4ccf-81ac-7b86a97e0e62', 'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmNTkxM2QyNi1iY2M5LTRjY2YtODFhYy03Yjg2YTk3ZTBlNjIiLCJpYXQiOjE3ODg3ODIyMDUsImV4cCI6MTc4ODc4NTgwNX0.WbF0tG6yVoXcAkOxIJdj52MhMz15wUQ8CIrbd9ehxk0', 'refresh_handle': 'quRLIeYFumLlO_zrA79Nr3-PzE6NpNsyjUdqqHN7AbU'}
+
+(Skipping /api/fix idempotency tests — pass --with-fix-cost to run them.)
+
+== Refresh: valid handle (expect: 200, new access_token + refresh_handle) ==
+status: 200
+{'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmNTkxM2QyNi1iY2M5LTRjY2YtODFhYy03Yjg2YTk3ZTBlNjIiLCJpYXQiOjE3ODg3ODIyMDYsImV4cCI6MTc4ODc4NTgwNn0.kFoSrttbcSSrzy-lE0u1ec6icl7IAynTBp-6ba2i7C0', 'refresh_handle': 'Zog9nxoEXlpGV_50V00cLM-pldGxjGBBmK87_-gafZo'}
+PASS: refresh rotated the handle correctly.
+
+== Refresh: reuse the now-OLD handle (expect: 401 token_revoked or token_expired) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+error_code returned: token_expired
+PASS: reused refresh handle correctly rejected.
+
+== Refresh: garbage handle (expect: 401 token_revoked) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+PASS: garbage refresh handle correctly rejected.
+
+(Skipping recovery-email test — set RECOVERY_TEST_EMAIL to run it.)
+
+ALL RUN STEPS PASSED.
+
+=== api_smoke_test.py --base-url (live, no --with-fix) ===
+
+== POST /api/extension/link ==
+status: 200
+{
+  "installation_id": "7d96a628-8ecb-41a7-bd62-db908eff4640",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3ZDk2YTYyOC04ZWNiLTQxYTctYmQ2Mi1kYjkwOGVmZjQ2NDAiLCJpYXQiOjE3ODg3ODIyMDgsImV4cCI6MTc4ODc4NTgwOH0.wz_YfNHdXKL6laSIRL6r_cBvI5VbeYDoxLSKf7zTvUo",
+  "refresh_handle": "pFEl662r6u28s4cXul7CVQEhqNMcMft167lcmrVJmxk"
+}
+
+== POST /api/check-draft ==
+status: 200
+{
+  "request_id": "da8e8c45-cdff-4118-9681-1958e977d7d5",
+  "overall_match": 50,
+  "dimension_scores": {
+    "hedge_density": {
+      "label": "Hedging",
+      "baseline": 1.37,
+      "output": 27.27,
+      "verdict": "MISSED"
+    },
+    "sentence_length_sd": {
+      "label": "Sentence rhythm",
+      "baseline": 7.6,
+      "output": 0.0,
+      "verdict": "MISSED"
+    },
+    "first_person_ratio": {
+      "label": "Ownership (first person)",
+      "baseline": 0.458,
+      "output": 0.0,
+      "verdict": "MISSED"
+    },
+    "directive_ratio": {
+      "label": "Directness",
+      "baseline": 0.0,
+      "output": 0.0,
+      "verdict": "HIT"
+    },
+    "conclusion_opener_ratio": {
+      "label": "Conclusion placement",
+      "baseline": 1.0,
+      "output": 1.0,
+      "verdict": "HIT"
+    },
+    "scaffolding_density": {
+      "label": "Scaffolding",
+      "baseline": 0.0,
+      "output": 0.0,
+      "verdict": "HIT"
+    }
+  },
+  "dimension_explanations": {
+    "hedge_density": "Hedging language differs from your usual baseline.",
+    "sentence_length_sd": "Sentence-length rhythm differs from your usual pattern.",
+    "first_person_ratio": "How much first-person ownership language appears differs from your baseline."
+  },
+  "burrows_delta": {
+    "tier": "Moderate",
+    "delta": 1.684,
+    "biggest_divergences": [
+      {
+        "word": "be",
+        "baseline_freq": 3.3445,
+        "output_freq": 181.8182
+      },
+      {
+        "word": "it",
+        "baseline_freq": 2.2297,
+        "output_freq": 90.9091
+      },
+      {
+        "word": "might",
+        "baseline_freq": 4.4593,
+        "output_freq": 90.9091
+      }
+    ]
+  },
+  "verdict": "borderline",
+  "remaining_allowance": 10,
+  "recommended_action": "fix_available",
+  "scoring_version": "voice-engine-2026-09-05.1",
+  "timestamp": "2026-09-07T11:56:50.159859+00:00"
+}
+
+== POST /api/extension/disconnect ==
+status: 200
+{
+  "disconnected": true
+}
+
+PASS — all steps returned the documented shape.
