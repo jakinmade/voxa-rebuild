@@ -1,0 +1,41 @@
+
+== POST /api/extension/link ==
+status: 200
+{'installation_id': '95d89585-dc68-4087-baa5-5e8e6183b532', 'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5NWQ4OTU4NS1kYzY4LTQwODctYmFhNS01ZThlNjE4M2I1MzIiLCJpYXQiOjE3ODg3NzkyMTMsImV4cCI6MTc4ODc4MjgxM30.n1ouwemn3hSi7F6scVFcFy3DZqOBjeXCDKHEZS-ZF_k', 'refresh_handle': 'j0HAjWA13vpQApwbBxp4OtP6kuBuou_0Ebu0-KbL1hM'}
+
+(Skipping /api/fix idempotency tests — pass --with-fix-cost to run them.)
+
+== Refresh: valid handle (expect: 200, new access_token + refresh_handle) ==
+status: 200
+{'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5NWQ4OTU4NS1kYzY4LTQwODctYmFhNS01ZThlNjE4M2I1MzIiLCJpYXQiOjE3ODg3NzkyMTMsImV4cCI6MTc4ODc4MjgxM30.n1ouwemn3hSi7F6scVFcFy3DZqOBjeXCDKHEZS-ZF_k', 'refresh_handle': 'zR1VfYBIAepx9PvcibQpBMmkIbKOxTt4MT2K4GpsbrE'}
+PASS: refresh rotated the handle correctly.
+
+== Refresh: reuse the now-OLD handle (expect: 401 token_revoked or token_expired) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+error_code returned: token_expired
+PASS: reused refresh handle correctly rejected.
+
+== Refresh: garbage handle (expect: 401 token_revoked) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+PASS: garbage refresh handle correctly rejected.
+
+== Register recovery email (authenticated) ==
+status: 200
+{'registered': True}
+
+== Trigger recovery (unauthenticated, real endpoint a lost-device user would hit) ==
+status: 200
+{'request_id': '3477dc31-5329-4826-bddf-8393f39a7012'}
+Recovery triggered. Check the inbox for john@akinmade.co.uk for the email now.
+
+== Polling SendGrid Activity API for delivery confirmation ==
+SendGrid attempt 1: no messages yet, retrying...
+SendGrid attempt 2: no messages yet, retrying...
+SendGrid attempt 3: no messages yet, retrying...
+SendGrid attempt 4: no messages yet, retrying...
+SendGrid attempt 5: no messages yet, retrying...
+SendGrid attempt 6: no messages yet, retrying...
+
+FAIL: no matching message found in SendGrid Activity API after polling — either delivery failed, or SENDGRID_API_KEY lacks Activity API scope
