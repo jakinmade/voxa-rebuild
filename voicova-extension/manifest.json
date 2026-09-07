@@ -14,7 +14,10 @@
   ],
 
   "externally_connectable": {
-    "matches": ["https://voicova.com/*"]
+    "matches": [
+      "https://voicova.com/*",
+      "https://web-production-dbceb0.up.railway.app/*"
+    ]
   },
 
   "background": {
