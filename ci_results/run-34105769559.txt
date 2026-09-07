@@ -1,0 +1,10 @@
+
+== POST /api/extension/link ==
+status: 200
+{'installation_id': '3bbeee7e-a13c-4f9d-8d78-78c5a4fdab0f', 'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYmJlZWU3ZS1hMTNjLTRmOWQtOGQ3OC03OGM1YTRmZGFiMGYiLCJpYXQiOjE3ODg3NzMwMzksImV4cCI6MTc4ODc3NjYzOX0.RhoYZEVlGFbE4OsbRx_vFvkbVFKBv1BBK_Xjv97OQ0M', 'refresh_handle': 'Y5NWTmibfNmCRg5WyBOsVUXkSbNDANoXM-1C0-nk-fU'}
+
+== Idempotency: same key twice, sequentially (expect: identical response, one credit) ==
+status: 500
+{'detail': {'error_code': 'engine_error'}}
+
+FAIL: first fix call failed: 500
