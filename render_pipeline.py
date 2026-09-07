@@ -384,8 +384,16 @@ def run_voice_render(
             clean = _apply_uk_english(clean)
         clean = _grammar_fix_pass(clean, client, locale=locale, original_input_text=input_text)
         clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
-    except Exception:
+    except Exception as exc:
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
+        # DIAG (7 Sept 2026): structlog's exc_info=True line above is
+        # not surfacing content in at least one log viewer in use —
+        # see logging_config.py's own note on a prior, different
+        # buffering bug in this same area. Belt-and-braces plain print
+        # matching the proven-working DIAG convention (lifetime_cap.py)
+        # until that's understood, so the actual client-level failure
+        # (auth, rate limit, bad request, etc.) is never invisible.
+        print(f"DIAG llm_call_exception: type={type(exc).__name__} message={exc}", flush=True)
         return RenderResult(success=False, error="That didn't go through. Your text is safe, try again.")
 
     clean, casing_restored, casing_still_dropped = _fix_entity_casing(clean, input_text)
