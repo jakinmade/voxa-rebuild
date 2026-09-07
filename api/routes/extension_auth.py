@@ -17,7 +17,7 @@ work."
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from logging_config import get_logger
 from api.auth import tokens
@@ -55,6 +55,38 @@ def link_extension(req: LinkRequest):
         raise HTTPException(status_code=500, detail={"error_code": "engine_error"})
 
     return LinkResponse(**result)
+
+
+@router.get("/api/extension/link-page")
+def link_extension_page(device_identity: str = Query(...)):
+    # Flow A's missing frontend piece (found 7 Sept 2026): the backend
+    # (link_extension above) and the extension's own onMessageExternal
+    # listener have both existed and worked all along — nobody had
+    # built the actual page on voicova.com that calls either of them.
+    # Rather than embed the handoff JS inside a Streamlit component
+    # (which renders in a sandboxed, opaque-origin iframe that
+    # externally_connectable can never match — the exact class of bug
+    # the recovery page hit first), this is a real top-level page
+    # served from this API's own domain, already listed in both
+    # manifest.json's host_permissions and externally_connectable.
+    # voicova.com only needs a plain <a href="..."> link to this URL
+    # with the visitor's own device_identity (their existing device
+    # cookie, persistence.py's get_or_create_device_id) — a normal
+    # top-level navigation, not an embedded component.
+    #
+    # Same validation link_extension (POST, above) already applies,
+    # and the same LinkResponse-shaped result, just handed off via the
+    # browser-facing page instead of returned as JSON — reuses that
+    # exact logic rather than duplicating it.
+    if get_profile_bundle(device_identity) is None:
+        raise HTTPException(status_code=400, detail={"error_code": "invalid_device_identity"})
+
+    result = tokens.issue_installation(device_identity)
+    if result is None:
+        raise HTTPException(status_code=500, detail={"error_code": "engine_error"})
+
+    from api.extension_handoff import link_handoff_html
+    return link_handoff_html(result, connecting_verb="Connecting")
 
 
 @router.post("/api/extension/refresh", response_model=RefreshResponse)
