@@ -71,11 +71,38 @@ def reset_all():
     defaults. Explicitly lands back on Step 1, not the marketing
     landing screen (screen 0) — landing is for a first-ever visit
     only; someone hitting "Start over" from mid-flow has already
-    seen it and wants straight back into onboarding."""
+    seen it and wants straight back into onboarding.
+
+    Real bug fixed 7 Sept 2026: this used to only clear local
+    session_state, never the saved Supabase profile — and
+    restore_profile_if_available() runs unconditionally on every page
+    load, so the very next rerun after "Start over" silently pulled
+    the old profile straight back and dropped the person on Screen 4
+    again. "Start over" looked like it worked for an instant, then
+    snapped back, with no way to actually reach Screen 1-3 again once
+    a profile existed. _skip_profile_restore tells the top-level
+    restore check in app.py to stand down for the rest of this
+    onboarding attempt. Cleared automatically the moment a fresh
+    calibration sample is actually added
+    (_add_writing_sample_to_fingerprint), not here — it needs to
+    survive every intermediate rerun across Screens 1-3, not just the
+    one immediately after this call. The OLD Supabase row is left
+    untouched until that happens: nothing is destroyed by clicking
+    "Start over" alone, only overwritten once new calibration
+    completes and saves, same fail-safe spirit as the rest of this
+    module.
+
+    Known, accepted limitation: this flag lives only in
+    st.session_state, not any durable store. If someone starts a
+    fresh calibration and abandons the browser tab entirely before
+    finishing it, a later visit's fresh session will auto-restore the
+    old profile again - the safe fallback (worst case, they click
+    "Start over" again), not a broken state."""
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     init_state()
     st.session_state.screen = 1
+    st.session_state["_skip_profile_restore"] = True
 
 
 def generate_receipt(session_start: str, word_count: int) -> dict:

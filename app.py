@@ -1180,7 +1180,18 @@ init_state()
 # redoing onboarding. No UI, no prompt; see persistence.py for the
 # fail-open design (any absence or error just proceeds as fresh
 # onboarding, exactly as it worked before this existed).
-if restore_profile_if_available():
+#
+# _skip_profile_restore (7 Sept 2026 fix): set by reset_all() when
+# someone explicitly clicks "Start over" with an existing saved
+# profile. Without this check, this call happens unconditionally on
+# every rerun, so it silently pulled the old profile straight back on
+# the very next rerun after "Start over" - the button looked like it
+# worked for an instant, then snapped back to Screen 4, with no way
+# to actually reach fresh onboarding again once a profile existed.
+# Cleared automatically the moment fresh calibration data is actually
+# added (_add_writing_sample_to_fingerprint), not consumed here - it
+# needs to survive every intermediate rerun across Screens 1-3.
+if not st.session_state.get("_skip_profile_restore") and restore_profile_if_available():
     st.session_state.screen = 4
     if not st.session_state.get("_returning_user_sidebar"):
         st.session_state["_returning_user_sidebar"] = True
@@ -1716,6 +1727,13 @@ def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = 
     st.session_state.baseline_fingerprint = _merge_baseline(
         st.session_state.get("baseline_fingerprint"), new_metrics
     )
+    # 7 Sept 2026 fix: this is the single choke point every fresh-
+    # calibration path and every Learn-from-edit path both go through,
+    # so it's the right place to clear _skip_profile_restore (see
+    # reset_all() and the top-level restore check for why it exists).
+    # Harmless no-op when the flag was never set (the normal
+    # Learn-from-edit case on an already-restored profile).
+    st.session_state.pop("_skip_profile_restore", None)
     if platform_format:
         by_format = st.session_state.get("baseline_fingerprints_by_format") or {}
         by_format[platform_format] = _merge_baseline(
@@ -1766,6 +1784,50 @@ def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = 
         st.session_state.voice_report = report
 
     save_profile_if_available()
+
+
+def _start_over_control(key_suffix: str, container=st):
+    """Two-step 'Start over', added 7 Sept 2026 alongside the
+    reset_all()/_skip_profile_restore fix that made "Start over"
+    actually work for the first time — see reset_all()'s docstring for
+    the full bug. Once it actually resets something real, an accidental
+    click has a real cost (redoing calibration to recover), unlike the
+    old broken version where it silently did nothing. First click sets
+    a per-call-site confirm flag and shows Yes/Cancel in its place;
+    nothing is reset until Yes is clicked. Cancel or navigating away
+    leaves the existing profile completely untouched either way.
+
+    key_suffix must be unique per call site (this is called from both
+    the mid-onboarding "Start over" on Screen 2 and the post-render one
+    on Screen 4) so Streamlit's widget keys and the confirm flag itself
+    never collide between them.
+
+    container: the st module itself, or a column object from
+    st.columns() — both support .button()/.markdown()/.columns(), so
+    this renders correctly whether called at the page level or inside
+    an existing column layout."""
+    confirm_key = f"_confirm_start_over_{key_suffix}"
+    if not st.session_state.get(confirm_key):
+        if container.button("Start over", key=f"start_over_{key_suffix}",
+                             type="primary", use_container_width=True):
+            st.session_state[confirm_key] = True
+            st.rerun()
+    else:
+        container.markdown(
+            '<div class="microcopy">This replaces your voice profile once '
+            'you finish new calibration. Continue?</div>',
+            unsafe_allow_html=True,
+        )
+        yes_col, cancel_col = container.columns([1, 1])
+        if yes_col.button("Yes, start over", key=f"confirm_yes_{key_suffix}",
+                           use_container_width=True):
+            st.session_state.pop(confirm_key, None)
+            reset_all()
+            st.rerun()
+        if cancel_col.button("Cancel", key=f"confirm_cancel_{key_suffix}",
+                              use_container_width=True):
+            st.session_state.pop(confirm_key, None)
+            st.rerun()
 
 
 def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool = False):
@@ -2076,9 +2138,7 @@ def screen_reveal():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("\u2190 Start over", use_container_width=True):
-            reset_all()
-            st.rerun()
+        _start_over_control("screen2")
     with col2:
         if st.button("Continue \u2192", type="primary", use_container_width=True):
             go_to(3)
@@ -3902,9 +3962,7 @@ Show the per-dimension breakdown
                     st.session_state.refinement_used = False
                     st.rerun()
             with col2:
-                if st.button("Start over", type="primary", use_container_width=True):
-                    reset_all()
-                    st.rerun()
+                _start_over_control("screen4")
             with col3:
                 st.download_button(
                     "Export your profile",
