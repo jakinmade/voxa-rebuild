@@ -33,6 +33,12 @@ _BASELINE = {
     "hedge_density": 1.0, "sentence_length_sd": 3.0,
     "first_person_ratio": 0.4, "directive_ratio": 0.3,
     "conclusion_opener_ratio": 0.5, "scaffolding_density": 0.1,
+    # word_count added 7 Sept 2026 — previously missing here because
+    # this fixture's renders always took the "clean human input" path,
+    # which never read this field. Fixed alongside the change that
+    # made _build_restoration_targets run on the clean path too (see
+    # that function's own docstring) and started reading it there.
+    "word_count": 500,
 }
 _RAW_TEXT = "I checked the deck myself. It's solid. Let's send it today."
 

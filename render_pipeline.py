@@ -89,6 +89,7 @@ from deterministic_fixers import (
     _fix_first_person_ratio, _fix_first_person_over_ratio,
     _fix_directive_ratio, _fix_modal_hedge, _fix_scaffolding_density,
     _check_uncorrected_insertions, _fix_entity_casing,
+    _restore_dropped_subject_openers,
     ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
     get_fabricated_blocks,
 )
@@ -414,6 +415,18 @@ def run_voice_render(
     clean, casing_restored, casing_still_dropped = _fix_entity_casing(clean, input_text)
     if casing_restored:
         log.info("entity_casing_restored", restored=casing_restored, still_dropped=casing_still_dropped)
+
+    # 7 Sept 2026: deterministic backstop for the SENTENCE COMPLETENESS
+    # instruction (prompts._build_voice_dna) — that instruction asks the
+    # model not to add a subject/word to a deliberately dropped-subject
+    # opener, but an instruction isn't enforcement, confirmed live on
+    # the same document twice (see _restore_dropped_subject_openers'
+    # own docstring). Placed right after entity-casing restoration,
+    # same stage in the pipeline, same "deterministic cleanup before
+    # the insertion-check scoring runs" position.
+    clean, dropped_subject_restored = _restore_dropped_subject_openers(clean, input_text)
+    if dropped_subject_restored:
+        log.info("dropped_subject_openers_restored", restored=dropped_subject_restored)
 
     initial_insertion_check = _check_uncorrected_insertions(input_text, clean)
     log.info(

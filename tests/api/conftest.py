@@ -57,6 +57,12 @@ _fake_profiles = {
             "hedge_density": 1.0, "sentence_length_sd": 3.0,
             "first_person_ratio": 0.4, "directive_ratio": 0.3,
             "conclusion_opener_ratio": 0.5, "scaffolding_density": 0.1,
+            # word_count added 7 Sept 2026 — same fixture gap as
+            # tests/unit/test_render_pipeline.py's _BASELINE, exposed
+            # by the same fix (_build_restoration_targets now runs on
+            # the clean-human path too, which this fixture's renders
+            # always take).
+            "word_count": 500,
         },
         "starter_baseline": None,
         "baseline_fingerprints_by_format": None,

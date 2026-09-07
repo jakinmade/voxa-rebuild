@@ -1413,3 +1413,140 @@ def get_fabricated_blocks(before: str, after: str) -> list[dict]:
         for before_block, after_block, _ in _diff_growth_blocks(before, after)
     ]
 
+
+
+# ------------------------------------------------------------------
+# Dropped-subject opener restoration — added 7 Sept 2026, real finding.
+# ------------------------------------------------------------------
+#
+# prompts._build_voice_dna already tells the model, in plain language
+# (the SENTENCE COMPLETENESS instruction), not to add a subject the
+# original left out for economy ("Built out for X" should not become
+# "I built it out for X"). That instruction is not enforcement — an
+# LLM can and does ignore it some of the time. Confirmed live, twice,
+# on the same source document: "Built out for US Financial Services"
+# rendered as "I built this out for US Financial Services" (the exact
+# example that instruction's own docstring already cites as fixed —
+# a regression, not a new case) and, separately, "Curious if you got a
+# chance..." rendered as "I'm curious if you got a chance...".
+#
+# Same evidence-gated, narrow-or-decline philosophy as
+# _fix_entity_casing above: this only fires when (a) the ORIGINAL
+# sentence does not itself start with a subject, article, or other
+# safe opener — i.e. genuinely looks like a dropped-subject economy
+# construction, not an ordinary sentence that happens to share a verb
+# with something else — and (b) the output contains that exact opener
+# word, lowercased, immediately preceded by one of a closed set of
+# subject-injection phrases, AND immediately followed by a real,
+# multi-word match of the rest of that original sentence. Both
+# conditions together make a coincidental match on an unrelated
+# sentence extremely unlikely. When correspondence isn't this clean,
+# this does nothing and leaves the text as the model produced it —
+# the same "leave it flagged rather than force an unsafe substitution"
+# principle _fix_entity_casing already follows, rather than risk
+# corrupting an unrelated sentence.
+#
+# On a confirmed match, the entire corresponding output sentence is
+# replaced with the ORIGINAL sentence's own exact wording, not a
+# smaller word-level edit — the safest possible restoration once
+# correspondence is this well-evidenced, since it guarantees the
+# result is verbatim what the person actually wrote rather than a
+# hand-patched version of the model's phrasing.
+_SAFE_OPENER_SUBJECTS = re.compile(
+    r"^(I|I'm|I've|I'd|I'll|We|We're|We've|We'd|You|You're|You've|You'd|"
+    r"He|He's|She|She's|It|It's|They|They're|They've|"
+    r"This|That|These|Those|There|There's|A|An|The)\b",
+    re.IGNORECASE,
+)
+
+_DROPPED_SUBJECT_INJECTIONS = (
+    "I'm ", "I am ", "I've ", "I have ", "I'd ", "I would ", "I ",
+    "It's ", "It is ", "We're ", "We are ", "We've ", "We ",
+    "This is ", "That's ", "That is ",
+)
+
+
+def _restore_dropped_subject_openers(output_text: str, input_text: str) -> tuple[str, list[str]]:
+    """Returns (fixed_text, restored_sentences). restored_sentences is
+    the list of original sentences whose dropped-subject opener was
+    restored, for logging — same shape as _fix_entity_casing's return."""
+    # [\'"\)]* after the lookbehind: a sentence ending in quoted speech
+    # or a parenthetical ("...didn't.\"") otherwise never splits here at
+    # all — the closing quote sits between the period and the
+    # whitespace, so a bare (?<=[.!?])\s+ silently merges that whole
+    # sentence into the NEXT one instead of splitting. Confirmed live:
+    # this exact document's "Built out for..." sentence was swallowed
+    # into the preceding quoted sentence and never seen as its own
+    # sentence at all, silently no-op'ing this entire function for it.
+    orig_sentences = [s.strip() for s in re.split(r"(?<=[.!?])['\")]*\s+", input_text) if s.strip()]
+    fixed = output_text
+    restored = []
+
+    for sent in orig_sentences:
+        words = sent.split()
+        if len(words) < 4:
+            continue
+        first_word = words[0]
+        if not first_word.isalpha():
+            continue
+        if _SAFE_OPENER_SUBJECTS.match(sent):
+            continue  # already has a normal subject/article opener — not this case
+
+        first_lower = first_word[0].lower() + first_word[1:]
+        # A meaningful chunk of what follows, used only to confirm real
+        # correspondence — never itself inserted; the restore always
+        # uses `sent` verbatim.
+        rest_words = words[1:6]
+        if len(rest_words) < 3:
+            continue
+        rest_chunk = r"\s+".join(re.escape(w) for w in rest_words)
+
+        matched = False
+        for subj in _DROPPED_SUBJECT_INJECTIONS:
+            # Allow up to 2 extra inserted words between the opener verb
+            # and the rest of the sentence — confirmed live, the model
+            # doesn't only prepend a subject, it sometimes also inserts
+            # a short object pronoun at the same time ("Built out" ->
+            # "I built THIS out"). Still evidence-gated: rest_chunk
+            # itself must match verbatim, so this only widens how much
+            # slack is allowed before that real match, not what counts
+            # as a match.
+            # Non-greedy gap: a greedy {0,2} would swallow the first
+            # word of rest_chunk itself into the "extra inserted words"
+            # allowance (confirmed by testing) rather than leaving it
+            # for rest_chunk to match against.
+            pattern = re.compile(
+                re.escape(subj) + re.escape(first_lower) + r"(?:\s+\w+){0,2}?\s+" + rest_chunk,
+                re.IGNORECASE,
+            )
+            m = pattern.search(fixed)
+            if not m:
+                continue
+            # Widen to the full sentence boundary in `fixed` so the
+            # whole sentence is replaced, not just the matched prefix.
+            start = max(
+                fixed.rfind(".", 0, m.start()),
+                fixed.rfind("!", 0, m.start()),
+                fixed.rfind("?", 0, m.start()),
+            )
+            start = start + 1 if start != -1 else 0
+            # Skip past any trailing quote/paren left over from the
+            # PRECEDING sentence's own closing punctuation (e.g.
+            # `didn't."` — the quote sits between the period and the
+            # whitespace) as well as the whitespace itself, so that
+            # character isn't mistaken for part of the sentence being
+            # replaced and doesn't get swallowed by the splice below.
+            while start < len(fixed) and fixed[start] in "\"') \n\t":
+                start += 1
+            end_match = re.search(r"[.!?]['\")]*", fixed[m.start():])
+            if not end_match:
+                continue
+            end = m.start() + end_match.end()
+            fixed = fixed[:start] + sent + fixed[end:]
+            restored.append(sent)
+            matched = True
+            break
+        if matched:
+            continue
+
+    return fixed, restored
