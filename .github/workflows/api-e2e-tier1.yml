@@ -47,9 +47,20 @@ jobs:
         run: pip install httpx
 
       - name: Run Tier 1 E2E tests
+        id: run_tests
+        continue-on-error: true
         run: |
+          set -o pipefail
           if [ "${{ github.event.inputs.with_fix_cost }}" = "true" ]; then
-            python3 dev_tools/api_e2e_tier1.py --with-fix-cost
+            python3 dev_tools/api_e2e_tier1.py --with-fix-cost 2>&1 | tee result.txt
           else
-            python3 dev_tools/api_e2e_tier1.py
+            python3 dev_tools/api_e2e_tier1.py 2>&1 | tee result.txt
           fi
+
+      - name: Publish result as a private gist (log download isn't reachable from all environments)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh gist create result.txt --desc "api-e2e-tier1 run ${{ github.run_id }}" --filename "result-${{ github.run_id }}.txt" > gist_url.txt
+          cat gist_url.txt
+          exit "${{ steps.run_tests.outcome == 'success' && '0' || '1' }}"
