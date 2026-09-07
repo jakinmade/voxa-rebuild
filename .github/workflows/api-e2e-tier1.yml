@@ -60,6 +60,15 @@ jobs:
             python3 dev_tools/api_e2e_tier1.py 2>&1 | tee result.txt
           fi
 
+      - name: Run api_smoke_test.py against the LIVE API (check-draft + disconnect — no cost, no LLM call)
+        id: run_smoke_test
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          echo "" >> result.txt
+          echo "=== api_smoke_test.py --base-url (live, no --with-fix) ===" >> result.txt
+          python3 dev_tools/api_smoke_test.py --base-url "$VOICOVA_API_BASE_URL" --device-id "$VOICOVA_DEVICE_ID" 2>&1 | tee -a result.txt
+
       - name: Publish result to a dedicated results branch (raw log download isn't reachable from all environments)
         run: |
           mkdir -p /tmp/results-checkout
@@ -80,6 +89,6 @@ jobs:
           git push origin ci-results
           echo "Result path: ci_results/run-${{ github.run_id }}.txt on branch ci-results"
 
-      - name: Fail the job if the tests themselves failed
-        if: steps.run_tests.outcome != 'success'
+      - name: Fail the job if either test run failed
+        if: steps.run_tests.outcome != 'success' || steps.run_smoke_test.outcome != 'success'
         run: exit 1
