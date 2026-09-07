@@ -300,6 +300,21 @@ def run_voice_render(
     if not api_key:
         return RenderResult(success=False, error="API key missing.")
 
+    # Same sanitization already applied to SENDGRID_API_KEY in
+    # profile_recovery.py (7 Sept 2026 finding): a stray non-printable
+    # character picked up during a copy-paste between systems (a
+    # trailing newline, a non-breaking space, a BOM) is invisible to a
+    # human eyeballing the value but makes Anthropic's API reject it
+    # outright as "invalid" with no further detail — indistinguishable
+    # from a genuinely wrong key without this. One defensive strip
+    # here covers every caller (this function and
+    # _generate_voice_profile_summary, which receives this same
+    # cleaned value as a parameter) rather than each call site
+    # separately.
+    api_key = "".join(c for c in api_key if 33 <= ord(c) <= 126).strip()
+    if not api_key:
+        return RenderResult(success=False, error="API key missing.")
+
     import anthropic
 
     detected_mode = _detect_mode(input_text)
