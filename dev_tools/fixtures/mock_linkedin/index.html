@@ -1,14 +1,23 @@
 <!DOCTYPE html>
 <!--
   Mock of LinkedIn's post-composer DOM, built to match
-  content_scripts/linkedin.js's real CONFIG selectors exactly
-  (.share-creation-state container, .ql-editor[contenteditable]
-  text area) — not LinkedIn's actual page, which this sandbox
-  cannot reach or log into. This exists to test the EXTENSION's
-  own logic (composer detection, injection, message passing,
-  panel rendering) against a faithful structural copy, per the
-  E2E harness plan — it does not and cannot prove LinkedIn's real
-  DOM still matches these selectors today.
+  content_scripts/linkedin.js's real CONFIG selectors exactly —
+  UPDATED 7 Sept 2026: this fixture was still simulating the
+  pre-6-Sept Quill/.share-creation-state structure after
+  linkedin.js itself moved to the TipTap/<dialog> selectors (see
+  that file's own CONFIG comment, "LinkedIn has migrated off Quill
+  to TipTap/ProseMirror"). extension_e2e_test.js's content-script
+  injection check was silently failing against this stale fixture
+  ever since, for reasons unrelated to the extension's own code —
+  this brings the mock back in sync. Not LinkedIn's actual page,
+  which this sandbox cannot reach or log into; exists to test the
+  EXTENSION's own logic (composer detection, injection, message
+  passing, panel rendering) against a faithful structural copy per
+  the E2E harness plan. Faithful to CONFIG's two selectors and the
+  _findComposers() walk-up-to-nearest-dialog logic, nothing more —
+  it does not and cannot prove LinkedIn's real DOM still matches
+  today (that's this fixture's own known, accepted limit, same as
+  before).
 -->
 <html>
 <head>
@@ -16,14 +25,14 @@
   <title>Mock LinkedIn Feed</title>
   <style>
     body { font-family: sans-serif; padding: 40px; }
-    .share-creation-state { border: 1px solid #ccc; border-radius: 8px; padding: 16px; max-width: 500px; }
-    .ql-editor { min-height: 80px; border: 1px solid #eee; padding: 8px; outline: none; }
+    dialog[data-testid="dialog"] { border: 1px solid #ccc; border-radius: 8px; padding: 16px; max-width: 500px; display: block; position: static; }
+    [componentkey="ShareBox_textEditor"] { min-height: 80px; border: 1px solid #eee; padding: 8px; outline: none; }
   </style>
 </head>
 <body>
   <h1>Mock feed</h1>
-  <div class="share-creation-state">
-    <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
-  </div>
+  <dialog data-testid="dialog" open>
+    <div contenteditable="true" componentkey="ShareBox_textEditor" data-placeholder="What do you want to talk about?"></div>
+  </dialog>
 </body>
 </html>

@@ -230,7 +230,7 @@ async function main() {
   await page.waitForSelector("#voicova-control-container button", { timeout: 10000 });
   check("content script injected the Check control", true);
 
-  await page.type(".ql-editor", "It could perhaps be argued that further review might be advisable.");
+  await page.type("[componentkey=\"ShareBox_textEditor\"]", "It could perhaps be argued that further review might be advisable.");
   await page.click("#voicova-control-container button");
 
   await page.waitForSelector(".voicova-result", { timeout: 15000 }).catch(() => {});
@@ -243,7 +243,7 @@ async function main() {
   await worker.evaluate(() => VoicovaStorage.clearAll());
   await page.reload({ waitUntil: "networkidle0" });
   await page.waitForSelector("#voicova-control-container button", { timeout: 10000 });
-  await page.type(".ql-editor", "Another draft to check.");
+  await page.type("[componentkey=\"ShareBox_textEditor\"]", "Another draft to check.");
   await page.click("#voicova-control-container button");
   await page.waitForSelector(".voicova-auth", { timeout: 15000 }).catch(() => {});
   const authText = await page.$eval(".voicova-auth", (el) => el.textContent).catch(() => null);
