@@ -246,5 +246,12 @@ def fix(req: FixRequest, identity: Identity = Depends(resolve_identity)):
             error_message=str(exc),
             idempotency_key=req.idempotency_key,
         )
+        # Matches the existing DIAG print(..., flush=True) convention
+        # elsewhere in this codebase (see lifetime_cap.py) — that
+        # pattern is confirmed to render in Railway's log viewer;
+        # structlog's JSON line above was not surfacing there for
+        # reasons not yet understood, so this is belt-and-braces until
+        # that's diagnosed separately.
+        print(f"DIAG fix_unhandled_exception: type={type(exc).__name__} message={exc}", flush=True)
         fix_idempotency.release(req.idempotency_key)
         raise
