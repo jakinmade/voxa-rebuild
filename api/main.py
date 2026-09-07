@@ -43,3 +43,19 @@ def health():
     # get misread as this service being down and trigger an
     # unnecessary restart.
     return {"status": "ok"}
+
+
+@app.get("/privacy")
+def privacy_policy():
+    # Chrome Web Store requirement (7 Sept 2026, Web Store submission
+    # prep): any extension handling personal data needs a publicly
+    # accessible privacy policy URL to enter in the Developer
+    # Dashboard. Served from this API rather than voicova.com's
+    # Streamlit app for the same reason the recovery landing page is
+    # (api/extension_handoff.py's own docstring) — a plain, fast,
+    # always-available static page, no Streamlit session/rerun cycle
+    # in the way of something a reviewer or user just needs to read.
+    from fastapi.responses import HTMLResponse
+    from api.privacy_policy import PRIVACY_POLICY_HTML
+    return HTMLResponse(content=PRIVACY_POLICY_HTML, headers={"Cache-Control": "public, max-age=3600"})
+

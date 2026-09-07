@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "VOICOVA Voice Check",
-  "version": "0.1.0",
-  "description": "Checks your LinkedIn drafts against your own voice before you post.",
+  "version": "0.2.0",
+  "description": "Checks your LinkedIn and Gmail drafts against your own voice before you send.",
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
 
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtRTUccZ4QbQ2IkSn/g6wFbLCj5XMgPSjvSnXCBo+sWiRZPvm/GdVW2u1NIEjjEEZT8HkI3J5YCNWNQUxXy1U7KGyHsFalQayHtz/9HMIQlys0E1S4FzyJO9t+Qhvi+YyQuq/WIZuhc+tJF6FzdVcBLsXQ5UDPEAsXk6ww88xNPEzFu+nRBObrJtRLujW/KgjwAG0RKl8flQCk5CMLLyzi5oDGNpgIrnA+I2LR5UG8VxZwPUdt8cpq4f6zmeVdItryEve4nmsiehHMvSlu7auqbQHzaDM4wusLnz0GRpiPU8EzhW8b82YYKYj4rXuy93GtLSMY2oZcymrmPfYMsIoZQIDAQAB",
 
