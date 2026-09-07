@@ -2979,6 +2979,26 @@ def _shell_sidebar(current_screen: int):
                 st.rerun()
             _handle_manage_subscription_request()
 
+        # Chrome extension connect link (7 Sept 2026) — Flow A's
+        # previously-missing frontend piece (see api/routes/
+        # extension_auth.py's link_extension_page docstring). A plain
+        # <a> tag deliberately, not st.components.v1.html: Streamlit's
+        # HTML components render inside a sandboxed iframe with an
+        # opaque origin, which manifest.json's externally_connectable
+        # can never match (the exact bug the recovery page hit first)
+        # — a real top-level navigation via a normal link doesn't have
+        # that problem, since the resulting page's own top-level
+        # origin is the API's own domain, already whitelisted.
+        _extension_link_base = os.environ.get(
+            "VOICOVA_API_BASE_URL", "https://web-production-dbceb0.up.railway.app"
+        )
+        st.markdown(
+            f'<a href="{_extension_link_base}/api/extension/link-page?device_identity={device_id}" '
+            f'target="_blank" class="sidebar-usage-chip" style="display:block;text-align:center;'
+            f'text-decoration:none;margin-top:0.5rem;">Connect Chrome extension \u2192</a>',
+            unsafe_allow_html=True,
+        )
+
 
 def screen_render():
     # Wide-layout cap, scoped to this screen only (set_page_config's
