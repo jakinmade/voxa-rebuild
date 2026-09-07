@@ -10,6 +10,7 @@
 
   "host_permissions": [
     "https://www.linkedin.com/*",
+    "https://mail.google.com/*",
     "https://web-production-dbceb0.up.railway.app/*"
   ],
 
@@ -28,6 +29,11 @@
     {
       "matches": ["https://www.linkedin.com/*"],
       "js": ["shared/state_machine.js", "shared/panel.js", "content_scripts/linkedin.js"],
+      "css": ["shared/panel.css"]
+    },
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["shared/state_machine.js", "shared/panel.js", "content_scripts/gmail.js"],
       "css": ["shared/panel.css"]
     }
   ],

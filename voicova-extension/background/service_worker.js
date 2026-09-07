@@ -77,12 +77,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await VoicovaApiClient.disconnect(); // best-effort; clear locally either way, per below
       await VoicovaStorage.clearAll();
       chrome.alarms.clear(_REFRESH_ALARM);
-      // Broadcast to any open LinkedIn tabs so an already-rendered
-      // panel doesn't keep showing Connected until its next API call
-      // fails (Section 6.3: "a stale-state bug, not just a delayed
-      // one").
-      const tabs = await chrome.tabs.query({ url: "https://www.linkedin.com/*" });
-      for (const tab of tabs) {
+      // Broadcast to any open LinkedIn AND Gmail tabs so an
+      // already-rendered panel on either surface doesn't keep showing
+      // Connected until its next API call fails (Section 6.3: "a
+      // stale-state bug, not just a delayed one"). Two queries rather
+      // than one two-pattern query — chrome.tabs.query's url filter
+      // accepts an array, but keeping them explicit here matches
+      // manifest.json's own two-entry content_scripts list and avoids
+      // a silent gap if a third surface is ever added and only one of
+      // the two lists gets updated.
+      const linkedinTabs = await chrome.tabs.query({ url: "https://www.linkedin.com/*" });
+      const gmailTabs = await chrome.tabs.query({ url: "https://mail.google.com/*" });
+      for (const tab of [...linkedinTabs, ...gmailTabs]) {
         chrome.tabs.sendMessage(tab.id, { type: "TOKEN_INVALIDATED" }).catch(() => {});
       }
       sendResponse({ disconnected: true });

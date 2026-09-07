@@ -10,7 +10,7 @@ test:
 # needed (see tests/js/load_classic_script.js's own comment on why no
 # bundler/dependency was introduced for this).
 test-js:
-	node --test tests/js/test_api_client.js tests/js/test_linkedin_editor.js
+	node --test tests/js/test_api_client.js tests/js/test_linkedin_editor.js tests/js/test_gmail_editor.js
 
 # Install runtime dependencies (optional — needed for production use)
 install-deps:
