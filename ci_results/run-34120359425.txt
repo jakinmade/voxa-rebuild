@@ -1,0 +1,132 @@
+
+== POST /api/extension/link ==
+status: 200
+{'installation_id': '69c37d3e-d103-40df-b90d-91b34e4b0ac9', 'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2OWMzN2QzZS1kMTAzLTQwZGYtYjkwZC05MWIzNGU0YjBhYzkiLCJpYXQiOjE3ODg3ODI5OTcsImV4cCI6MTc4ODc4NjU5N30.ius2u89WNx5J_MAnHkggOkVgljNCqt0z7Cz1coWe6tE', 'refresh_handle': '7rLDZVyVBSkeBuT7WA9wvgXpOT1AZwudEqOkDxfejdc'}
+
+(Skipping /api/fix idempotency tests — pass --with-fix-cost to run them.)
+
+== Refresh: valid handle (expect: 200, new access_token + refresh_handle) ==
+status: 200
+{'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2OWMzN2QzZS1kMTAzLTQwZGYtYjkwZC05MWIzNGU0YjBhYzkiLCJpYXQiOjE3ODg3ODI5OTcsImV4cCI6MTc4ODc4NjU5N30.ius2u89WNx5J_MAnHkggOkVgljNCqt0z7Cz1coWe6tE', 'refresh_handle': '3y3uQ1vZc3Jsrj1KeHoXw8XQOZCfAgXMW3F1SnulnZw'}
+PASS: refresh rotated the handle correctly.
+
+== Refresh: reuse the now-OLD handle (expect: 401 token_revoked or token_expired) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+error_code returned: token_expired
+PASS: reused refresh handle correctly rejected.
+
+== Refresh: garbage handle (expect: 401 token_revoked) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+PASS: garbage refresh handle correctly rejected.
+
+== Register recovery email (authenticated) ==
+status: 200
+{'registered': True}
+
+== Trigger recovery (unauthenticated, real endpoint a lost-device user would hit) ==
+status: 200
+{'request_id': 'dcfe2490-0df0-4efb-9ced-429b463029cb'}
+Recovery triggered. Check the inbox for john@akinmade.co.uk for the email now.
+
+== Polling SendGrid Activity API for delivery confirmation ==
+SendGrid attempt 1: found 1 recent message(s) to john@akinmade.co.uk
+  status=delivered subject='Recover your VOICOVA voice profile' last_event=2026-09-07T11:39:18Z
+PASS: SendGrid confirms a real send to this address (not just a 200 from our own endpoint).
+
+ALL RUN STEPS PASSED.
+
+=== api_smoke_test.py --base-url (live, no --with-fix) ===
+
+== POST /api/extension/link ==
+status: 200
+{
+  "installation_id": "e4b7bd46-7f9d-4d86-935f-3179d81fa6e0",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlNGI3YmQ0Ni03ZjlkLTRkODYtOTM1Zi0zMTc5ZDgxZmE2ZTAiLCJpYXQiOjE3ODg3ODMwMTAsImV4cCI6MTc4ODc4NjYxMH0.LUGuk168PHGUKcUjLfSAiQKF7PtTw4QcIXmmAvS98S8",
+  "refresh_handle": "UjaYoxXDxn9zt08jipKwvJEtOzVo0OaiauXnHRSZchg"
+}
+
+== POST /api/check-draft ==
+status: 200
+{
+  "request_id": "8860eff0-ec5b-469a-b033-b602fa16b9a0",
+  "overall_match": 50,
+  "dimension_scores": {
+    "hedge_density": {
+      "label": "Hedging",
+      "baseline": 1.37,
+      "output": 27.27,
+      "verdict": "MISSED"
+    },
+    "sentence_length_sd": {
+      "label": "Sentence rhythm",
+      "baseline": 7.6,
+      "output": 0.0,
+      "verdict": "MISSED"
+    },
+    "first_person_ratio": {
+      "label": "Ownership (first person)",
+      "baseline": 0.458,
+      "output": 0.0,
+      "verdict": "MISSED"
+    },
+    "directive_ratio": {
+      "label": "Directness",
+      "baseline": 0.0,
+      "output": 0.0,
+      "verdict": "HIT"
+    },
+    "conclusion_opener_ratio": {
+      "label": "Conclusion placement",
+      "baseline": 1.0,
+      "output": 1.0,
+      "verdict": "HIT"
+    },
+    "scaffolding_density": {
+      "label": "Scaffolding",
+      "baseline": 0.0,
+      "output": 0.0,
+      "verdict": "HIT"
+    }
+  },
+  "dimension_explanations": {
+    "hedge_density": "Hedging language differs from your usual baseline.",
+    "sentence_length_sd": "Sentence-length rhythm differs from your usual pattern.",
+    "first_person_ratio": "How much first-person ownership language appears differs from your baseline."
+  },
+  "burrows_delta": {
+    "tier": "Moderate",
+    "delta": 1.684,
+    "biggest_divergences": [
+      {
+        "word": "be",
+        "baseline_freq": 3.3445,
+        "output_freq": 181.8182
+      },
+      {
+        "word": "it",
+        "baseline_freq": 2.2297,
+        "output_freq": 90.9091
+      },
+      {
+        "word": "might",
+        "baseline_freq": 4.4593,
+        "output_freq": 90.9091
+      }
+    ]
+  },
+  "verdict": "borderline",
+  "remaining_allowance": 10,
+  "recommended_action": "fix_available",
+  "scoring_version": "voice-engine-2026-09-05.1",
+  "timestamp": "2026-09-07T12:10:11.435752+00:00"
+}
+
+== POST /api/extension/disconnect ==
+status: 200
+{
+  "disconnected": true
+}
+
+PASS — all steps returned the documented shape.
