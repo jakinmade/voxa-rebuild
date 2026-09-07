@@ -1,0 +1,55 @@
+name: API E2E Tier 1 (manual)
+
+# Manual-only (workflow_dispatch), never on push — this hits the LIVE
+# Chrome-First API with real side effects (a real /api/fix render
+# under with_fix_cost, a real recovery email if recovery_email is
+# set), so it must never fire automatically on a push the way
+# smoke-test.yml does. Runs on a GitHub-hosted runner specifically
+# because it needs real outbound internet to the live Railway domain
+# and (optionally) SendGrid's Activity API — neither of which is
+# reachable from Claude's own sandboxed tool environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_id:
+        description: "A real voice_profiles.device_id to link against"
+        required: true
+        default: "8f225068-b18d-43a8-af8d-b32a433f17a1"
+      with_fix_cost:
+        description: "Also run /api/fix idempotency tests (consumes a real render credit + LLM tokens)"
+        type: boolean
+        default: false
+      recovery_email:
+        description: "Inbox to test the recovery-email flow against (leave blank to skip)"
+        required: false
+        default: ""
+
+jobs:
+  api-e2e-tier1:
+    runs-on: ubuntu-latest
+    env:
+      VOICOVA_API_BASE_URL: https://web-production-dbceb0.up.railway.app
+      VOICOVA_DEVICE_ID: ${{ github.event.inputs.device_id }}
+      RECOVERY_TEST_EMAIL: ${{ github.event.inputs.recovery_email }}
+      # Only used if this secret has been added to the repo — the
+      # script itself handles an unset key by skipping the automated
+      # delivery check rather than failing.
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Run Tier 1 E2E tests
+        run: |
+          if [ "${{ github.event.inputs.with_fix_cost }}" = "true" ]; then
+            python3 dev_tools/api_e2e_tier1.py --with-fix-cost
+          else
+            python3 dev_tools/api_e2e_tier1.py
+          fi
