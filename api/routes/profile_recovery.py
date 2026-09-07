@@ -58,7 +58,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from logging_config import get_logger
 from api.auth import tokens
@@ -217,8 +217,8 @@ def recover_initiate(req: RecoverInitiateRequest):
     return RecoverInitiateResponse(request_id=request_id)
 
 
-@router.get("/api/profile/recover", response_model=LinkResponse)
-def recover_complete(response: Response, token: str = Query(...)):
+@router.get("/api/profile/recover", response_model=None)
+def recover_complete(request: Request, response: Response, token: str = Query(...)):
     # This response body carries live bearer credentials (same as
     # POST /api/extension/link's own LinkResponse) — no-store stops
     # any browser, proxy, or CDN on the path from caching a response
@@ -245,4 +245,102 @@ def recover_complete(response: Response, token: str = Query(...)):
     result = tokens.issue_installation(row["profile_id"])
     if result is None:
         raise HTTPException(status_code=500, detail={"error_code": "engine_error"})
+
+    # Landing page (7 Sept 2026): closes the gap this module's own
+    # docstring originally flagged — "no browser landing page yet to
+    # receive this and hand it to the extension". Reuses the EXACT
+    # message shape (type: "LINK", access_token, refresh_handle,
+    # installation_id) service_worker.js's onMessageExternal listener
+    # already handles for Flow A (Section 3.3.3) — same handoff, same
+    # code path on the extension side, just a second sender. Requires
+    # manifest.json's "key" field (added 7 Sept 2026) so the extension
+    # has a stable ID this page can target even before Chrome Web
+    # Store publishing — see that file's own comment.
+    #
+    # Only served as HTML for an actual browser navigation (the emailed
+    # link); any client that doesn't send an HTML-preferring Accept
+    # header gets the original LinkResponse JSON unchanged, so
+    # api_smoke_test.py and api_e2e_tier1.py keep working exactly as
+    # before.
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        return _recovery_landing_page_html(result)
+
     return LinkResponse(**result)
+
+
+_EXTENSION_ID_ENV = "VOICOVA_EXTENSION_ID"
+# Deterministic ID derived from the public key now pinned in
+# voicova-extension/manifest.json's "key" field (7 Sept 2026) — stable
+# whether loaded unpacked or, eventually, published to the Chrome Web
+# Store with that same manifest. Overridable via env var so a future
+# real Web Store ID (if Google ever assigns a different one at
+# publish time) can be set without a code change.
+_DEFAULT_EXTENSION_ID = "dkgmcpdgfgcoeneodjhkdgmdmjmghbog"
+
+
+def _recovery_landing_page_html(link_result: dict) -> "HTMLResponse":
+    from fastapi.responses import HTMLResponse
+    import json as _json
+
+    extension_id = os.environ.get(_EXTENSION_ID_ENV, _DEFAULT_EXTENSION_ID)
+    payload = _json.dumps({
+        "type": "LINK",
+        "access_token": link_result["access_token"],
+        "refresh_handle": link_result["refresh_handle"],
+        "installation_id": link_result["installation_id"],
+    })
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Recovering your VOICOVA profile</title>
+<style>
+  body {{ font-family: -apple-system, Arial, sans-serif; max-width: 480px; margin: 4rem auto; padding: 0 1.5rem; color: #111827; text-align: center; }}
+  .status {{ font-size: 1.1rem; margin-top: 1.5rem; }}
+  .fallback {{ display: none; margin-top: 2rem; padding: 1rem; background: #f3f4f6; border-radius: 8px; font-size: 0.85rem; word-break: break-all; text-align: left; }}
+  .fallback.show {{ display: block; }}
+</style>
+</head>
+<body>
+  <h2>VOICOVA</h2>
+  <p class="status" id="status">Reconnecting your voice profile…</p>
+  <div class="fallback" id="fallback">
+    <p>Couldn't reach the extension automatically. If it's installed, open the VOICOVA popup and it should reconnect shortly — or contact support with this reference:</p>
+    <code id="installation-id"></code>
+  </div>
+  <script>
+    const EXTENSION_ID = "{extension_id}";
+    const payload = {payload};
+    document.getElementById("installation-id").textContent = payload.installation_id;
+
+    function showFallback(message) {{
+      document.getElementById("status").textContent = message;
+      document.getElementById("fallback").classList.add("show");
+    }}
+
+    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {{
+      showFallback("Open this link in Chrome with the VOICOVA extension installed.");
+    }} else {{
+      chrome.runtime.sendMessage(EXTENSION_ID, payload, (response) => {{
+        if (chrome.runtime.lastError || !response || !response.linked) {{
+          showFallback("Almost there — reconnecting is taking longer than expected.");
+          return;
+        }}
+        document.getElementById("status").textContent = "Reconnected. You can close this tab and go back to LinkedIn.";
+      }});
+      // externally_connectable calls with no listening extension (not
+      // installed, or a mismatched ID) fail silently with no callback
+      // at all in some Chrome versions — a timeout fallback covers
+      // that case, not just an explicit lastError.
+      setTimeout(() => {{
+        if (document.getElementById("status").textContent.includes("Reconnecting")) {{
+          showFallback("Couldn't reach the extension automatically.");
+        }}
+      }}, 4000);
+    }}
+  </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
