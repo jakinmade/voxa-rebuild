@@ -1,0 +1,35 @@
+
+== POST /api/extension/link ==
+status: 200
+{'installation_id': '33584d50-d90e-4617-b7e6-bb96c3976ba3', 'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMzU4NGQ1MC1kOTBlLTQ2MTctYjdlNi1iYjk2YzM5NzZiYTMiLCJpYXQiOjE3ODg3NzcxMzksImV4cCI6MTc4ODc4MDczOX0.I1UNrwJgCMxDoFZJYaYNTsqwaEvdV7ZIZoGtq_4yjG0', 'refresh_handle': '-dikQUY7l0Y7rVqtIyyQg5WcOhEdw_wse14O5z58iq4'}
+
+== Idempotency: same key twice, sequentially (expect: identical response, one credit) ==
+status: 200
+{'request_id': 'f4099ef0-64e5-4517-8ece-431238f054bc', 'corrected_text': 'Further review is advisable.', 'what_changed': ['hedging 100%', 'sentence rhythm 100%'], 'post_fix_predicted_score': 50, 'content_lock_result': {'pass': True, 'reasons': []}, 'render_consumed': True, 'scoring_version': 'voice-engine-2026-09-05.1', 'timestamp': '2026-09-07T10:32:27.714160+00:00'}
+status: 200
+{'request_id': 'f4099ef0-64e5-4517-8ece-431238f054bc', 'corrected_text': 'Further review is advisable.', 'what_changed': ['hedging 100%', 'sentence rhythm 100%'], 'post_fix_predicted_score': 50, 'content_lock_result': {'pass': True, 'reasons': []}, 'render_consumed': True, 'scoring_version': 'voice-engine-2026-09-05.1', 'timestamp': '2026-09-07T10:32:27.714160+00:00'}
+PASS: sequential replay returned the exact same response, no second render.
+
+== Idempotency: same key fired concurrently (expect: one 200, one 409 fix_already_in_progress) ==
+race result codes: [200, 409]
+PASS: exactly one call was rejected as in-progress, as designed.
+
+== Refresh: valid handle (expect: 200, new access_token + refresh_handle) ==
+status: 200
+{'access_token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzMzU4NGQ1MC1kOTBlLTQ2MTctYjdlNi1iYjk2YzM5NzZiYTMiLCJpYXQiOjE3ODg3NzcxNTUsImV4cCI6MTc4ODc4MDc1NX0.rOnHAMgGDQriHzOvAfAsrK4c35VoyJA-Pnx0pqraY60', 'refresh_handle': 'BVECIBmx1hGhfnYiehpELrFC5GJiOhiqRdDaLL1d8fA'}
+PASS: refresh rotated the handle correctly.
+
+== Refresh: reuse the now-OLD handle (expect: 401 token_revoked or token_expired) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+error_code returned: token_expired
+PASS: reused refresh handle correctly rejected.
+
+== Refresh: garbage handle (expect: 401 token_revoked) ==
+status: 401
+{'detail': {'error_code': 'token_expired'}}
+PASS: garbage refresh handle correctly rejected.
+
+(Skipping recovery-email test — set RECOVERY_TEST_EMAIL to run it.)
+
+ALL RUN STEPS PASSED.
