@@ -25,6 +25,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: write
+
 jobs:
   api-e2e-tier1:
     runs-on: ubuntu-latest
