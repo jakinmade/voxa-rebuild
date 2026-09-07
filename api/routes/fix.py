@@ -233,6 +233,18 @@ def fix(req: FixRequest, identity: Identity = Depends(resolve_identity)):
         )
         fix_idempotency.complete(req.idempotency_key, response.model_dump())
         return response
-    except Exception:
+    except Exception as exc:
+        # Diagnostic addition (7 Sept 2026): the bare `except Exception:
+        # raise` here previously left the real cause visible only in a
+        # multi-line traceback — which, on this service (no Sentry
+        # wired in yet, see api/main.py), doesn't reliably render in
+        # every log viewer. One single-line, always-parseable log
+        # entry first, so the actual failure is never invisible.
+        log.error(
+            "fix_unhandled_exception",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            idempotency_key=req.idempotency_key,
+        )
         fix_idempotency.release(req.idempotency_key)
         raise
