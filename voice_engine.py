@@ -659,22 +659,17 @@ def compute_baseline_metrics(text: str) -> dict:
     Extracts four numerical constraint metrics from a text sample.
     Used to build the baseline fingerprint for v10.1 restoration targeting.
 
-    NOTE — a second, independent implementation of this same function
-    name and shape exists in packages/voxa-api/src/voxa_api/recalibrate.py.
-    That copy is not a duplicate to be merged; its own docstring explains
-    it's a near-verbatim port of the older Streamlit app.py pipeline,
-    kept deliberately separate because it powers full-draft recalibration
-    rather than the five-dimension checker this file supports. The two
-    are NOT expected to return identical numbers on the same input —
-    confirmed divergences: this version's hedge detection uses the full
-    _HEDGE_PATTERN (Hyland clause-level hedges like "curious whether",
-    "it seems", "kind of" — see that pattern's own comment for why),
-    recalibrate.py's is a single-word-only regex; this version's sentence
-    splitting goes through _extract_sentences (abbreviation-guarded via
-    _protect_abbreviations), recalibrate.py's is a raw re.split with no
-    such guard. See tests/unit/test_baseline_metrics_divergence.py for a
-    pinned example of the gap. If either implementation changes, check
-    whether the divergence this documents is still accurate.
+    NOTE — an earlier version of this docstring referenced a second,
+    independent implementation at packages/voxa-api/src/voxa_api/
+    recalibrate.py, kept deliberately separate for full-draft
+    recalibration. Confirmed 8 Sept 2026: that path does not exist
+    anywhere in the current repo (packages/ only holds voxa-profile,
+    voxa-calibration, voxa-governance, voxa-humanisation, voxa-core —
+    no voxa-api), and the test file that claim pointed to
+    (tests/unit/test_baseline_metrics_divergence.py) doesn't exist
+    either. Stale documentation, not a real second implementation —
+    this function is the only place first_person_ratio etc. are
+    computed, for both calibration and every render check.
 
     Returns:
         hedge_density     — hedge words per 100 words
@@ -717,8 +712,49 @@ def compute_baseline_metrics(text: str) -> dict:
     sentence_length_sd = round(math.sqrt(variance), 2)
 
     # 3. First-person ratio
+    #
+    # Extended 8 Sept 2026 to include we/our/ours/ourselves — previously
+    # entirely invisible here, a real gap for VOICOVA's actual target
+    # market (professionals/ghostwriters), where a founder or team
+    # member routinely writes "we shipped this" or "our approach" as
+    # their own authentic voice, not someone else's.
+    #
+    # Confirmed via linguistics research before this change (stylometry/
+    # authorial-stance literature — Biber & Finegan 1989, Hyland 2005,
+    # 2012, Kuo 1999): "we/us/our/ours/ourselves" ARE grammatically
+    # first-person (Scribbr et al., uncontested), but the SAME
+    # literature is equally clear that plural "we" is also routinely
+    # used specifically to DIFFUSE personal accountability — the
+    # "editorial we"/"royal we", corporate-distancing voice (Microsoft's
+    # own style guide calls this out directly), and reliably
+    # distinguishing that from genuine exclusive-we self-reference
+    # requires more than surface pattern matching; even the cited
+    # corpus studies did this by hand, not by regex. Deliberately NOT
+    # attempted here — a shallow heuristic trying to classify exclusive
+    # vs. inclusive vs. distancing "we" would misfire in ways worse than
+    # the plain gap this closes, and the hedge_density dimension
+    # already separately catches the hedging FUNCTION (might/could/
+    # perhaps etc.) wherever it co-occurs with "we", which is the right
+    # division of labour between these two independent dimensions.
+    #
+    # Structurally mirrors the existing "I" word classes exactly (add
+    # nothing new): subject ("we "), a generic apostrophe catch-all
+    # ("we'", covering we're/we've/we'd/we'll the same way "I'" already
+    # covers I'm/I've/I'd/I'll), possessive ("our "), possessive
+    # pronoun ("ours"), reflexive ("ourselves") — including the same
+    # asymmetry already present for "I" (object case "me" was never
+    # matched either; "us" is deliberately excluded here for the same
+    # reason, not an oversight).
+    #
+    # \b anchoring before each alternative is unaffected by this
+    # addition — "our "/"ours"/"ourselves" cannot false-positive on
+    # "hour", "your", "flavour", "colour" etc., since \b requires a
+    # boundary immediately before the match and none of those words
+    # have one at that internal position (verified against real
+    # examples before shipping this).
     first_person = re.compile(
-        r"\b(I |I'|I'm|I've|I'd|I'll|my |mine\b|myself\b)", re.I
+        r"\b(I |I'|I'm|I've|I'd|I'll|my |mine\b|myself\b|"
+        r"we |we'|our |ours\b|ourselves\b)", re.I
     )
     fp_sents = sum(1 for s in sentences if first_person.search(s))
     first_person_ratio = round(fp_sents / total_sents, 3)

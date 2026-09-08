@@ -405,6 +405,17 @@ def test_mixed_case_only_one_genuine_sentence_still_fails():
     assert df.ownership_miss_is_content_driven(render, original) is False
 
 
+def test_not_content_driven_when_fabricated_marker_is_we_not_i():
+    """'we' analogue of test_not_content_driven_when_a_sentence_has_no_
+    original_first_person above: a fabricated ownership sentence must
+    be caught the same way whether it's phrased with 'I' or 'we' — the
+    8 Sept 2026 fix's whole point was to stop 'we' from being a blind
+    spot in this exact safety check."""
+    original = "Nobody finds it through monitoring."
+    render = "We find nobody catches it through monitoring."
+    assert df.ownership_miss_is_content_driven(render, original) is False
+
+
 # ------------------------------------------------------------------
 # restore_fabricated_ownership_sentences — the general, alignment-
 # based fix that supersedes pattern-matching specific verbs for this
@@ -472,6 +483,38 @@ def test_does_not_touch_sentences_with_no_first_person_marker():
     fixed, changed = df.restore_fabricated_ownership_sentences(text, "Also neutral.")
     assert not changed
     assert fixed == text
+
+
+def test_catches_fabricated_we_ownership_same_as_fabricated_i():
+    """Regression guard for the 8 Sept 2026 we-vs-I fix: a render
+    fabricating ownership via 'We find...' instead of 'I find...' must
+    be caught by this same anti-fabrication safety net, not slip past
+    it just because the fabricated marker happens to be plural. Direct
+    'we' analogue of test_catches_the_real_session_failure_case above."""
+    text = "We find nobody catches this in practice."
+    original = "Nobody catches this in practice."
+    fixed, changed = df.restore_fabricated_ownership_sentences(text, original)
+    assert changed
+    assert fixed == original
+
+
+def test_does_not_touch_genuine_preserved_we_ownership():
+    """'we' analogue of test_does_not_touch_genuine_preserved_ownership
+    above — a render sentence using 'we' must not be replaced when the
+    aligned original ALSO already carries a first-person marker
+    (singular or plural), regardless of exact wording difference."""
+    cases = [
+        ("We think you have found the gap rather than a subdivision of one.",
+         "We think you have found the gap rather than a subdivision of one."),
+        ("Where we would push back slightly, or at least add friction.",
+         "Where I would push back slightly, or at least add friction."),
+        ("So we suspect qualification is not a gate but a gate plus an expiry.",
+         "So I suspect qualification is not a gate but a gate plus an expiry."),
+    ]
+    for render, original in cases:
+        fixed, changed = df.restore_fabricated_ownership_sentences(render, original)
+        assert not changed, f"false positive on genuine we-ownership: {render}"
+        assert fixed == render
 
 
 def test_no_conversion_cap_unlike_the_pattern_based_fixer():

@@ -636,7 +636,34 @@ def _fix_first_person_over_ratio(text: str, target: float, current: float,
     return _apply_across_paragraphs(text, _fix_one, max_conversions=_MAX_CONVERSIONS_PER_PASS)
 
 
-_FIRST_PERSON_MARKER = re.compile(r"\b(i|my|me|mine|myself)\b", re.I)
+# Extended 8 Sept 2026, additive only: "we/our/ours/ourselves" now join
+# the same alternation, closing the same we-vs-I gap fixed the same day
+# in voice_engine.py's compute_baseline_metrics (see that fix's own
+# comment for the full rationale — grammatically first-person per the
+# stylometry/authorial-stance literature, deliberately not attempting
+# exclusive-vs-inclusive-we classification). Without this, a render
+# fabricating ownership via "We find that..." instead of "I find
+# that..." would score as first-person under voice_engine.py's fixed
+# detector but slip straight past this module's own anti-fabrication
+# checks (ownership_miss_is_content_driven,
+# restore_fabricated_ownership_sentences below) — exactly the kind of
+# hand-copied-word-list drift this codebase was already burned by once
+# for hedge detection (see _HEDGE_PATTERN's own history/docstring).
+#
+# Deliberately NOT unified into one shared constant with voice_engine's
+# pattern the way _HEDGE_PATTERN was: this pattern already includes
+# bare object-case "me" (voice_engine's never has), a pre-existing
+# divergence from before this fix, not something newly introduced
+# here. Importing voice_engine's pattern wholesale would silently
+# remove that existing "me" coverage from this module's live
+# anti-fabrication safety net with no evidence that narrowing is safe
+# — out of scope for this fix; left as a known, pre-existing
+# divergence for a dedicated look later, same as this comment now
+# documents it. This edit only ADDS the we-family alternatives,
+# touching nothing else about the existing pattern.
+_FIRST_PERSON_MARKER = re.compile(
+    r"\b(i|my|me|mine|myself|we|our|ours|ourselves)\b", re.I
+)
 
 
 def ownership_miss_is_content_driven(render_text: str, original_input_text: str) -> bool:
