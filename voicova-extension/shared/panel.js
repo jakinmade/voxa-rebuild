@@ -163,13 +163,15 @@ function mount(container, { onCheck, onFix, onAcceptFix }) {
       const el = document.createElement("div");
       el.className = "voicova-panel voicova-credits";
       const p = document.createElement("p");
-      p.textContent = "You've used all your free renders.";
+      p.textContent = "You've used all 15 free renders.";
+      const p2 = document.createElement("p");
+      p2.textContent = "Voice Check still works, free, whenever you want it — Fix-it needs a plan.";
       const link = document.createElement("a");
-      link.href = "https://voicova.com/upgrade";
+      link.href = "https://voicova.com/?view=pricing";
       link.target = "_blank";
       link.rel = "noopener";
-      link.textContent = "Upgrade to Solo";
-      el.append(p, link);
+      link.textContent = "See plans — £6.99/mo or £49/yr";
+      el.append(p, p2, link);
       return el;
     },
 

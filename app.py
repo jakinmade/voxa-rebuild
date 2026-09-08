@@ -1233,6 +1233,18 @@ if st.query_params.get("payment") == "success":
 elif st.query_params.get("payment") == "cancelled":
     st.query_params.clear()
 
+# Deep link to the pricing screen (view=pricing) - same top-level
+# query-param pattern as the payment/restore handlers above. Added
+# because the extension's credits-exhausted panel previously linked
+# to a nonexistent /upgrade path with no matching handler here; this
+# gives it (and anything else) a real URL to land on. One screen
+# pass, then cleared, so a refresh doesn't re-trigger the redirect
+# and trap the user on screen 7 if they navigate elsewhere.
+if st.query_params.get("view") == "pricing":
+    go_to(7)
+    st.query_params.clear()
+    st.rerun()
+
 # Restore-by-magic-link handling - same top-level query-param pattern
 # as the payment=success handler above, one screen pass, then cleared
 # so a page refresh doesn't re-consume an already-used token. Binds
