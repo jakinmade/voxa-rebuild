@@ -82,5 +82,12 @@ def get_profile_bundle(profile_id: str) -> dict | None:
         "correction_evidence": row.get("correction_evidence"),
         "flagged_dimensions": row.get("flagged_dimensions"),
         "voice_profile_summary": row.get("voice_profile_summary"),
+        # 8 Sept 2026 — see VOICOVA_Reference_Statement_Design.docx.
+        # row.get(...) with no default (None, not "") matches every
+        # other optional field above — _build_voice_dna's own default
+        # ("") only applies when a caller omits the kwarg entirely, so
+        # fix.py must coalesce None -> "" itself, same as it would for
+        # any of these other Optional fields if it needed to.
+        "reference_statement": row.get("reference_statement"),
         "updated_at": row.get("updated_at"),
     }

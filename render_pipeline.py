@@ -275,6 +275,7 @@ def run_voice_render(
     voice_profile_summary: str | None = None,
     starter_baseline: dict | None = None,
     baseline_fingerprints_by_format: dict | None = None,
+    reference_statement: str = "",
     render_mode: str = "preserve",
     render_context: str = "",
     platform_format: str | None = None,
@@ -297,6 +298,15 @@ def run_voice_render(
     _run_render's own docstring (build_correction_prompt's mode
     parameter; opt-in social/email line-editing; whether this is the
     one-time included refinement of an already-rendered original).
+
+    reference_statement: added 8 Sept 2026 — see
+    VOICOVA_Reference_Statement_Design.docx. Passed straight through
+    to _build_voice_dna's own parameter of the same name; NEVER
+    included in fingerprint_corpus below or any other input to
+    compute_baseline_metrics — see _build_voice_dna's own docstring
+    for why that separation matters. Default "" (every caller that
+    doesn't pass it, and every profile that predates this feature)
+    reproduces the prior anchor-selection behaviour exactly.
     """
     if not api_key:
         return RenderResult(success=False, error="API key missing.")
@@ -361,7 +371,10 @@ def run_voice_render(
         if generated_summary:
             voice_profile_summary = generated_summary
 
-    voice_dna = _build_voice_dna(observations, fingerprint_corpus or raw_text, baseline, ai_score, current_input_text=input_text)
+    voice_dna = _build_voice_dna(
+        observations, fingerprint_corpus or raw_text, baseline, ai_score,
+        current_input_text=input_text, reference_statement=reference_statement,
+    )
     mode_instruction = apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
 

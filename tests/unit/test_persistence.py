@@ -269,6 +269,39 @@ def test_restore_omits_flagged_dimensions_key_when_absent():
     assert "flagged_dimensions" not in st.session_state
 
 
+def test_restore_populates_reference_statement_when_present():
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+        "reference_statement": "We shipped the new pricing page this week and churn already dropped.",
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert st.session_state["reference_statement"] == "We shipped the new pricing page this week and churn already dropped."
+
+
+def test_restore_omits_reference_statement_key_when_absent():
+    """A row saved before this column existed won't have it — restore
+    must not set the key at all (not set it to None), matching the
+    same pattern already used for flagged_dimensions above. This is
+    the explicit backward-compatibility guarantee from
+    VOICOVA_Reference_Statement_Design.docx \u00a76: _build_voice_dna
+    must fall back to algorithmic-only anchors, unaffected."""
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert "reference_statement" not in st.session_state
+
+
 def test_restore_does_not_overwrite_an_already_populated_session():
     """Guards against clobbering a baseline built earlier this same
     session (e.g. a mid-flow rerun) with a stale saved profile."""
@@ -371,6 +404,35 @@ def test_save_includes_none_for_flagged_dimensions_when_none_flagged():
 
     payload = mock_client.table.return_value.upsert.call_args[0][0]
     assert payload["flagged_dimensions"] is None
+
+
+def test_save_includes_reference_statement_when_present():
+    st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
+    st.session_state["_device_id"] = "device-1"
+    st.session_state["reference_statement"] = "We shipped the new pricing page this week and churn already dropped."
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        mock_client = _mock_supabase_client()
+        with patch("persistence.get_supabase_client", return_value=mock_client):
+            persistence.save_profile_if_available()
+
+    payload = mock_client.table.return_value.upsert.call_args[0][0]
+    assert payload["reference_statement"] == "We shipped the new pricing page this week and churn already dropped."
+
+
+def test_save_includes_none_for_reference_statement_when_not_yet_set():
+    """Same explicit-key discipline as flagged_dimensions — the key is
+    always present in the payload (None when never set), not silently
+    omitted, so a profile that already had one is never accidentally
+    left un-updated on a later, unrelated save."""
+    st.session_state["baseline_fingerprint"] = {"hedge_density": 1.0}
+    st.session_state["_device_id"] = "device-1"
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        mock_client = _mock_supabase_client()
+        with patch("persistence.get_supabase_client", return_value=mock_client):
+            persistence.save_profile_if_available()
+
+    payload = mock_client.table.return_value.upsert.call_args[0][0]
+    assert payload["reference_statement"] is None
 
 
 def test_save_failure_does_not_raise():

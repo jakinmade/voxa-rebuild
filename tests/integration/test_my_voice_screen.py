@@ -190,3 +190,73 @@ def test_my_voice_shows_real_per_dimension_confidence_spread_with_strong_profile
     assert "High" in body
     assert "Medium" in body
     assert "Low" in body
+
+
+# ------------------------------------------------------------------
+# Reference statement panel (8 Sept 2026) — VOICOVA_Reference_
+# Statement_Design.docx. Deliberately on this screen, not onboarding
+# — see that doc's own \u00a73.1 for why.
+# ------------------------------------------------------------------
+
+def test_my_voice_shows_reference_statement_prompt_when_unset():
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+    expander_labels = [e.label for e in at.expander]
+    assert "Give Fix-it one real example to aim for" in expander_labels
+
+
+def test_my_voice_shows_update_label_and_current_value_when_already_set():
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.session_state["reference_statement"] = "We closed our biggest quarter yet as a whole team."
+    at.run()
+    assert not at.exception
+    expander_labels = [e.label for e in at.expander]
+    assert "Update your reference statement" in expander_labels
+    assert "Give Fix-it one real example to aim for" not in expander_labels
+    body = " ".join(m.value for m in at.markdown)
+    assert "We closed our biggest quarter yet as a whole team." in body
+
+
+def test_saving_a_valid_reference_statement_sets_session_state():
+    """paste_guard is a custom JS component AppTest can't drive
+    directly (same limitation test_streamlit_app_flow.py documents for
+    Screen 3) — simulate a typed value by setting
+    reference_statement_draft in session_state before at.run(), the
+    same workaround used there for sample2_completions."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+
+    at.session_state["reference_statement_draft"] = (
+        "We closed our biggest quarter yet and the whole team pulled together to make it happen."
+    )
+    at.run()
+    at.button(key="reference_statement_submit").click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["reference_statement"] == (
+        "We closed our biggest quarter yet and the whole team pulled together to make it happen."
+    )
+    # Success message must survive the rerun the submit handler triggers.
+    body = " ".join(m.value for m in at.markdown)
+    assert "Saved" in body
+
+
+def test_saving_a_too_short_reference_statement_shows_an_error_and_does_not_save():
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+
+    at.session_state["reference_statement_draft"] = "Too short."
+    at.run()
+    at.button(key="reference_statement_submit").click()
+    at.run()
+    assert not at.exception
+    assert "reference_statement" not in at.session_state or not at.session_state["reference_statement"]
+    body = " ".join(m.value for m in at.markdown)
+    assert "at least" in body

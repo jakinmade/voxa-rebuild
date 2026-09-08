@@ -1882,6 +1882,81 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool 
                 render_alert("A bit more, at least a sentence or two.", "error")
 
 
+# Minimum word floor for a reference statement — set higher than
+# SAMPLE2_REQUIRED_MIN_WORDS (10, for Screen 3's starters) because a
+# useful reference statement needs enough length to actually supply
+# 2-3 usable anchor sentences downstream (5-20 words each, per
+# _build_voice_dna's own usable-sentence filter) — a bare 10-word
+# floor could pass with a single short sentence that supplies nothing.
+REFERENCE_STATEMENT_MIN_WORDS = 15
+
+
+def _reference_statement_panel():
+    """VOICOVA_Reference_Statement_Design.docx — "give Fix-it one real
+    example to aim for." Deliberately placed on the standing Voice
+    dashboard (screen_my_voice), not inside onboarding: \u00a73.1 of that
+    doc explains why — onboarding-funnel research says asking for more
+    effort BEFORE a user has seen product value is the costliest place
+    to add a step, even an optional one. This screen is only ever
+    reached voluntarily, well after a person is already invested, so
+    it carries none of that risk — a plain optional expander is
+    enough; no dismiss-forever flag or extra schema is needed the way
+    a blocking onboarding step would need one.
+
+    Deliberately does NOT reuse _add_writing_sample_to_fingerprint
+    (above) — that function's whole job is merging a sample into the
+    SCORED baseline via compute_baseline_metrics, which is exactly
+    what this text must never touch (\u00a76 of the design doc). This
+    panel only ever sets st.session_state.reference_statement and
+    calls save_profile_if_available() directly.
+    """
+    existing = st.session_state.get("reference_statement", "")
+    label = "Update your reference statement" if existing else "Give Fix-it one real example to aim for"
+
+    with st.expander(label, expanded=False):
+        st.markdown(
+            '<div class="sub" style="margin-bottom:0.8rem;">'
+            "Think of a real professional opinion, lesson, or observation you've had "
+            "recently \u2014 something you'd genuinely consider posting. Write it exactly "
+            "as you'd post it: 2\u20134 sentences, first draft, no editing.<br><br>"
+            "Don't worry about polish \u2014 that's what this calibrates against, not "
+            "what we're grading."
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        if existing:
+            st.markdown(
+                f'<div class="voice-check-evidence" style="margin-bottom:0.8rem;">'
+                f'Current: "{_safe_html(existing)}"</div>',
+                unsafe_allow_html=True,
+            )
+        # Explicit read-modify-write through its own session_state key,
+        # same pattern screen_sample2 uses for its paste_guard fields
+        # (completions[idx] = paste_guard(value=completions[idx], ...))
+        # rather than a hardcoded value="" — AppTest can't drive this
+        # custom JS component directly (see test_streamlit_app_flow.py's
+        # own comment on the same limitation), so tests simulate a
+        # typed value by setting reference_statement_draft in
+        # session_state before at.run(), which only works if the value
+        # actually round-trips through here rather than being reset to
+        # "" on every call.
+        draft = st.session_state.get("reference_statement_draft", "")
+        draft = paste_guard(value=draft, key="reference_statement_input")
+        st.session_state.reference_statement_draft = draft
+        if st.button("Save", key="reference_statement_submit"):
+            if draft and len(draft.split()) >= REFERENCE_STATEMENT_MIN_WORDS:
+                st.session_state.reference_statement = draft
+                st.session_state.reference_statement_draft = ""
+                save_profile_if_available()
+                st.session_state.reference_statement_success_message = "Saved. Fix-it will use this as a priority example."
+                st.rerun()
+            else:
+                render_alert(
+                    f"A bit more \u2014 at least {REFERENCE_STATEMENT_MIN_WORDS} words, "
+                    "2-4 real sentences.", "error",
+                )
+
+
 # ============================================================
 # Screen 1 — Paste something you've written
 # ============================================================
@@ -2079,6 +2154,20 @@ def _show_deepen_success_if_pending():
     if st.session_state.get("deepen_success_message"):
         render_alert(st.session_state.deepen_success_message, "success")
         st.session_state.deepen_success_message = None
+
+
+def _show_reference_statement_success_if_pending():
+    """Same pattern and same reason as _show_deepen_success_if_pending
+    above (that function's own docstring has the full explanation of
+    why this can't just be a bare st.success() inside the panel's
+    button handler) — reference_statement_success_message set by
+    _reference_statement_panel's submit handler must survive the
+    st.rerun() it triggers immediately after. Only screen_my_voice can
+    host that panel today, so only that screen needs to call this —
+    unlike the deepen panel, which appears on several screens."""
+    if st.session_state.get("reference_statement_success_message"):
+        render_alert(st.session_state.reference_statement_success_message, "success")
+        st.session_state.reference_statement_success_message = None
 
 
 def screen_reveal():
@@ -2459,6 +2548,7 @@ def _run_render(
     voice_profile_summary = st.session_state.get("voice_profile_summary")
     starter_baseline = st.session_state.get("starter_baseline")
     baseline_fingerprints_by_format = st.session_state.get("baseline_fingerprints_by_format")
+    reference_statement = st.session_state.get("reference_statement", "")
 
     _spinner_text = {
         "writing": "Writing as you...",
@@ -2490,6 +2580,7 @@ def _run_render(
             voice_profile_summary=voice_profile_summary,
             starter_baseline=starter_baseline,
             baseline_fingerprints_by_format=baseline_fingerprints_by_format,
+            reference_statement=reference_statement,
             render_mode=render_mode,
             render_context=render_context,
             platform_format=platform_format,
@@ -4298,6 +4389,8 @@ def screen_my_voice():
     if st.session_state.get("baseline_fingerprint"):
         _shell_sidebar(5)
 
+    _show_reference_statement_success_if_pending()
+
     st.markdown('<div class="headline">Your voice.</div>', unsafe_allow_html=True)
 
     confidence = st.session_state.get("confidence")
@@ -4347,6 +4440,9 @@ def screen_my_voice():
     _render_dimension_confidence_table(
         observations, heading="Stability across your last {sample_count} samples:"
     )
+
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    _reference_statement_panel()
 
     # Shareable card (27 Aug 2026) — a low-effort, high-reach feature:
     # nothing in the product before this was shareable, and the data

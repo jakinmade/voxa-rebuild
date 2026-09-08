@@ -1,0 +1,37 @@
+-- Migration: reference statement (8 Sept 2026).
+--
+-- WHY: VOICOVA_Reference_Statement_Design.docx (8 Sept 2026). Fix-it's
+-- rewrite prompt already shows the model concrete anchor sentences
+-- (_pick_anchor_sentences, voice_engine.py) drawn from the onboarding
+-- calibration corpus (raw_text + sample2_completions) -- but that
+-- corpus is built for diagnostic REGISTER CONTRAST (a professional/
+-- defensive sample vs. an unfiltered/emotional one), never for
+-- matching the actual output register Fix-it needs to reproduce
+-- (professional LinkedIn/business writing). This column stores one
+-- short, deliberately-elicited, register-matched exemplar -- "give
+-- Fix-it one real example to aim for" -- surfaced once, dismissibly,
+-- on the standing Voice dashboard (screen_my_voice), not inside the
+-- onboarding sequence itself (see the design doc's own \u00a73.1 on
+-- why: funnel research says asking for more effort BEFORE a user has
+-- seen product value is the costliest place to add a step, even an
+-- optional one).
+--
+-- Deliberately NEVER read by compute_baseline_metrics or included in
+-- fingerprint_corpus (render_pipeline.py) -- it feeds ONLY the
+-- anchor-sentence pool in prompts.py's _build_voice_dna, kept
+-- completely separate from the scored diagnostic baseline. Mixing the
+-- two would reintroduce exactly the register-contamination risk PR
+-- #52 (7 Sept 2026) already fixed.
+--
+-- Same additive pattern as every prior column added to this table
+-- (correction_evidence, flagged_dimensions, ...): a new, nullable
+-- column, every existing row and every existing read of the other
+-- columns on this table completely unaffected. NULL = feature not yet
+-- used by this profile, the correct default state, not an error.
+--
+-- Apply once via the Supabase SQL editor (or Supabase MCP
+-- apply_migration) against the live project. Idempotent -- safe to
+-- re-run (ADD COLUMN IF NOT EXISTS).
+
+alter table public.voice_profiles
+    add column if not exists reference_statement text;

@@ -24,6 +24,8 @@ from voice_engine import (
     _extract_function_patterns,
     _format_function_patterns,
     _classify_register,
+    _extract_sentences,
+    _ANCHOR_SENTENCE_CAP,
     compute_baseline_metrics,
     uses_contractions,
     _PLAUSIBILITY_SHIELD_DROP,
@@ -185,7 +187,7 @@ def apply_intent_mode(text: str, mode: str) -> str:
     }
     return mode_prompts.get(mode, mode_prompts["GET_IT_DONE"])
 def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | None = None, ai_score: float = 0.0,
-                      current_input_text: str = "") -> str:
+                      current_input_text: str = "", reference_statement: str = "") -> str:
     """
     Builds a rich, structured voice DNA string for the render prompt.
     Goes far beyond observation headlines — extracts structural metrics
@@ -209,6 +211,22 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     onboarding — same principle as the keep_contractions/keep_dashes
     fix in app.py, applied here to the pre-generation instruction
     layer rather than the post-generation cleanup layer.
+
+    reference_statement: added 8 Sept 2026 — see
+    VOICOVA_Reference_Statement_Design.docx. One short, deliberately-
+    elicited, register-matched sample ("something you'd genuinely
+    consider posting"), stored separately from raw_text/
+    sample2_completions and NEVER passed into compute_baseline_metrics
+    anywhere in this codebase — it exists purely to seed this
+    function's own anchor-sentence selection with register-matched
+    material, not to feed the scored diagnostic baseline. When
+    present, its usable sentences take priority placement in the
+    ANCHOR SENTENCES block ahead of _pick_anchor_sentences' picks from
+    the general (register-CONTRAST, not register-matched) corpus —
+    see the anchor-sentence block below for the actual precedence
+    logic. Empty string (the default, and every profile that predates
+    this feature or skipped the prompt) falls back to exactly the
+    prior algorithmic-only behaviour.
     """
     if not observations:
         return "No fingerprint available. Apply a plain, direct, compressed register. UK English. Short sentences."
@@ -330,9 +348,30 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
 
     # Anchor sentences — most distinctive sentences from their writing
     # Not the first three. The ones that sound most like them.
+    #
+    # Priority ordering added 8 Sept 2026 (VOICOVA_Reference_Statement_
+    # Design.docx \u00a75.1): reference_statement's usable sentences go
+    # FIRST, ahead of _pick_anchor_sentences' algorithmic picks from
+    # the general corpus, which then fill any remaining slots up to
+    # _ANCHOR_SENTENCE_CAP. Purpose-built, register-matched material
+    # takes precedence over algorithmically-inferred material rather
+    # than competing with it on equal footing — the general corpus is
+    # built for diagnostic register CONTRAST (see compute_baseline_
+    # metrics' callers), not for matching the actual LinkedIn/business
+    # register Fix-it needs to reproduce, which is exactly the gap
+    # reference_statement exists to close. With no reference_statement
+    # (the default, and every profile that predates this feature or
+    # skipped the prompt), ref_sentences is empty and behaviour is
+    # byte-for-byte identical to before this change.
+    ref_sentences = (
+        [s for s in _extract_sentences(reference_statement) if 5 <= len(s.split()) <= 20]
+        if reference_statement else []
+    )[:_ANCHOR_SENTENCE_CAP]
     usable = [s for s in sentences if 5 <= len(s.split()) <= 20]
-    if usable:
-        samples = _pick_anchor_sentences(usable, corpus_text=raw_text)
+    if usable or ref_sentences:
+        remaining_slots = max(_ANCHOR_SENTENCE_CAP - len(ref_sentences), 0)
+        corpus_picks = _pick_anchor_sentences(usable, corpus_text=raw_text)[:remaining_slots] if usable and remaining_slots else []
+        samples = ref_sentences + corpus_picks
         lines.append("\nANCHOR SENTENCES — their most distinctive sentences (calibrate against these, do not copy):")
         for s in samples:
             lines.append(f'  "{s}"')
