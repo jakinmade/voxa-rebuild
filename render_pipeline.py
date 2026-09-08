@@ -685,6 +685,31 @@ def run_voice_render(
                 delta["first_person_ratio"]["verdict"] = "SKIPPED"
                 delta["first_person_ratio"]["skip_reason"] = "content_ceiling"
 
+        # Authoritative final recheck (added 8 Sept 2026). Everything
+        # above this line computes/updates insertion_check along
+        # whichever of several possible branches this specific render
+        # happened to take (no correction needed at all / the general
+        # LLM correction-prompt branch / the still-missed re-fix loop
+        # just above, which itself runs regardless of which of those
+        # branches fired and can further mutate `clean` afterward).
+        # Real finding (adversarial live testing, 8 Sept 2026): two
+        # renders of the SAME input in different render_mode settings
+        # converged on byte-identical final output text, yet reported
+        # different "no sentences invented"/"no new hedging" Content
+        # Lock verdicts — traced to exactly this: insertion_check held
+        # whatever value one of the earlier branches left it at, which
+        # is not guaranteed to be a comparison against the true final
+        # `clean`. Risk and the hard-fail gate are the one place this
+        # value is actually load-bearing (review_gate.py's entire
+        # premise depends on it matching what the person is about to
+        # see) — so it must be freshly and unconditionally computed
+        # against the actual final `clean` right here, not inherited
+        # from mid-pipeline bookkeeping. Cheap: _check_uncorrected_
+        # insertions is already called this many times per render
+        # above; one more, in the one place that actually matters for
+        # what gets shown, is not a meaningful cost.
+        insertion_check = _check_uncorrected_insertions(input_text, clean)
+
         confidence = compute_confidence(sample_fitness, baseline, len(observations), dimension_stability)
         risk = compute_risk(delta, semantic, ai_tells, insertion_check)
         risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)

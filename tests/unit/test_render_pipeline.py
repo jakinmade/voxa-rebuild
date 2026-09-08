@@ -133,6 +133,57 @@ def test_no_baseline_still_generates_but_skips_scoring():
     assert result.delta is None
 
 
+def test_insertion_check_in_final_result_matches_fresh_check_against_actual_output():
+    """Regression test for a real bug found via live adversarial testing
+    (8 Sept 2026): insertion_check - the signal behind Content Lock's
+    "no sentences invented"/"no new hedging" checks - could reflect an
+    intermediate/stale text state rather than the true final
+    output_text, depending on which internal branch a render happened
+    to take (no correction needed at all / the general LLM
+    correction-prompt branch / the still-missed re-fix loop that runs
+    after either of those). Confirmed live: two renders of the same
+    input under different render_mode settings converged on
+    byte-identical final output text but reported different Content
+    Lock verdicts on it.
+
+    Deliberately not trying to reproduce the exact branch-divergence
+    (fragile, depends on internal dimension-fixer timing that can
+    change). Instead asserts the actual invariant that must hold
+    regardless of path: whatever RenderResult.insertion_check says
+    must be identical to a fresh, independent
+    _check_uncorrected_insertions call against the input and the
+    ACTUAL final output_text. Fails on the pre-fix code whenever any
+    branch leaves a stale value in place; passes when insertion_check
+    is always freshly computed against the true final text right
+    before use."""
+    from render_pipeline import run_voice_render
+    from deterministic_fixers import _check_uncorrected_insertions
+
+    input_text = "Please review the attached figures at your earliest convenience."
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = mock_cls.return_value
+        mock_client.messages.create.return_value = _fake_response(
+            "I reviewed the numbers last night. They hold up. I want to ship this today, not next week."
+        )
+        result = run_voice_render(
+            input_text=input_text,
+            api_key="test-key",
+            raw_text=_RAW_TEXT,
+            sample2_completions=["I looked at the numbers. They add up.", "", "", ""],
+            baseline=_BASELINE,
+            baseline_texts=[_RAW_TEXT],
+        )
+
+    assert result.success
+    fresh_check = _check_uncorrected_insertions(input_text, result.output_text)
+    assert result.insertion_check == fresh_check, (
+        "insertion_check in the final RenderResult must always match a "
+        "fresh check against the actual final output_text - if this "
+        "fails, some branch in the pipeline is leaving a stale value "
+        "in place again."
+    )
+
+
 def test_on_stage_callback_is_optional():
     """The API path never supplies one — must not raise or behave
     differently when omitted."""

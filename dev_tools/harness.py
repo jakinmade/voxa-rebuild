@@ -533,6 +533,18 @@ def run_render_stage(
         clean = pr._regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
         ai_tells = ve.score_ai_tells(clean, original_input_text=input_text, calibration_text=persona.get("sample1_text", ""))
 
+    # Authoritative final recheck, mirroring render_pipeline.py's own
+    # 8 Sept 2026 fix — see that module's docstring for the full
+    # explanation (real finding: two renders of the same input under
+    # different render_mode settings converged on byte-identical final
+    # text but reported different Content Lock verdicts, traced to
+    # initial_insertion_check reflecting whichever branch this render
+    # happened to take rather than the true final `clean`). Freshly
+    # computed here too, unconditionally, so this dev harness's risk/
+    # gating numbers match what production would actually show for
+    # the same final text.
+    initial_insertion_check = df._check_uncorrected_insertions(input_text, clean)
+
     confidence = ve.compute_confidence(fingerprint["fitness"], baseline, len(observations))
     risk = ve.compute_risk(delta, semantic, ai_tells, initial_insertion_check)
     content_integrity_hard_fail = ve.has_content_integrity_hard_fail(
