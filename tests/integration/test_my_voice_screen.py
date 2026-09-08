@@ -260,3 +260,49 @@ def test_saving_a_too_short_reference_statement_shows_an_error_and_does_not_save
     assert "reference_statement" not in at.session_state or not at.session_state["reference_statement"]
     body = " ".join(m.value for m in at.markdown)
     assert "at least" in body
+
+
+def test_saving_a_single_long_sentence_that_clears_word_floor_but_yields_no_anchor_is_rejected():
+    """Regression guard for the exact silent-failure bug
+    dev_tools/reference_statement_smoke_check.py's pre-launch run
+    caught: a genuinely well-formed, natural formal/academic-register
+    statement can clear the word-count floor as ONE long sentence and
+    still supply zero usable anchors — must be rejected with a
+    specific, actionable error, not silently accepted as \"Saved\"
+    while doing nothing."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+
+    at.session_state["reference_statement_draft"] = (
+        "It could perhaps be argued that the results here are somewhat more nuanced "
+        "than the headline figure initially suggests, and although I would genuinely "
+        "want to see the whole thing properly replicated before drawing any kind of "
+        "firm conclusion, I do still think there is something real underneath it all "
+        "worth taking seriously regardless of how it eventually turns out in the end."
+    )
+    assert len(at.session_state["reference_statement_draft"].split()) > 35, "test sentence must exceed the new ceiling"
+    at.run()
+    at.button(key="reference_statement_submit").click()
+    at.run()
+    assert not at.exception
+    assert "reference_statement" not in at.session_state or not at.session_state["reference_statement"]
+    body = " ".join(m.value for m in at.markdown)
+    assert "shorter sentences" in body
+
+
+def test_reference_statement_kill_switch_hides_the_panel(monkeypatch):
+    """REFERENCE_STATEMENT_ENABLED=false (pre-launch hardening, 8 Sept
+    2026) — same kill-switch pattern as EMAIL_ENABLED
+    (stripe_subscription.py). Instant rollback with no deploy if real
+    usage shows a problem before the feature has had any production
+    validation."""
+    monkeypatch.setenv("REFERENCE_STATEMENT_ENABLED", "false")
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+    expander_labels = [e.label for e in at.expander]
+    assert "Give Fix-it one real example to aim for" not in expander_labels
+    assert "Update your reference statement" not in expander_labels

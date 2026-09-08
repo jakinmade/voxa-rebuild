@@ -1562,6 +1562,48 @@ def _format_function_patterns(patterns: dict, input_genre: str = "email") -> str
     return "\n".join(lines)
 _ANCHOR_SENTENCE_CAP = 5
 
+# Sentence-length range for a REFERENCE STATEMENT specifically (8 Sept
+# 2026, VOICOVA_Reference_Statement_Design.docx) — deliberately wider
+# than the general corpus's 5-20 word anchor filter used elsewhere in
+# this file. Found necessary by dev_tools/reference_statement_smoke_
+# check.py's pre-launch run against the real persona corpus: a
+# genuinely well-formed, natural reference statement from a formal/
+# academic-register writer (hedging_academic, formal_civil_servant)
+# can easily be ONE 25-35 word sentence — well-punctuated, not a
+# run-on, just that register's normal sentence length. Under the
+# general corpus's 20-word ceiling, that entire, perfectly valid
+# submission would silently supply ZERO anchors: the person sees
+# "Saved" while the feature does nothing for them, with no error or
+# signal that anything went wrong. The general corpus's 20-word cap
+# exists for a different reason (narrowing many candidate sentences
+# down to punchy, representative ones via _pick_anchor_sentences'
+# typicality scoring) that doesn't apply here — a reference statement
+# is already a short, deliberately curated 2-4 sentence input, not a
+# large corpus to select from, so the only real requirement is "not a
+# fragment, not absurdly long as a single anchor line." Single source
+# of truth for both prompts.py's _build_voice_dna (priority-anchor
+# extraction) and app.py's _reference_statement_panel (accept/reject
+# validation before saving) — same discipline already applied twice
+# this session (compute_baseline_metrics' first-person regex,
+# deterministic_fixers.py's _FIRST_PERSON_MARKER) to avoid two
+# separately hand-copied ranges drifting apart.
+_REFERENCE_STATEMENT_SENTENCE_WORD_RANGE = (5, 35)
+
+
+def usable_reference_statement_sentences(text: str) -> list[str]:
+    """Sentences from `text` usable as generation-prompt anchors under
+    _REFERENCE_STATEMENT_SENTENCE_WORD_RANGE, capped at
+    _ANCHOR_SENTENCE_CAP. Empty list means this text — even if it
+    clears a raw word-count floor — would silently supply NO anchors
+    at all; callers (app.py's save-validation, in particular) must
+    treat that as a rejection, not a silent no-op save. See this
+    module's own _REFERENCE_STATEMENT_SENTENCE_WORD_RANGE comment for
+    the full reasoning."""
+    if not text:
+        return []
+    low, high = _REFERENCE_STATEMENT_SENTENCE_WORD_RANGE
+    return [s for s in _extract_sentences(text) if low <= len(s.split()) <= high][:_ANCHOR_SENTENCE_CAP]
+
 
 def _pick_anchor_sentences(sentences: list[str], corpus_text: str = "") -> list[str]:
     """

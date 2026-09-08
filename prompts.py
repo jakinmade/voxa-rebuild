@@ -26,6 +26,7 @@ from voice_engine import (
     _classify_register,
     _extract_sentences,
     _ANCHOR_SENTENCE_CAP,
+    usable_reference_statement_sentences,
     compute_baseline_metrics,
     uses_contractions,
     _PLAUSIBILITY_SHIELD_DROP,
@@ -363,10 +364,7 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     # (the default, and every profile that predates this feature or
     # skipped the prompt), ref_sentences is empty and behaviour is
     # byte-for-byte identical to before this change.
-    ref_sentences = (
-        [s for s in _extract_sentences(reference_statement) if 5 <= len(s.split()) <= 20]
-        if reference_statement else []
-    )[:_ANCHOR_SENTENCE_CAP]
+    ref_sentences = usable_reference_statement_sentences(reference_statement)[:_ANCHOR_SENTENCE_CAP]
     usable = [s for s in sentences if 5 <= len(s.split()) <= 20]
     if usable or ref_sentences:
         remaining_slots = max(_ANCHOR_SENTENCE_CAP - len(ref_sentences), 0)

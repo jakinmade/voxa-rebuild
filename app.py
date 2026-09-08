@@ -56,6 +56,7 @@ from voice_engine import (
     compute_burrows_delta,
     compute_sentence_economy, compute_passive_voice,
     score_draft_check,
+    usable_reference_statement_sentences,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -1882,12 +1883,19 @@ def _deepen_fingerprint_panel(show_caveat_framing: bool = False, expanded: bool 
                 render_alert("A bit more, at least a sentence or two.", "error")
 
 
-# Minimum word floor for a reference statement — set higher than
-# SAMPLE2_REQUIRED_MIN_WORDS (10, for Screen 3's starters) because a
-# useful reference statement needs enough length to actually supply
-# 2-3 usable anchor sentences downstream (5-20 words each, per
-# _build_voice_dna's own usable-sentence filter) — a bare 10-word
-# floor could pass with a single short sentence that supplies nothing.
+# Minimum word floor for a reference statement — a fast, cheap first
+# check (fails obviously-too-short input immediately), NOT the real
+# acceptance criterion on its own. Set higher than SAMPLE2_REQUIRED_
+# MIN_WORDS (10, for Screen 3's starters) for the same underlying
+# reason, but see the real gate below: usable_reference_statement_
+# sentences (voice_engine.py) is what actually decides whether a
+# submission supplies any usable anchor at all. Found necessary by
+# dev_tools/reference_statement_smoke_check.py's pre-launch run: a
+# submission can clear a raw word-count floor yet still be ONE
+# sentence outside the usable per-sentence range, silently supplying
+# ZERO anchors — a genuinely well-formed, natural formal/academic-
+# register statement can do exactly this. This floor alone would have
+# said "Saved!" and done nothing; the real check below catches it.
 REFERENCE_STATEMENT_MIN_WORDS = 15
 
 
@@ -1909,7 +1917,23 @@ def _reference_statement_panel():
     what this text must never touch (\u00a76 of the design doc). This
     panel only ever sets st.session_state.reference_statement and
     calls save_profile_if_available() directly.
+
+    REFERENCE_STATEMENT_ENABLED kill switch (8 Sept 2026, pre-launch
+    hardening pass): same pattern as EMAIL_ENABLED
+    (stripe_subscription.py's _send_restore_email) — defaults to
+    enabled, a single env var flip disables it instantly with no code
+    deploy. Exists because this feature genuinely cannot be validated
+    against real usage before launch (no live profile has ever used
+    it yet); if real rewrites look worse once people start filling
+    this in, this is the fastest possible off switch, safe to flip at
+    any time since the backend already treats an empty/absent
+    reference_statement as a complete no-op (\u00a76/\u00a78 of the design
+    doc — this is not a new failure mode, just controlling exposure to
+    an already-proven-safe default state).
     """
+    if os.environ.get("REFERENCE_STATEMENT_ENABLED", "true").strip().lower() == "false":
+        return
+
     existing = st.session_state.get("reference_statement", "")
     label = "Update your reference statement" if existing else "Give Fix-it one real example to aim for"
 
@@ -1944,16 +1968,33 @@ def _reference_statement_panel():
         draft = paste_guard(value=draft, key="reference_statement_input")
         st.session_state.reference_statement_draft = draft
         if st.button("Save", key="reference_statement_submit"):
-            if draft and len(draft.split()) >= REFERENCE_STATEMENT_MIN_WORDS:
+            word_count_ok = bool(draft) and len(draft.split()) >= REFERENCE_STATEMENT_MIN_WORDS
+            # The real acceptance criterion, not the word-count floor
+            # above — see REFERENCE_STATEMENT_MIN_WORDS' own comment
+            # and voice_engine.py's usable_reference_statement_
+            # sentences docstring. A submission can clear the word
+            # floor yet still supply zero usable anchors (one long
+            # sentence outside the usable per-sentence range) —
+            # checked explicitly so that failure mode gets its own
+            # specific, actionable error instead of a silent "Saved"
+            # that does nothing.
+            has_usable_anchor = bool(usable_reference_statement_sentences(draft)) if word_count_ok else False
+            if word_count_ok and has_usable_anchor:
                 st.session_state.reference_statement = draft
                 st.session_state.reference_statement_draft = ""
                 save_profile_if_available()
                 st.session_state.reference_statement_success_message = "Saved. Fix-it will use this as a priority example."
                 st.rerun()
-            else:
+            elif not word_count_ok:
                 render_alert(
                     f"A bit more \u2014 at least {REFERENCE_STATEMENT_MIN_WORDS} words, "
                     "2-4 real sentences.", "error",
+                )
+            else:
+                render_alert(
+                    "Try splitting that into two or three shorter sentences \u2014 "
+                    "one long run-on sentence doesn't give Fix-it anything concrete to work from.",
+                    "error",
                 )
 
 
