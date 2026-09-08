@@ -24,7 +24,16 @@ supabase==2.23.0
 # Restore-subscription magic-link emails — same package/version as
 # clearance-app's send_report_email, reused deliberately (see
 # _send_restore_email in stripe_subscription.py)
-sendgrid>=6.11.0
+# Pinned exact (matches the resolved version already tested and
+# locked in requirements.lock) — was >=6.11.0, the one remaining open
+# range in this file; same class of risk that broke render-cap
+# counting via an unpinned supabase-py minor bump. The API service
+# (Dockerfile.api) already installs from requirements.lock, but the
+# Streamlit web service builds via Nixpacks, which reads this file
+# directly — so this file needs its own exact pin too, not just the
+# lock, or a fresh Nixpacks build could silently resolve a newer
+# sendgrid than what's actually been tested.
+sendgrid==6.12.5
 streamlit-cookies-controller==0.0.4
 
 # Subscription checkout/verification (Step 4, stripe_subscription.py) —
