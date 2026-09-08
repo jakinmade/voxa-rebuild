@@ -269,6 +269,42 @@ def test_restore_omits_flagged_dimensions_key_when_absent():
     assert "flagged_dimensions" not in st.session_state
 
 
+def test_restore_regenerates_observations_from_raw_text():
+    """Regression guard for a real, pre-existing bug found 8 Sept 2026
+    via a live Chrome test of the Reference Statement feature: this
+    restore path never populated st.session_state.observations at
+    all, so screen_my_voice's own gate (empty observations -> 'No
+    voice profile yet') hid the ENTIRE My Voice screen for any
+    returning session, not just the new panel. Must regenerate it
+    from the restored raw_text using the same analyse_writing()
+    onboarding calls live."""
+    row = {
+        "device_id": "device-1",
+        "raw_text": "I think we should move fast on this. I believe the team can " * 5,
+        "baseline_fingerprint": {"hedge_density": 1.0},
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                assert persistence.restore_profile_if_available() is True
+    assert st.session_state.get("observations")
+    assert len(st.session_state["observations"]) >= 1
+
+
+def test_restore_does_not_overwrite_already_populated_observations():
+    st.session_state["observations"] = [{"headline": "Already set", "body": "x"}]
+    row = {
+        "device_id": "device-1",
+        "raw_text": "some writing",
+        "baseline_fingerprint": {"hedge_density": 1.0},
+    }
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_SERVICE_KEY": "key"}):
+        with patch("persistence.st.context", _mock_context_cookies("device-1")):
+            with patch("persistence.get_supabase_client", return_value=_mock_supabase_client(select_rows=[row])):
+                persistence.restore_profile_if_available()
+    assert st.session_state["observations"] == [{"headline": "Already set", "body": "x"}]
+
+
 def test_restore_populates_reference_statement_when_present():
     row = {
         "device_id": "device-1",

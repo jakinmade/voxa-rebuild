@@ -57,6 +57,7 @@ from streamlit_cookies_controller import CookieController
 
 from logging_config import get_logger
 from supabase_client import get_supabase_client
+from voice_engine import analyse_writing
 
 log = get_logger(__name__)
 
@@ -197,6 +198,27 @@ def restore_profile_if_available() -> bool:
         st.session_state["sample2_completions"] = row.get("sample2_completions") or ["", "", "", ""]
         st.session_state["baseline_fingerprint"] = row.get("baseline_fingerprint")
         st.session_state["starter_baseline"] = row.get("starter_baseline")
+        # Fix (8 Sept 2026) — a real pre-existing bug, exposed while
+        # verifying the Reference Statement feature via Claude in
+        # Chrome: this restore path never populated
+        # st.session_state.observations at all. screen_my_voice's own
+        # gate (`if not observations: return "No voice profile yet"`)
+        # hides the ENTIRE My Voice screen — not just the new panel —
+        # for ANY returning session that goes through this restore
+        # path rather than live onboarding, since observations was
+        # previously only ever set during onboarding itself
+        # (analyse_writing(raw_text), app.py) and never persisted or
+        # rebuilt on restore. Regenerate it here from the restored
+        # raw_text using the exact same function onboarding calls live
+        # — deterministic, same output shape, no new persistence
+        # needed. Guarded so an already-populated session (e.g. mid-
+        # onboarding, observations already set this run) is never
+        # overwritten.
+        if not st.session_state.get("observations") and st.session_state["raw_text"]:
+            try:
+                st.session_state["observations"] = analyse_writing(st.session_state["raw_text"])
+            except Exception:
+                pass
         # Optional (30 Aug 2026) — same safe pattern as voice_profile_summary
         # below: a row saved before this feature existed simply won't have
         # it, and the app falls back to the single blended baseline exactly
