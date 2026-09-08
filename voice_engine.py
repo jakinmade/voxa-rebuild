@@ -2756,14 +2756,34 @@ def confidence_caveat(stability: dict | None) -> str | None:
 
 def has_content_integrity_hard_fail(
     semantic: dict | None, ai_tells: dict | None = None,
-    insertion_check: dict | None = None,
+    insertion_check: dict | None = None, *,
+    ownership_fabrication_restored: bool = False,
 ) -> bool:
     """
     True only for the genuine content-integrity failures: a surviving
-    AI tell, an attribution swap, a dropped entity, or an invented
-    sentence out of the correction pass. These are the "wrong name in
-    the email" class of error — factually or attributionally wrong,
-    not just stylistically off.
+    AI tell, an attribution swap, a dropped entity, an invented
+    sentence out of the correction pass, or a fabricated first-person
+    ownership claim that had to be restored to the person's own
+    original wording. These are the "wrong name in the email" class
+    of error — factually or attributionally wrong, not just
+    stylistically off.
+
+    ownership_fabrication_restored (added 8 Sept 2026): True only when
+    deterministic_fixers.restore_fabricated_ownership_sentences
+    actually found and replaced a sentence where the render invented a
+    first-person marker the original didn't have — never when
+    _fix_first_person_ratio/_fix_first_person_over_ratio merely
+    adjusted how MUCH first-person language appears (an ordinary style
+    match, not a fabrication). Conflating those three under one
+    "ownership_fixed" flag, as the pipeline's dimension-correction
+    bookkeeping already does for its own unrelated purpose, would gate
+    on nearly every render again — first_person_ratio needs
+    adjustment on a large fraction of real renders, which is exactly
+    the "fires almost constantly" regression the 19 Aug narrowing
+    fixed. The caller is responsible for threading through only the
+    restore_fabricated_ownership_sentences return value, not the
+    combined dimension-fix flag. Default False preserves every
+    existing caller's behaviour unchanged.
 
     Extracted out of compute_risk so this exact same
     check can gate the review-confirmation wall in review_gate.py
@@ -2782,9 +2802,11 @@ def has_content_integrity_hard_fail(
 
     compute_risk's own Low/Medium/High badge is UNCHANGED by this —
     it still folds in style-drift severity for the informational
-    badge shown to the user. This function is deliberately narrower:
-    it answers one question only ("does this need to be gated"), not
-    "how risky does this look overall."
+    badge shown to the user, and does NOT currently take
+    ownership_fabrication_restored (deliberately out of scope for this
+    change; see the 8 Sept commit message for why). This function is
+    deliberately narrower: it answers one question only ("does this
+    need to be gated"), not "how risky does this look overall."
     """
     if ai_tells and not ai_tells.get("clean", True):
         return True
@@ -2793,6 +2815,8 @@ def has_content_integrity_hard_fail(
     if (semantic or {}).get("dropped_entities"):
         return True
     if (insertion_check or {}).get("sentence_growth", 0) > 0:
+        return True
+    if ownership_fabrication_restored:
         return True
     return False
 

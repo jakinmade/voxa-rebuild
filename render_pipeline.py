@@ -456,6 +456,14 @@ def run_voice_render(
     )
 
     hedge_fixed = modal_fixed = rhythm_fixed = ownership_fixed = directive_fixed = False
+    # Tracked separately from ownership_fixed above: that flag also
+    # includes _fix_first_person_ratio/_fix_first_person_over_ratio,
+    # ordinary style adjustments that fire on most renders. This one
+    # is True only when restore_fabricated_ownership_sentences itself
+    # found and replaced a genuinely fabricated first-person claim —
+    # see has_content_integrity_hard_fail's own docstring (8 Sept
+    # 2026) for why the two must not be conflated.
+    ownership_fabrication_restored = False
     correction_prompt = None
     delta = None
     semantic = None
@@ -487,6 +495,7 @@ def run_voice_render(
             )
             clean, ownership_restored = restore_fabricated_ownership_sentences(clean, input_text)
             ownership_fixed = ownership_fixed or ownership_over_fixed or ownership_restored
+            ownership_fabrication_restored = ownership_fabrication_restored or ownership_restored
         if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
             d = correction_delta["directive_ratio"]
             clean, directive_fixed = _fix_directive_ratio(
@@ -638,7 +647,8 @@ def run_voice_render(
                 clean, _ = _fix_first_person_over_ratio(
                     clean, d["baseline"], d["output"], input_text
                 )
-                clean, _ = restore_fabricated_ownership_sentences(clean, input_text)
+                clean, ownership_restored_2 = restore_fabricated_ownership_sentences(clean, input_text)
+                ownership_fabrication_restored = ownership_fabrication_restored or ownership_restored_2
             if "directive_ratio" in still_missed:
                 d = delta["directive_ratio"]
                 clean, _ = _fix_directive_ratio(
@@ -678,7 +688,10 @@ def run_voice_render(
         confidence = compute_confidence(sample_fitness, baseline, len(observations), dimension_stability)
         risk = compute_risk(delta, semantic, ai_tells, insertion_check)
         risk_reason = compute_risk_reason(delta, semantic, ai_tells, insertion_check)
-        content_integrity_hard_fail = has_content_integrity_hard_fail(semantic, ai_tells, insertion_check)
+        content_integrity_hard_fail = has_content_integrity_hard_fail(
+            semantic, ai_tells, insertion_check,
+            ownership_fabrication_restored=ownership_fabrication_restored,
+        )
 
         log.info(
             "render_complete", is_refinement=is_refinement,

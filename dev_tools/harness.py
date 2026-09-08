@@ -378,6 +378,11 @@ def run_render_stage(
     input_metrics_signal = ve.compute_baseline_metrics(input_text)
     input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
     input_has_directive_content = input_metrics_signal["directive_ratio"] > 0
+    # Tracked separately from ownership_fixed below, mirroring
+    # render_pipeline.py's own 8 Sept 2026 fix — see
+    # has_content_integrity_hard_fail's docstring for why the two
+    # must not be conflated.
+    ownership_fabrication_restored = False
 
     if correction_delta.get("hedge_density", {}).get("verdict") == "MISSED":
         d = correction_delta["hedge_density"]
@@ -400,6 +405,7 @@ def run_render_stage(
         )
         clean, ownership_restored = df.restore_fabricated_ownership_sentences(clean, input_text)
         ownership_fixed = ownership_fixed or ownership_over_fixed or ownership_restored
+        ownership_fabrication_restored = ownership_fabrication_restored or ownership_restored
     else:
         ownership_fixed = False
     if correction_delta.get("directive_ratio", {}).get("verdict") == "MISSED":
@@ -529,7 +535,10 @@ def run_render_stage(
 
     confidence = ve.compute_confidence(fingerprint["fitness"], baseline, len(observations))
     risk = ve.compute_risk(delta, semantic, ai_tells, initial_insertion_check)
-    content_integrity_hard_fail = ve.has_content_integrity_hard_fail(semantic, ai_tells, initial_insertion_check)
+    content_integrity_hard_fail = ve.has_content_integrity_hard_fail(
+        semantic, ai_tells, initial_insertion_check,
+        ownership_fabrication_restored=ownership_fabrication_restored,
+    )
     voice_report = ve.build_voice_report(
         delta, semantic, confidence, risk, ai_tells,
         content_integrity_hard_fail=content_integrity_hard_fail,

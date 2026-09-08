@@ -61,6 +61,46 @@ class TestHasContentIntegrityHardFail:
     def test_missing_optional_args_defaults_to_no_hard_fail(self):
         assert ve.has_content_integrity_hard_fail(None, None, None) is False
 
+    def test_ownership_fabrication_restored_is_hard_fail(self):
+        """8 Sept 2026: a fabricated first-person claim that
+        restore_fabricated_ownership_sentences had to fix is the same
+        class of error as an attribution swap - misattributing who
+        said or did something - so it must gate the same way."""
+        semantic = {"attribution_swaps": [], "dropped_entities": []}
+        ai_tells = {"clean": True}
+        insertion_check = {"sentence_growth": 0}
+        assert ve.has_content_integrity_hard_fail(
+            semantic, ai_tells, insertion_check,
+            ownership_fabrication_restored=True,
+        ) is True
+
+    def test_ownership_fabrication_restored_default_false_no_regression(self):
+        """Every existing caller (harness.py, render_pipeline.py before
+        this change, all tests above) calls this with 3 positional args
+        only. The new keyword-only param must default to False so none
+        of that behaviour shifts."""
+        semantic = {"attribution_swaps": [], "dropped_entities": []}
+        ai_tells = {"clean": True}
+        insertion_check = {"sentence_growth": 0}
+        assert ve.has_content_integrity_hard_fail(semantic, ai_tells, insertion_check) is False
+
+    def test_ordinary_first_person_style_fix_is_not_conflated_with_fabrication(self):
+        """The specific regression this change must not reintroduce:
+        _fix_first_person_ratio/_fix_first_person_over_ratio (ordinary
+        style adjustment, fires on most renders) must NOT be able to
+        trigger this gate just by being passed in some other shape -
+        only the dedicated ownership_fabrication_restored flag can.
+        A render with no other hard-fail signal and the flag left at
+        its default stays ungated, exactly like the plain style-drift
+        case the 19 Aug fix already covers above."""
+        semantic = {"attribution_swaps": [], "dropped_entities": []}
+        ai_tells = {"clean": True}
+        insertion_check = {"sentence_growth": 0}
+        assert ve.has_content_integrity_hard_fail(
+            semantic, ai_tells, insertion_check,
+            ownership_fabrication_restored=False,
+        ) is False
+
 
 class TestComputeRiskBadgeUnchangedByRefactor:
     """
