@@ -128,7 +128,7 @@ def my_voice_page(live_app):
         page.goto(_APP_URL, timeout=30000)
         page.wait_for_timeout(3000)
         page.get_by_role("button", name="Get started \u2192").click()
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
 
         textarea = page.locator("textarea").first
         textarea.click()
@@ -136,9 +136,9 @@ def my_voice_page(live_app):
         page.keyboard.press("Tab")
         page.wait_for_timeout(1500)
         page.get_by_role("button", name="Show me my fingerprint \u2192").click()
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(6000)
         page.get_by_role("button", name="Continue \u2192").click()
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(6000)
 
         # Screen 3 — both required starters, real typed input via each
         # one's own real paste_guard iframe (same component this
@@ -207,16 +207,35 @@ def test_typed_reference_statement_round_trips_saves_and_blocks_paste(my_voice_p
     my_voice_page.get_by_text("Update your reference statement").click()
     my_voice_page.wait_for_timeout(2500)
     guard_frames = [f for f in my_voice_page.frames if "paste_guard" in f.url]
-    ref_textarea = guard_frames[-1].locator("#ta")
-    ref_textarea.wait_for(state="visible", timeout=10000)
+    ref_frame = guard_frames[-1]
+    ref_frame.locator("#ta").wait_for(state="visible", timeout=10000)
 
-    ref_textarea.click()
-    my_voice_page.keyboard.type("Original typed content here.", delay=10)
-    my_voice_page.wait_for_timeout(500)
-    my_voice_page.evaluate("() => navigator.clipboard.writeText('PASTED CONTENT SHOULD BE BLOCKED')")
-    my_voice_page.keyboard.press("Control+A")
-    my_voice_page.keyboard.press("Control+V")
-    my_voice_page.wait_for_timeout(1000)
+    # One atomic evaluate() call, not a multi-step Playwright-level
+    # Ctrl+A/Ctrl+V sequence — the earlier version of this test crossed
+    # the Playwright-to-frame boundary on every keystroke/keypress
+    # call, and Streamlit's own rerun (triggered by the component's
+    # return-value change as it's typed into) could tear down and
+    # recreate this iframe BETWEEN those calls, detaching the frame
+    # mid-sequence ("Frame was detached"). Same root cause
+    # test_paste_guard_live.py's own drop-event test already avoids by
+    # doing everything in one synchronous in-page script — dispatching
+    # a real ClipboardEvent (not a keyboard shortcut) is also the more
+    # direct way to test the actual "paste" listener paste_guard's own
+    # index.html registers, rather than relying on the browser's
+    # native Ctrl+V handling to fire it indirectly.
+    result = ref_frame.evaluate("""() => {
+        const ta = document.getElementById('ta');
+        ta.value = 'Original typed content here.';
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        const dt = new DataTransfer();
+        dt.setData('text/plain', 'PASTED CONTENT SHOULD BE BLOCKED');
+        const pasteEvent = new ClipboardEvent('paste', {
+            bubbles: true, cancelable: true, clipboardData: dt,
+        });
+        const wasDefaultPrevented = !ta.dispatchEvent(pasteEvent);
+        return { wasDefaultPrevented, valueAfter: ta.value };
+    }""")
 
-    value_after = ref_textarea.input_value()
-    assert "PASTED CONTENT" not in value_after
+    assert result["wasDefaultPrevented"] is True
+    assert "PASTED CONTENT" not in result["valueAfter"]
+    assert "Original typed content" in result["valueAfter"]
