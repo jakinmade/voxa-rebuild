@@ -183,6 +183,74 @@ test("two concurrent refreshAccessToken calls share one in-flight network reques
   assert.equal(storage.state.accessToken, "new-token");
 });
 
+test("a successful refresh writes the refresh handle before the access token", async () => {
+  // Regression test for the live revocation bug (8 Sept 2026): if the
+  // MV3 service worker is suspended between the two storage writes,
+  // whichever write happens SECOND is the one that can be lost. The
+  // refresh handle (chrome.storage.local) must go first because a
+  // stale refresh handle gets the whole installation revoked on its
+  // next use; a stale/missing access token just costs one more
+  // refresh call. This test fails if that order ever regresses.
+  const storage = makeStorageMock({
+    installation: { installationId: "inst-1", refreshHandle: "old-handle" },
+    accessToken: "old-token",
+  });
+  const writeOrder = [];
+  storage.setInstallation = async (v) => {
+    writeOrder.push("installation");
+    storage.state.installation = v;
+  };
+  storage.setAccessToken = async (v) => {
+    writeOrder.push("accessToken");
+    storage.state.accessToken = v;
+  };
+  const fetchMock = makeFetchMock([
+    { ok: true, body: { access_token: "new-token", refresh_handle: "new-handle" } },
+  ]);
+  const sandbox = loadApiClient({ storage, fetchMock });
+
+  await sandbox.VoicovaApiClient.refreshAccessToken();
+
+  assert.deepEqual(writeOrder, ["installation", "accessToken"]);
+});
+
+test("a missing access token triggers a refresh instead of failing outright", async () => {
+  // Regression test: a missing access token is the EXPECTED state
+  // after every browser restart (chrome.storage.session clears on
+  // browser close; chrome.storage.local's refresh handle doesn't).
+  // The previous behaviour declared token_revoked immediately without
+  // even attempting a refresh, showing "disconnected" on every
+  // restart despite a perfectly valid refresh handle sitting in local
+  // storage.
+  const storage = makeStorageMock({
+    installation: { installationId: "inst-1", refreshHandle: "good-handle" },
+    accessToken: null, // simulates a fresh browser restart
+  });
+  const fetchMock = makeFetchMock([
+    { ok: true, body: { access_token: "fresh-token", refresh_handle: "rotated-handle" } },
+    { ok: true, body: { remaining_allowance: 5 } }, // the actual checkDraft call, post-refresh
+  ]);
+  const sandbox = loadApiClient({ storage, fetchMock });
+
+  const result = await sandbox.VoicovaApiClient.checkDraft("hello", "linkedin");
+
+  assert.equal(result.ok, true);
+  assert.equal(fetchMock.calls.length, 2, "should refresh once, then retry the original call");
+  assert.equal(storage.state.accessToken, "fresh-token");
+});
+
+test("a missing access token with no recoverable installation reports revoked", async () => {
+  const storage = makeStorageMock({ installation: null, accessToken: null });
+  const fetchMock = makeFetchMock([]); // refresh short-circuits before any fetch
+  const sandbox = loadApiClient({ storage, fetchMock });
+
+  const result = await sandbox.VoicovaApiClient.checkDraft("hello", "linkedin");
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, "token_revoked");
+  assert.equal(fetchMock.calls.length, 0);
+});
+
 test("a later refresh call after one completes fires a new network request", async () => {
   // Guards against the in-flight cache accidentally never clearing —
   // a real second refresh (e.g. the next scheduled alarm) must still

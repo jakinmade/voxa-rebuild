@@ -109,17 +109,55 @@ async function _doRefresh() {
   }
 
   const body = await response.json();
-  await VoicovaStorage.setAccessToken(body.access_token);
+
+  // Write order matters (bug confirmed live 8 Sept 2026): the server
+  // has already rotated to the new refresh handle the instant this
+  // response was sent, and its next check (check_reuse_or_race in
+  // api/db/extension_installations.py) treats ANY older handle
+  // presented later as reuse — full revocation, no recovery except
+  // reconnecting. The access token carries no such penalty: a
+  // missing/stale one just costs one more refresh call. So the local
+  // storage write (refresh handle — chrome.storage.local, the one the
+  // server can never forgive drift on) goes first, and the session
+  // write (access token — allowed to be missing/stale) goes second.
+  // If this MV3 service worker gets suspended mid-write — fetch() does
+  // not reliably keep an MV3 worker alive on its own, and the alarm
+  // listener below doesn't extend its own lifetime — the worst case
+  // under this order is a missing access token (self-healing on next
+  // use), not a silently-desynced refresh handle that revokes the
+  // whole installation on its next legitimate use. That desync-then-
+  // revoke sequence is exactly what happened live: server rotated to
+  // refresh_handle_version 10 at 22:59, the extension's local storage
+  // never received it, and the next refresh attempt 7 hours later (on
+  // browser restart, after the intervening alarm was missed while the
+  // browser was closed) presented the pre-rotation handle and was
+  // classified as reuse.
   await VoicovaStorage.setInstallation({
     refreshHandle: body.refresh_handle,
     installationId: installation.installationId,
   });
+  await VoicovaStorage.setAccessToken(body.access_token);
   return true;
 }
 
 async function _authedRequest(path, payload) {
-  const accessToken = await VoicovaStorage.getAccessToken();
-  if (!accessToken) return { ok: false, status: 401, errorCode: "token_revoked" };
+  let accessToken = await VoicovaStorage.getAccessToken();
+  if (!accessToken) {
+    // A missing access token is NOT evidence of a revoked installation
+    // — it's the expected state after every browser restart, by
+    // design (Full Spec Section 3.3.2: chrome.storage.session clears
+    // on browser close; chrome.storage.local's refresh handle
+    // survives). Declaring token_revoked outright here (the previous
+    // behaviour) meant the extension showed "disconnected" on every
+    // browser restart even when a perfectly valid refresh handle was
+    // sitting in local storage, forcing an unnecessary reconnect.
+    // Attempt a real refresh first; only report revoked if that
+    // refresh itself fails — no installation record at all, or a
+    // genuinely dead/reused handle.
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) return { ok: false, status: 401, errorCode: "token_revoked" };
+    accessToken = await VoicovaStorage.getAccessToken();
+  }
 
   const attempt = async (token) => {
     let response;
