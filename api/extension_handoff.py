@@ -24,13 +24,17 @@ import os
 from fastapi.responses import HTMLResponse
 
 _EXTENSION_ID_ENV = "VOICOVA_EXTENSION_ID"
-# Deterministic ID derived from the public key pinned in
-# voicova-extension/manifest.json's "key" field (7 Sept 2026) — stable
-# whether loaded unpacked or, eventually, published to the Chrome Web
-# Store with that same manifest. Overridable via env var so a future
-# real Web Store ID (if Google ever assigns a different one at
-# publish time) can be set without a code change.
-_DEFAULT_EXTENSION_ID = "dkgmcpdgfgcoeneodjhkdgmdmjmghbog"
+# STALE PLACEHOLDER (8 Sept 2026): manifest.json's pinned "key" field
+# (and the ID it deterministically produced) has been removed — that
+# approach only kept the ID stable for local unpacked loading and
+# never matched what the Chrome Web Store actually assigns on
+# publish. This constant is not a real extension ID; it exists only
+# as a fallback so the module doesn't crash before VOICOVA_EXTENSION_ID
+# is set. The real fix is operational, not code: after uploading the
+# built extension to the Chrome Web Store dev dashboard, set
+# VOICOVA_EXTENSION_ID on Railway to the ID Chrome assigns there, then
+# redeploy. Do not derive or pin a new "key" value as a substitute.
+_DEFAULT_EXTENSION_ID = "UNSET_PENDING_CHROME_WEB_STORE_ID"
 
 
 def link_handoff_html(link_result: dict, *, connecting_verb: str = "Reconnecting") -> HTMLResponse:
