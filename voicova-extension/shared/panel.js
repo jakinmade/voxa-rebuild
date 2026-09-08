@@ -126,10 +126,36 @@ function mount(container, { onCheck, onFix, onAcceptFix }) {
       return el;
     },
 
+    // First-run / never-connected case (Section 13 fix, 8 Sept 2026)
+    // — distinct copy and distinct state from AUTH_REQUIRED below,
+    // since "connect for the first time" and "your connection broke,
+    // reconnect" are different situations even though both point the
+    // user at the same voicova.com destination.
+    [STATES.CONNECT_REQUIRED]: () => {
+      const el = document.createElement("div");
+      el.className = "voicova-panel voicova-auth";
+      const p = document.createElement("p");
+      p.textContent = "Connect your voice profile to start checking drafts.";
+      const link = document.createElement("a");
+      link.href = "https://voicova.com";
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Connect on voicova.com \u2192";
+      el.append(p, link);
+      return el;
+    },
+
     [STATES.AUTH_REQUIRED]: () => {
       const el = document.createElement("div");
       el.className = "voicova-panel voicova-auth";
-      el.textContent = "Reconnect this extension on voicova.com.";
+      const p = document.createElement("p");
+      p.textContent = "Your connection needs refreshing.";
+      const link = document.createElement("a");
+      link.href = "https://voicova.com";
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Reconnect on voicova.com \u2192";
+      el.append(p, link);
       return el;
     },
 
@@ -209,7 +235,21 @@ function mount(container, { onCheck, onFix, onAcceptFix }) {
     if (event.key === "Escape") setState(STATES.IDLE);
   });
 
-  render();
+  // Proactive first-run check (Section 13 fix, 8 Sept 2026): previously
+  // every panel always started at IDLE regardless of connection state,
+  // so a never-connected user only discovered they needed to connect
+  // after clicking "Check my voice" and getting a failed CHECK_DRAFT
+  // back — reactive-only, per the outstanding item this closes. Asking
+  // the background worker up front (a local chrome.storage read, no
+  // network call) means the very first paint already reflects reality.
+  // storage.js is intentionally never loaded into this content-script
+  // context (Section 6.3: content scripts don't touch tokens directly),
+  // so this goes through the same message-passing every other
+  // token-adjacent action already uses, not a direct storage read.
+  chrome.runtime.sendMessage({ type: "GET_CONNECTION_STATUS" }).then((response) => {
+    if (!response?.connected) setState(STATES.CONNECT_REQUIRED);
+    else render();
+  }).catch(() => render()); // background unreachable — fall back to idle rather than staying blank
 
   const instance = {
     invalidateResult() {
