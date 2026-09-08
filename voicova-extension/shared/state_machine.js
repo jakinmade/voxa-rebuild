@@ -33,6 +33,7 @@ const STATES = Object.freeze({
   RESULT_FAILED_CONTENT_LOCK: "result_failed_content_lock",
   FIX_IT: "fix_it",
   ACCEPTED: "accepted",
+  CONNECT_REQUIRED: "connect_required",
   AUTH_REQUIRED: "auth_required",
   CREDITS_EXHAUSTED: "credits_exhausted",
   ERROR_OFFLINE: "error_offline",

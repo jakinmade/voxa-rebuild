@@ -61,6 +61,17 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 // ever say "check this text" or "fix this text" and get a result —
 // they never see a token or construct a request themselves.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "GET_CONNECTION_STATUS") {
+    // Local storage read only, no network call — the panel uses this
+    // for its proactive first-run check (Section 13 fix, 8 Sept
+    // 2026), same "content scripts never touch tokens directly"
+    // boundary as CHECK_DRAFT/FIX_DRAFT below, just reporting a
+    // boolean rather than doing anything token-bearing.
+    VoicovaStorage.getInstallation().then((installation) => {
+      sendResponse({ connected: !!installation });
+    });
+    return true;
+  }
   if (message?.type === "CHECK_DRAFT") {
     VoicovaApiClient.checkDraft(message.text, message.surface).then((response) => {
       if (response.ok) VoicovaStorage.setLastKnownAllowance(response.data.remaining_allowance);
