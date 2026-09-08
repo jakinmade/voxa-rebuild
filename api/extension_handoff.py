@@ -24,12 +24,18 @@ import os
 from fastapi.responses import HTMLResponse
 
 _EXTENSION_ID_ENV = "VOICOVA_EXTENSION_ID"
-# Deterministic ID derived from the public key pinned in
-# voicova-extension/manifest.json's "key" field (7 Sept 2026) — stable
-# whether loaded unpacked or, eventually, published to the Chrome Web
-# Store with that same manifest. Overridable via env var so a future
-# real Web Store ID (if Google ever assigns a different one at
-# publish time) can be set without a code change.
+# CORRECTED 8 Sept 2026 — this ID is a DEV-ONLY placeholder, not a
+# stable published one. It's derived from the openssl-generated public
+# key currently pinned in voicova-extension/manifest.json's "key"
+# field, which keeps unpacked/dev-mode installs on the same ID across
+# reloads, but Chrome Web Store rejects a *first-time* upload whose
+# manifest contains a "key" field at all ("key field is not allowed in
+# manifest") — so this ID will NOT survive Store publish unchanged.
+# See scripts/build_store_zip.py for the submission build (strips
+# "key") and the correct 6-step sequence for locking in the real,
+# Chrome-issued ID afterward. Do not treat this default as the
+# production ID until VOICOVA_EXTENSION_ID has been updated to the
+# real Item ID shown on the Developer Dashboard post-publish.
 _DEFAULT_EXTENSION_ID = "dkgmcpdgfgcoeneodjhkdgmdmjmghbog"
 
 

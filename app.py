@@ -1416,6 +1416,31 @@ def screen_landing():
         unsafe_allow_html=True,
     )
 
+    # Ghostwriter/agency Chrome extension callout (8 Sept 2026, ahead
+    # of Go-Live) - additive only, doesn't touch the consumer flow
+    # above or its session state. Closes the gap where voicova.com's
+    # main landing page had zero mention of the extension or the
+    # agreed Section 5.1 "independent QA layer" positioning that
+    # outreach messaging leads with - anyone clicking through from a
+    # cold-outreach message or the Store listing was landing on
+    # generic consumer copy that didn't match what they'd been told.
+    st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub" style="font-weight:600;">For ghostwriters &amp; agencies</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="headline" style="font-size:1.5rem;">The independent QA layer you run '
+        'before a draft goes to the client \u2014 right inside the tools you already write in.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="sub">A free Chrome extension checks LinkedIn posts and Gmail drafts '
+        'against your voice fingerprint before you send. Voice Check is free; Fix-it uses '
+        'your existing render allowance.</div>',
+        unsafe_allow_html=True,
+    )
+
     st.markdown("")
     cta_col1, cta_col2 = st.columns([2, 1])
     with cta_col1:
