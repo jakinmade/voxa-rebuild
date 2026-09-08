@@ -23,14 +23,14 @@ def test_fresh_visitor_lands_on_landing_screen_not_step_one():
     # Landing has no text_area (that's Step 1's paste box) - confirms
     # we're genuinely on the marketing screen, not onboarding.
     assert len(at.text_area) == 0
-    headlines = [m.value for m in at.markdown if "whether it actually did" in m.value]
+    headlines = [m.value for m in at.markdown if "should still sound like them" in m.value]
     assert headlines
 
 
 def test_get_started_button_advances_to_step_one():
     at = AppTest.from_file(_APP_PATH)
     at.run()
-    get_started = next(b for b in at.button if b.label == "Get started \u2192")
+    get_started = next(b for b in at.button if b.label == "Check a draft \u2192")
     get_started.click().run()
     assert not at.exception
     assert at.session_state["screen"] == 1
@@ -106,7 +106,7 @@ def test_landing_shows_check_a_draft_as_fourth_step():
     body = " ".join(m.value for m in at.markdown)
     assert '<span class="step-num">4</span>' in body
     assert '<span class="step-label">Check</span>' in body
-    assert "still sounds like you" in body
+    assert "Before it goes out" in body
 
 
 def test_pricing_free_tier_mentions_unlimited_draft_checks():

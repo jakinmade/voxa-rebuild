@@ -128,7 +128,7 @@ log = get_logger(__name__)
 # the top on each one.
 _current_screen = st.session_state.get("screen", 0)
 st.set_page_config(
-    page_title="Voicova - Communication Identity",
+    page_title="Voicova - Voice Assurance",
     page_icon="\U0001F535",
     layout="wide" if _current_screen == 4 else "centered",
     initial_sidebar_state="expanded" if (
@@ -160,12 +160,12 @@ if not st.session_state.get("_seo_meta_injected"):
                 }
                 tag.setAttribute("content", content);
             };
-            doc.title = "Voicova - Communication Identity";
+            doc.title = "Voicova - Voice Assurance for Ghostwriters";
             setMeta("name", "description",
-                "Voicova preserves who you are when you write. Test any draft against your own voice fingerprint and fix what doesn't sound like you.");
-            setMeta("property", "og:title", "Voicova - Communication Identity");
+                "Voicova checks AI-assisted drafts against a client's own writing before they go out, and rewrites what doesn't sound like them. Built for ghostwriters and agencies working inside LinkedIn and Gmail.");
+            setMeta("property", "og:title", "Voicova - Voice Assurance for Ghostwriters");
             setMeta("property", "og:description",
-                "Voicova preserves who you are when you write.");
+                "Checks every AI-assisted draft against your client's own voice before it goes out.");
             setMeta("property", "og:type", "website");
             setMeta("property", "og:url", "https://voicova.com");
             setMeta("name", "twitter:card", "summary");
@@ -1328,11 +1328,12 @@ def screen_landing():
         'Your voice. Still yours.</div>',
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="headline">AI can write like you now. The question is whether it actually did.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="headline">Every draft that goes out under a client\'s name should still sound like them.</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="sub">Paste your draft. Voicova rewrites it so it sounds like you '
-        'wrote it, not like a chatbot did. Or paste anything, from anywhere, and check '
-        'whether it still sounds like you.</div>',
+        '<div class="sub">You draft fast with AI. Your client still expects to sound like '
+        'themselves. Voicova checks the draft against their own writing before it goes '
+        'out, and rewrites it back into their voice when it drifts \u2014 right inside '
+        'LinkedIn and Gmail, or paste it here directly.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1349,7 +1350,7 @@ def screen_landing():
         st.markdown(
             '<div class="step-card"><span class="step-num">1</span>'
             '<span class="step-label">Paste</span>'
-            '<span class="step-desc">A few things you\'ve actually written. '
+            '<span class="step-desc">A few things your client has actually written. '
             'No account needed.</span></div>',
             unsafe_allow_html=True,
         )
@@ -1358,23 +1359,23 @@ def screen_landing():
             '<div class="step-card"><span class="step-num">2</span>'
             '<span class="step-label">Calibrate</span>'
             '<span class="step-desc">A couple of quick, typed sentences '
-            'sharpen the fingerprint.</span></div>',
+            'sharpen their fingerprint.</span></div>',
             unsafe_allow_html=True,
         )
     with step_col3:
         st.markdown(
             '<div class="step-card"><span class="step-num">3</span>'
             '<span class="step-label">Write</span>'
-            '<span class="step-desc">Paste any AI draft. Get it back '
-            'sounding like you.</span></div>',
+            '<span class="step-desc">Draft with any tool you already use. '
+            'Get it back sounding like them.</span></div>',
             unsafe_allow_html=True,
         )
     with step_col4:
         st.markdown(
             '<div class="step-card"><span class="step-num">4</span>'
             '<span class="step-label">Check</span>'
-            '<span class="step-desc">Paste anything, from anywhere. '
-            'See if it still sounds like you.</span></div>',
+            '<span class="step-desc">Before it goes out. On LinkedIn, in Gmail, '
+            'or straight from here.</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -1384,34 +1385,35 @@ def screen_landing():
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     ex_col1, ex_col2 = st.columns(2)
     with ex_col1:
-        st.markdown('<div class="sub">A generic AI draft</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">Client\'s AI-assisted draft</div>', unsafe_allow_html=True)
         st.markdown(
             '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
             'border:0.5px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;'
             'font-size:0.85rem;color:var(--body-text);">'
-            'I wanted to reach out regarding the project timeline. I believe we should '
-            'consider adjusting our approach moving forward to ensure optimal outcomes.'
+            'I am excited to share that our team successfully delivered this project '
+            'ahead of schedule. This milestone reflects our unwavering commitment to '
+            'excellence and collaboration.'
             '</div>',
             unsafe_allow_html=True,
         )
     with ex_col2:
-        st.markdown('<div class="sub">Rewritten in your voice</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">Checked and rewritten in their voice</div>', unsafe_allow_html=True)
         st.markdown(
             '<div style="white-space:pre-wrap;line-height:1.6;background:var(--surface);'
             'border:0.5px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;'
             'font-size:0.85rem;color:var(--body-text);">'
-            'Quick one on the timeline. I think we need to change tack here. Happy to '
-            'talk it through whenever works.'
+            'We got this one out early, and I\'m genuinely proud of how the team pulled '
+            'together to make it happen.'
             '</div>',
             unsafe_allow_html=True,
         )
 
     st.markdown("<hr class='divider'>", unsafe_allow_html=True)
     st.markdown(
-        '<div class="microcopy">No account or signup. Your profile is tied to a device '
-        'cookie, not an email. Clear your cookies and it\'s gone. Per-device, too, your '
-        'phone or another computer starts fresh with its own free renders. No selling, '
-        'no sharing, no third-party analytics on what you write. 15 renders free, then '
+        '<div class="microcopy">No account or signup. A profile is tied to a device '
+        'cookie, not an email \u2014 nothing to set up per client beyond pasting their '
+        'writing. Clear cookies and it\'s gone. No selling, no sharing, no third-party '
+        'analytics on what you or your clients write. 15 renders free, then '
         '£6.99/month or £49/year for unlimited.</div>',
         unsafe_allow_html=True,
     )
@@ -1419,7 +1421,7 @@ def screen_landing():
     st.markdown("")
     cta_col1, cta_col2 = st.columns([2, 1])
     with cta_col1:
-        if st.button("Get started \u2192", type="primary", use_container_width=True):
+        if st.button("Check a draft \u2192", type="primary", use_container_width=True):
             go_to(1)
             st.rerun()
     with cta_col2:
