@@ -4001,6 +4001,54 @@ def _classify_platform(text: str) -> str:
     return "professional"
 
 
+def _select_reference_statement(
+    reference_statements: dict | None,
+    detected_register: str,
+    legacy_reference_statement: str = "",
+) -> str:
+    """
+    Picks which register-matched sample (see migrations/2026_09_12_
+    add_reference_statements_multi_register.sql) to hand _build_voice_dna
+    as its reference_statement anchor material, given the register
+    _classify_platform detected for the text actually being rewritten.
+
+    Fallback order, each step only reached if the previous produced
+    nothing:
+      1. Exact match for the detected register.
+      2. The 'professional' entry — VOICOVA's actual customer base
+         (ghostwriters/copywriters) means this is the most likely
+         register to have a genuinely useful saved sample even when it
+         doesn't exactly match, same reasoning _classify_platform's own
+         default already uses.
+      3. Any other populated register in the dict, first one found —
+         some register-matched material beats none.
+      4. legacy_reference_statement — the pre-12-Sept single-sample
+         column, for any profile that saved a sample before this
+         feature existed and hasn't re-saved since.
+      5. "" — the original, pre-8-Sept behaviour (algorithmic anchor
+         selection only, no reference statement at all).
+
+    Deterministic: same inputs always produce the same output, no
+    randomness in the "any other populated register" step (dict
+    insertion order, not arbitrary).
+    """
+    reference_statements = reference_statements or {}
+
+    exact = reference_statements.get(detected_register)
+    if exact:
+        return exact
+
+    professional_fallback = reference_statements.get("professional")
+    if professional_fallback:
+        return professional_fallback
+
+    for value in reference_statements.values():
+        if value:
+            return value
+
+    return legacy_reference_statement or ""
+
+
 def uses_contractions(text: str) -> bool:
     """
     Does this person's own writing use contractions? Baseline-driven,

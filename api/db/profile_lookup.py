@@ -89,5 +89,12 @@ def get_profile_bundle(profile_id: str) -> dict | None:
         # fix.py must coalesce None -> "" itself, same as it would for
         # any of these other Optional fields if it needed to.
         "reference_statement": row.get("reference_statement"),
+        # 12 Sept 2026 — see migrations/2026_09_12_add_reference_
+        # statements_multi_register.sql. Same optional-field pattern —
+        # row.get(...) with no default (None, not {}) — fix.py
+        # coalesces None -> {} itself via _select_reference_statement's
+        # own `reference_statements or {}` guard, same as it already
+        # does for reference_statement above.
+        "reference_statements": row.get("reference_statements"),
         "updated_at": row.get("updated_at"),
     }

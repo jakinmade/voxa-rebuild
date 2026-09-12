@@ -2604,6 +2604,7 @@ def _run_render(
     starter_baseline = st.session_state.get("starter_baseline")
     baseline_fingerprints_by_format = st.session_state.get("baseline_fingerprints_by_format")
     reference_statement = st.session_state.get("reference_statement", "")
+    reference_statements = st.session_state.get("reference_statements", {})
 
     _spinner_text = {
         "writing": "Writing as you...",
@@ -2636,6 +2637,7 @@ def _run_render(
             starter_baseline=starter_baseline,
             baseline_fingerprints_by_format=baseline_fingerprints_by_format,
             reference_statement=reference_statement,
+            reference_statements=reference_statements,
             render_mode=render_mode,
             render_context=render_context,
             platform_format=platform_format,
