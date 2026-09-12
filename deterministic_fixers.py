@@ -1490,6 +1490,18 @@ _DROPPED_SUBJECT_INJECTIONS = (
     "I'm ", "I am ", "I've ", "I have ", "I'd ", "I would ", "I ",
     "It's ", "It is ", "We're ", "We are ", "We've ", "We ",
     "This is ", "That's ", "That is ",
+    # Added 12 Sept 2026 — real recurrence. SENTENCE COMPLETENESS
+    # (prompts._build_voice_dna) explicitly groups "a subject, article,
+    # or connective word" as one violation, but this list only ever
+    # covered subjects. Confirmed live: "Timing feels right..." (the
+    # exact original 7 Sept example, article dropped for economy)
+    # rendered as "The timing feels right..." — same mechanism, same
+    # evidence-gating, just an uncovered word class. _SAFE_OPENER_
+    # SUBJECTS already treats "The"/"A"/"An" as safe openers (an
+    # original already starting with one is correctly skipped as
+    # nothing-to-fix), so adding them here is symmetric with what the
+    # function already does for subjects, not a new risk profile.
+    "The ", "A ", "An ",
 )
 
 
@@ -1597,5 +1609,92 @@ def _restore_dropped_subject_openers(output_text: str, input_text: str) -> tuple
             break
         if matched:
             continue
+
+    return fixed, restored
+
+
+# ------------------------------------------------------------------
+# Dropped-contraction restoration — added 12 Sept 2026, real finding.
+# ------------------------------------------------------------------
+#
+# prompts._build_voice_dna already tells the model, when calibration
+# shows contractions are part of this person's voice, to use them
+# naturally and not write the expanded form (the CONTRACTIONS
+# instruction, added 4 Sept 2026). That instruction is not
+# enforcement — confirmed live, twice now, on the same real document:
+# "It's the deterministic proof layer..." rendered as "It is the
+# deterministic proof layer..." in two separate sessions despite the
+# instruction being present and correct both times. Unlike the
+# dropped-subject-opener case, no deterministic backstop was ever
+# built for this — only the pre-generation instruction existed.
+#
+# Same evidence-gated, narrow-or-decline philosophy as
+# _restore_dropped_subject_openers: for each sentence in the ORIGINAL
+# input containing one of a known, unambiguous set of contractions,
+# build the exact "expanded" version of that sentence and check
+# whether the OUTPUT contains that exact expanded sentence verbatim.
+# Only on an exact match is the whole sentence replaced with the
+# original's verbatim wording — same "replace the whole sentence with
+# the original's own exact wording" approach the subject-opener fixer
+# already uses, for the same reason (guarantees the result is verbatim
+# what the person actually wrote, not a hand-patched version of the
+# model's phrasing).
+#
+# Deliberately narrow: only pairs where the contraction is unambiguous
+# (never a possessive, never dependent on what follows to determine
+# meaning — "it's" is excluded from expanding to "it has" cases; if
+# the model actually wrote "it has" where the original used "it's"
+# meaning "it has", this simply won't match "it is" and will safely
+# no-op rather than guess). 've/'ll/'d forms deliberately excluded
+# from this first pass (I've/I have, I'll/I will, I'd/I would-or-had)
+# — narrower scope now, extend later with real evidence rather than
+# guessing at every possible pair upfront.
+#
+# Limitation, same "narrow rather than wrong" trade-off: only restores
+# ONE contraction per original sentence per pass (checks the sentence
+# against each pair independently, but the match requires the REST of
+# the sentence to be byte-identical to the original except for that
+# one substitution) — if a sentence had two contractions and both got
+# expanded, this pass won't catch either, since the candidate built
+# for either one wouldn't verbatim-match a sentence with BOTH expanded.
+# Real-world instances seen so far are single-contraction misses;
+# widen if evidence shows otherwise.
+_CONTRACTION_EXPANSION_PAIRS = (
+    ("it's", "it is"), ("that's", "that is"), ("there's", "there is"),
+    ("here's", "here is"), ("i'm", "i am"), ("we're", "we are"),
+    ("you're", "you are"), ("they're", "they are"),
+    ("don't", "do not"), ("doesn't", "does not"), ("didn't", "did not"),
+    ("isn't", "is not"), ("aren't", "are not"), ("wasn't", "was not"),
+    ("weren't", "were not"), ("can't", "cannot"), ("won't", "will not"),
+    ("wouldn't", "would not"), ("couldn't", "could not"),
+    ("shouldn't", "should not"), ("haven't", "have not"),
+    ("hasn't", "has not"), ("hadn't", "had not"), ("let's", "let us"),
+)
+
+
+def _restore_dropped_contractions(output_text: str, input_text: str) -> tuple[str, list[str]]:
+    """Returns (fixed_text, restored_sentences) — same shape as
+    _restore_dropped_subject_openers. restored_sentences is the list
+    of original sentences whose contraction was restored, for
+    logging."""
+    orig_sentences = [
+        s.strip() for s in re.split(r"(?<=[.!?])['\"\u2019\u201d\)]*\s+", input_text) if s.strip()
+    ]
+    fixed = output_text
+    restored = []
+
+    for sent in orig_sentences:
+        for contracted, expanded in _CONTRACTION_EXPANSION_PAIRS:
+            pattern = re.compile(r"\b" + re.escape(contracted) + r"\b", re.IGNORECASE)
+            m = pattern.search(sent)
+            if not m:
+                continue
+            orig_word = m.group(0)
+            corrupted_word = expanded[0].upper() + expanded[1:] if orig_word[0].isupper() else expanded
+            candidate_corrupted_sentence = sent[:m.start()] + corrupted_word + sent[m.end():]
+            if candidate_corrupted_sentence in fixed:
+                fixed = fixed.replace(candidate_corrupted_sentence, sent, 1)
+                restored.append(sent)
+                break  # one contraction restored for this sentence; see docstring limitation
 
     return fixed, restored
