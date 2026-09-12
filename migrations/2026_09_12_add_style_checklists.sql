@@ -1,0 +1,39 @@
+-- Migration: cached style checklists (12 Sept 2026, PR 5 of 5).
+--
+-- WHY: the 12 Sept guardrail conversation established that any new
+-- style-fidelity mechanism must stay fully deterministic — same input
+-- always produces the same output, no render-to-render drift. A
+-- second LLM call that analyzes the person's real writing and
+-- describes their sentence-construction habits in plain language
+-- (clause order, coordination vs subordination, opener patterns —
+-- research-backed as "self-prompting", see build_style_checklist_
+-- prompt's own docstring) would violate that guardrail if it ran
+-- fresh on every render, since a fresh analysis call could phrase its
+-- own description differently each time.
+--
+-- The fix is architectural, not a compromise: run the analysis ONCE,
+-- per profile per register, cache the result here, and reuse the
+-- exact same cached text on every subsequent render in that register
+-- — identical to how voice_profile_summary is already generated once
+-- and reused (see render_pipeline.py's _generate_voice_profile_summary
+-- and its lazy-generation call site). The model never re-interprets
+-- style between renders; it reads the same cached checklist every
+-- time, same guarantee the existing fingerprint numbers already give.
+--
+-- Keyed by the same closed register set as reference_statements
+-- (professional/email/casual) — see migrations/2026_09_12_add_
+-- reference_statements_multi_register.sql. A checklist is only ever
+-- generated from a register-matched reference_statement sample (never
+-- generic calibration text), so the description it produces actually
+-- describes that register's construction habits, not a blend.
+--
+-- Same additive pattern as every prior column on this table — new,
+-- nullable, every existing row and read unaffected. NULL/empty object
+-- = feature not yet used by this profile, the correct default state.
+--
+-- Apply once via the Supabase SQL editor (or Supabase MCP
+-- apply_migration) against the live project. Idempotent — safe to
+-- re-run (ADD COLUMN IF NOT EXISTS).
+
+alter table public.voice_profiles
+    add column if not exists style_checklists jsonb default '{}'::jsonb;

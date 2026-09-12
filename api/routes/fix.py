@@ -170,6 +170,7 @@ def fix(req: FixRequest, identity: Identity = Depends(resolve_identity)):
             baseline_fingerprints_by_format=profile.get("baseline_fingerprints_by_format"),
             reference_statement=profile.get("reference_statement") or "",
             reference_statements=profile.get("reference_statements") or {},
+            style_checklists=profile.get("style_checklists") or {},
             render_context=req.user_context or "",
             # platform_format ("social" | "email") is a distinct,
             # voicova.com-only opt-in (app.py's "elevate" line-editing
