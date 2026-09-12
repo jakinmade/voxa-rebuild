@@ -644,9 +644,25 @@ def _derive_baseline_metrics(stats: dict) -> dict:
 
     scaffolding_density = round((stats.get("scaffolding_count", 0) / total_words) * 100, 2)
 
+    # Burstiness — added 12 Sept 2026, part of the register-aware voice
+    # fidelity build (PR 4 of 5). See voice_engine.py's module notes on
+    # this build for the research basis: human writing varies sentence
+    # length a lot (stdev/mean typically 0.6-1.2); AI-generated text is
+    # unusually uniform (typically 0.2-0.4) even when other style
+    # signals are matched. sentence_length_sd alone (already surfaced
+    # via RESTORATION TARGETS since 7 Sept) doesn't capture this - a SD
+    # of 8 words means something different for a writer whose average
+    # sentence is 10 words versus one whose average is 30. Normalizing
+    # by the mean gives a comparable, research-grounded ratio that can
+    # be handed to the model as a concrete generation target rather
+    # than the vaguer "mix sentence lengths" instruction alone.
+    burstiness = round(sentence_length_sd / max(mean_len, 0.01), 3)
+
     return {
         "hedge_density": hedge_density,
         "sentence_length_sd": sentence_length_sd,
+        "mean_sentence_length": round(mean_len, 2),
+        "burstiness": burstiness,
         "first_person_ratio": first_person_ratio,
         "directive_ratio": directive_ratio,
         "conclusion_opener_ratio": conclusion_opener_ratio,
@@ -796,9 +812,19 @@ def compute_baseline_metrics(text: str) -> dict:
     scaffolding_count = len(_SCAFFOLDING_PATTERN.findall(text))
     scaffolding_density = round((scaffolding_count / total_words) * 100, 2)
 
+    # Burstiness — see _derive_baseline_metrics' identical addition
+    # (12 Sept 2026) for the full rationale. Duplicated here rather
+    # than delegated, matching how conclusion_opener_ratio and
+    # scaffolding_density above are already duplicated between this
+    # function and _derive_baseline_metrics — same formula, same
+    # variable names (avg_len/sentence_length_sd) already in scope.
+    burstiness = round(sentence_length_sd / max(avg_len, 0.01), 3)
+
     return {
         "hedge_density": hedge_density,
         "sentence_length_sd": sentence_length_sd,
+        "mean_sentence_length": round(avg_len, 2),
+        "burstiness": burstiness,
         "first_person_ratio": first_person_ratio,
         "directive_ratio": directive_ratio,
         "conclusion_opener_ratio": conclusion_opener_ratio,
@@ -1069,6 +1095,20 @@ def _merge_baseline(existing: dict | None, new_metrics: dict) -> dict:
             ),
             "scaffolding_density": weighted(
                 existing.get("scaffolding_density", 0.0), new_metrics.get("scaffolding_density", 0.0)
+            ),
+            # Added 12 Sept 2026 (PR 4). Neutral defaults for a baseline
+            # from before this date: mean_sentence_length falls back to
+            # new_metrics' own SD as a rough proxy-for-scale default
+            # (better than a fixed guess unrelated to this profile's
+            # actual writing); burstiness 0.5 sits mid-way between the
+            # research-cited human (~0.6-1.2) and AI-typical (~0.2-0.4)
+            # ranges — genuinely neutral, not a guess toward either.
+            "mean_sentence_length": weighted(
+                existing.get("mean_sentence_length", new_metrics.get("sentence_length_sd", 15.0)),
+                new_metrics.get("mean_sentence_length", new_metrics.get("sentence_length_sd", 15.0)),
+            ),
+            "burstiness": weighted(
+                existing.get("burstiness", 0.5), new_metrics.get("burstiness", 0.5)
             ),
             "word_count": total_wc,
         }

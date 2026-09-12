@@ -458,6 +458,7 @@ def _build_restoration_targets(
     fp = baseline["first_person_ratio"]
     directive = baseline["directive_ratio"]
     wc = baseline["word_count"]
+    burstiness = baseline.get("burstiness")
 
     confidence = "provisional" if wc < 800 else "established"
     confidence_note = f"(Based on {wc} words — {confidence} baseline)"
@@ -472,6 +473,37 @@ def _build_restoration_targets(
         f"hedges elsewhere in the piece to hit the rate instead.",
         f"  Sentence rhythm: SD {sd:.1f} words — mix sentence lengths, do not flatten to uniform short",
     ]
+
+    # Burstiness — added 12 Sept 2026 (PR 4 of 5, register-aware voice
+    # fidelity build). baseline.get(...) rather than baseline[...]:
+    # this key doesn't exist on any baseline computed before this date
+    # until it recalibrates or merges again, and the block above (SD
+    # alone, "mix sentence lengths") already covers that case exactly
+    # as before — this is additive, not a replacement.
+    #
+    # Research basis: human writing varies sentence length a lot
+    # (stdev/mean, i.e. this exact ratio, typically 0.6-1.2); AI text
+    # is unusually uniform (typically 0.2-0.4) even once vocabulary and
+    # tone are matched. SD alone doesn't distinguish "a writer who
+    # averages 10-word sentences with 8 words of spread" from "one who
+    # averages 30 words with the same 8-word spread" — those are very
+    # different rhythms. This ratio does, and gives the model an actual
+    # number to hit instead of the vaguer "mix it up" instruction alone.
+    if burstiness is not None:
+        if burstiness >= 0.5:
+            burst_instruction = (
+                f"  Burstiness (sentence-length variety): {burstiness:.2f} — this writer's sentences "
+                f"vary a lot in length, short next to long, not a steady rhythm. Match that "
+                f"variety; do not smooth every sentence to a similar length even if that reads "
+                f"as more 'polished' — the variation IS their voice, not an inconsistency to fix."
+            )
+        else:
+            burst_instruction = (
+                f"  Burstiness (sentence-length variety): {burstiness:.2f} — this writer's "
+                f"sentences are relatively consistent in length. Don't force in short-long "
+                f"contrast that isn't there; keep the steadier rhythm they actually use."
+            )
+        lines.append(burst_instruction)
 
     if input_has_opinion_content:
         lines.append(
