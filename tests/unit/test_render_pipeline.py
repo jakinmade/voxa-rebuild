@@ -184,6 +184,84 @@ def test_insertion_check_in_final_result_matches_fresh_check_against_actual_outp
     )
 
 
+def _fake_tool_response(corrected_text: str):
+    block = MagicMock()
+    block.type = "tool_use"
+    block.input = {"corrected_text": corrected_text}
+    resp = MagicMock()
+    resp.content = [block]
+    resp.stop_reason = "tool_use"
+    return resp
+
+
+def test_correction_pass_reintroducing_dropped_subject_is_caught_by_final_restore():
+    """Real production bug, 12 Sept 2026: _restore_dropped_subject_openers
+    ran once, early (right after the initial render), correctly fixing
+    a dropped-subject sentence. The general LLM correction-prompt
+    branch then fired afterward (build_correction_prompt has no
+    SENTENCE COMPLETENESS guardrail of its own) and its fresh
+    generation reintroduced the exact same drift, with nothing running
+    afterward to catch it a second time — confirmed by pulling the
+    actual byte-exact input/output from render_history and reproducing
+    directly against _restore_dropped_subject_openers in isolation.
+
+    This simulates that exact shape end-to-end: the initial render
+    already has the dropped-subject sentence correctly restored, a
+    baseline deliberately calibrated to guarantee a MISSED dimension
+    (forcing the correction-prompt branch to fire), and that branch's
+    mocked tool response reintroduces the drift. Asserts the final
+    output_text does NOT contain the reintroduced version — proving
+    the final-pass re-application (added alongside this test) is what
+    catches it, not just the early one."""
+    from render_pipeline import run_voice_render
+
+    input_text = "Curious if you got a chance to run it. Built out for US Financial Services specifically."
+
+    # Baseline with a first_person_ratio far above anything the output
+    # will show — guarantees build_correction_prompt fires the general
+    # LLM correction branch regardless of any other dimension.
+    baseline = {
+        "hedge_density": 1.0, "sentence_length_sd": 3.0,
+        "first_person_ratio": 0.9, "directive_ratio": 0.3,
+        "conclusion_opener_ratio": 0.5, "scaffolding_density": 0.1,
+        "word_count": 500,
+    }
+    raw_text = "I checked the numbers myself. I think it holds up. I want to ship this."
+
+    initial_output = "Curious if you got a chance to run it. Built out for US Financial Services specifically."
+    # The correction pass's own fresh generation reintroduces exactly
+    # the drift the early pass already fixed — the real-world shape of
+    # the bug, not a hypothetical.
+    corrected_with_drift = "I'm curious if you got a chance to run it. I built this out for US Financial Services specifically."
+
+    def _side_effect(*args, **kwargs):
+        if kwargs.get("tools"):
+            return _fake_tool_response(corrected_with_drift)
+        return _fake_response(initial_output)
+
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = mock_cls.return_value
+        mock_client.messages.create.side_effect = _side_effect
+        result = run_voice_render(
+            input_text=input_text,
+            api_key="test-key",
+            raw_text=raw_text,
+            sample2_completions=["", "", "", ""],
+            baseline=baseline,
+            baseline_texts=[raw_text],
+        )
+
+    assert result.success
+    assert "I'm curious if" not in result.output_text, (
+        "the correction pass's reintroduced dropped-subject drift "
+        "survived to the final output — the final-pass restoration "
+        "isn't catching it."
+    )
+    assert "I built this out" not in result.output_text
+    assert "Curious if you got a chance to run it." in result.output_text
+    assert "Built out for US Financial Services specifically." in result.output_text
+
+
 def test_on_stage_callback_is_optional():
     """The API path never supplies one — must not raise or behave
     differently when omitted."""

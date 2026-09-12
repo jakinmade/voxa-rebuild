@@ -817,6 +817,36 @@ def run_voice_render(
         # insertions is already called this many times per render
         # above; one more, in the one place that actually matters for
         # what gets shown, is not a meaningful cost.
+        #
+        # Same principle extended 12 Sept 2026, real recurrence: this
+        # session's SENTENCE COMPLETENESS bug fix (curly-quote handling
+        # in _restore_dropped_subject_openers, PR merged same day) was
+        # applied once, early (right after the initial render, before
+        # the correction pass). It never fired again after that. A real
+        # production render then showed the exact same "Curious if..."
+        # / "Built out for..." drift return — root-caused by pulling
+        # the actual byte-exact input/output from render_history and
+        # confirming the fixer DOES correctly restore both sentences
+        # when run directly against that data. The gap wasn't the
+        # fixer's logic (already fixed and tested) — it was that
+        # build_correction_prompt's own system prompt (the general LLM
+        # correction branch above) has no SENTENCE COMPLETENESS
+        # guardrail of its own, so that pass's fresh generation could
+        # freely reintroduce the exact drift the early pass had already
+        # fixed, with nothing running afterward to catch it a second
+        # time. Same class of bug as the insertion_check staleness
+        # above — a deterministic backstop applied once, mid-pipeline,
+        # is not the same guarantee as one applied to the actual final
+        # `clean` regardless of which branch produced it. Re-running
+        # here, right before the check that's actually authoritative,
+        # closes that gap the same way the 8 Sept fix already did for
+        # insertion_check itself.
+        clean, final_dropped_subject_restored = _restore_dropped_subject_openers(clean, input_text)
+        if final_dropped_subject_restored:
+            log.info(
+                "dropped_subject_openers_restored_final_pass",
+                restored=final_dropped_subject_restored,
+            )
         insertion_check = _check_uncorrected_insertions(input_text, clean)
 
         confidence = compute_confidence(sample_fitness, baseline, len(observations), dimension_stability)
