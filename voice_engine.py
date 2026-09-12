@@ -3810,6 +3810,197 @@ def _classify_register(text: str) -> str:
     return "mixed"
 
 
+# ---------------------------------------------------------------------------
+# Platform/audience register detection — added 12 Sept 2026, part of the
+# register-aware voice fidelity build (PR 2 of 5).
+#
+# NOT to be confused with _classify_register above — that function buckets
+# text as corporate/analytical/mixed to pick which AI-TELL vocabulary
+# applies. This one answers a different question entirely: who is this
+# piece of writing FOR? A ghostwriter's actual voice varies by platform —
+# a LinkedIn post, a business email, and a text to a friend are genuinely
+# different registers for the same person, not one fixed voice. Calibrating
+# every render off a single stored sample (see reference_statements,
+# migrations/2026_09_12_add_reference_statements_multi_register.sql) means
+# anything outside that one register gets judged against the wrong
+# baseline.
+#
+# Deterministic and heuristic, same philosophy as _detect_mode
+# (prompts.py) and _classify_register above — a fixed, closed set of
+# output categories, same input always lands in the same bucket. This
+# is a classification of the TEXT being rewritten, never a free-text
+# guess, so it can't introduce the kind of render-to-render variance the
+# guardrail conversation (12 Sept 2026) explicitly ruled out.
+#
+# "personal" is a valid reference_statements key but is NOT detected by
+# this function in this PR — distinguishing "personal note to someone
+# you know" from "casual" reliably needs signal (a named addressee, a
+# personal-life topic) that risks false positives without real
+# examples to tune against. Scoped out deliberately rather than guessed
+# at. Falls into "casual" for now; can be split out later if it proves
+# to matter in practice.
+# ---------------------------------------------------------------------------
+
+_EMAIL_SIGNALS = re.compile(
+    r'\b(Dear|Hi |Hello |Regards,|Best,|Cheers,|Thanks,|Sent from|Subject:|From:|To:)\b',
+    re.IGNORECASE
+)
+
+# LinkedIn/professional-post signals — vocabulary and constructions common
+# in professional social posts and business writing, distinct from private
+# correspondence. Deliberately excludes generic professional vocabulary
+# that would also appear in an ordinary business email (see _AI_TELL_
+# PHRASES' own note on the same principle) — this list is about the
+# announcement/engagement-post register specifically, not "sounds
+# professional" generally.
+_PROFESSIONAL_POST_SIGNALS = re.compile(
+    r'\b(excited to (share|announce)|thrilled to (share|announce)|'
+    r'proud to (share|announce)|delighted to (share|announce)|'
+    r'humbled to|grateful to|honou?red to|'
+    r'thoughts\?|agree\?|what (do you think|are your thoughts)|'
+    r'let.s connect|open to (work|opportunities)|'
+    r'my (journey|takeaways|learnings)|'
+    r'#\w+)\b',
+    re.IGNORECASE
+)
+
+# Ordinary business/work vocabulary — added 12 Sept 2026 alongside the
+# narrative-density signal below. Confirmed live (this session): with
+# only _PROFESSIONAL_POST_SIGNALS above, "professional" was reachable
+# only as a default when nothing else fired, never as an earned
+# positive signal in its own right. Real, plainly conversational text
+# (five genuine everyday samples — lunch, weather, weekend plans, TV,
+# mood) had no slang/emoji/punctuation to trip _CASUAL_SIGNALS, so 4 of
+# 5 misclassified as "professional" purely by default, not because
+# anything about them read as professional. This list gives
+# "professional" something real to earn credit from, so the casual
+# narrative signal below isn't just fighting an empty default.
+_BUSINESS_VOCAB = re.compile(
+    r'\b(team|client|clients|stakeholder|deliverable|deadline|roadmap|'
+    r'quarter|revenue|pipeline|campaign|initiative|strategy|workflow|'
+    r'meeting|agenda|leadership|budget|proposal|onboarding|kpi|'
+    r'project|milestone|synergy)\b',
+    re.IGNORECASE
+)
+
+# Casual/informal signals — slang, texting conventions, emoji, multiple
+# exclamation marks. If any of these fire strongly, the text is very
+# unlikely to be a LinkedIn post or formal email regardless of any other
+# signal present.
+_CASUAL_SIGNALS = re.compile(
+    r'\b(lol|lmao|haha+|omg|gonna|wanna|kinda|dunno|yeah|nah|'
+    r'mate|bro|innit)\b',
+    re.IGNORECASE
+)
+_CASUAL_PUNCTUATION = re.compile(r'!{2,}|\?{2,}|\.{3,}')
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "]"
+)
+
+# Plain first-person narrative — added 12 Sept 2026, same finding as
+# _BUSINESS_VOCAB above. Ordinary everyday writing ("I did not have
+# lunch today, as I was fasting", "I am watching a crime series on
+# Netflix") carries no slang and no business vocabulary — it's neither
+# list's territory. What it DOES reliably have: dense first-person
+# pronoun use and short, simple sentences describing routine personal
+# activity, with no professional-post markers (my journey/takeaways,
+# announcement verbs, hashtags) and no business vocabulary at all.
+# Combining those three absence/presence checks is a genuine positive
+# signal for "casual", not a topic-keyword guess — it doesn't need to
+# know the text is about lunch or Netflix specifically, only that it
+# reads as first-person routine narration rather than composed
+# business writing.
+_NARRATIVE_PRONOUNS = re.compile(r'\b(I|me|my|myself)\b')
+
+
+def _looks_like_plain_narrative(text: str) -> bool:
+    """
+    True if text reads as dense first-person, short-sentence personal
+    narration with no business vocabulary and no professional-post
+    markers. See _NARRATIVE_PRONOUNS comment above for the full
+    rationale — this is the signal that closes the gap
+    _PROFESSIONAL_POST_SIGNALS/_BUSINESS_VOCAB leave for ordinary
+    everyday writing that isn't marked by either slang or business
+    terms.
+    """
+    words = text.split()
+    if len(words) < 4:
+        return False  # too short to judge density reliably either way
+
+    if _BUSINESS_VOCAB.search(text) or _PROFESSIONAL_POST_SIGNALS.search(text):
+        return False  # already has a real professional signal, don't override it
+
+    pronoun_hits = len(_NARRATIVE_PRONOUNS.findall(text))
+    pronoun_density = pronoun_hits / (len(words) / 100)  # per 100 words
+
+    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+    avg_sentence_len = (len(words) / len(sentences)) if sentences else len(words)
+
+    # Thresholds chosen against the five real samples this signal was
+    # built to catch (dense first-person, short/simple sentences) —
+    # not tuned against a large corpus, so treat as a reasonable first
+    # pass rather than a precisely calibrated cutoff. Revisit once real
+    # usage data exists, same evidence-driven approach used throughout
+    # this codebase's scoring rules.
+    return pronoun_density >= 4.0 and avg_sentence_len <= 20
+
+
+def _classify_platform(text: str) -> str:
+    """
+    Classifies input text into a fixed audience/platform register:
+    'email', 'professional', or 'casual'. Used to select which
+    reference_statements entry (if any) matches the text actually
+    being rewritten, so calibration is judged against the right
+    register rather than whatever single sample happened to be saved.
+
+    Deliberately conservative and cheap — regex signal-counting, same
+    class of heuristic as _detect_mode and _classify_register, not an
+    LLM call. That keeps this fully deterministic (same input, same
+    bucket, always) and free to run on every render.
+
+    Email checked first and wins outright when present — explicit
+    salutations/sign-offs/headers are the most distinctive, lowest-
+    false-positive signal of the three, and a genuine email virtually
+    never also reads as a LinkedIn post.
+
+    Between professional and casual: business vocabulary and
+    professional-post markers earn real professional points;
+    slang/emoji/punctuation and plain first-person narrative
+    (_looks_like_plain_narrative) earn real casual points. Whichever
+    has more wins. Defaults to 'professional' only on a genuine
+    zero-zero tie — short, register-neutral text with no signal of
+    any kind — on the reasoning that VOICOVA's actual customer base
+    (ghostwriters/copywriters checking client drafts) means the modal
+    ambiguous input is more likely business writing than personal
+    chat. This can be revisited once real usage data exists.
+    """
+    if not text or not text.strip():
+        return "professional"
+
+    if _EMAIL_SIGNALS.search(text):
+        return "email"
+
+    casual_hits = (
+        len(_CASUAL_SIGNALS.findall(text))
+        + len(_CASUAL_PUNCTUATION.findall(text))
+        + len(_EMOJI_PATTERN.findall(text))
+    )
+    if _looks_like_plain_narrative(text):
+        casual_hits += 1
+
+    professional_hits = (
+        len(_PROFESSIONAL_POST_SIGNALS.findall(text))
+        + len(_BUSINESS_VOCAB.findall(text))
+    )
+
+    if casual_hits > professional_hits:
+        return "casual"
+    return "professional"
+
+
 def uses_contractions(text: str) -> bool:
     """
     Does this person's own writing use contractions? Baseline-driven,

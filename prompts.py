@@ -24,6 +24,8 @@ from voice_engine import (
     _extract_function_patterns,
     _format_function_patterns,
     _classify_register,
+    _classify_platform,
+    _EMAIL_SIGNALS,
     _extract_sentences,
     _ANCHOR_SENTENCE_CAP,
     usable_reference_statement_sentences,
@@ -386,14 +388,12 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     if raw_text and len(raw_text.split()) >= 100:
         patterns = _extract_function_patterns(raw_text)
         # Detect genre of the INPUT being rendered (not the corpus)
-        # Use a simple heuristic: email signals in the input text being restored
-        import re as _re
-        _email_signals = _re.compile(
-            r'\b(Dear|Hi |Hello |Regards,|Best,|Cheers,|Thanks,|Sent from|Subject:|From:|To:)\b',
-            _re.IGNORECASE
-        )
+        # Use the shared email-signal regex (voice_engine._EMAIL_SIGNALS,
+        # added 12 Sept 2026 for _classify_platform) rather than a second,
+        # locally-defined copy of the identical pattern — single source of
+        # truth, same reasoning _PLAUSIBILITY_SHIELD_* etc. already follow.
         # raw_text is the corpus (user's own writing) — check its genre
-        _corpus_is_email = bool(_email_signals.search(raw_text))
+        _corpus_is_email = bool(_EMAIL_SIGNALS.search(raw_text))
         _input_genre = "email" if _corpus_is_email else "article"
         pattern_block = _format_function_patterns(patterns, input_genre=_input_genre)
         if pattern_block:
