@@ -1505,7 +1505,17 @@ def _restore_dropped_subject_openers(output_text: str, input_text: str) -> tuple
     # this exact document's "Built out for..." sentence was swallowed
     # into the preceding quoted sentence and never seen as its own
     # sentence at all, silently no-op'ing this entire function for it.
-    orig_sentences = [s.strip() for s in re.split(r"(?<=[.!?])['\")]*\s+", input_text) if s.strip()]
+    #
+    # WIDENED 12 Sept 2026, real recurrence: the original fix only
+    # covered straight ASCII quote/paren characters ('"). Confirmed
+    # live (this session) that the exact same swallowing bug still
+    # fires when the preceding sentence's closing quote is a Unicode
+    # curly/typographic quote (\u201d "right double quotation mark",
+    # \u2019 "right single quotation mark") — which is Claude's own
+    # DEFAULT quoting style in generated output, not an edge case. The
+    # bug's mechanism is identical, just an uncovered character class;
+    # widened rather than special-cased.
+    orig_sentences = [s.strip() for s in re.split(r"(?<=[.!?])['\"\u2019\u201d\)]*\s+", input_text) if s.strip()]
     fixed = output_text
     restored = []
 
@@ -1563,9 +1573,21 @@ def _restore_dropped_subject_openers(output_text: str, input_text: str) -> tuple
             # whitespace) as well as the whitespace itself, so that
             # character isn't mistaken for part of the sentence being
             # replaced and doesn't get swallowed by the splice below.
-            while start < len(fixed) and fixed[start] in "\"') \n\t":
+            #
+            # WIDENED 12 Sept 2026, same real recurrence as the
+            # splitting regex above: only ASCII quote characters were
+            # covered here. Confirmed live — when the preceding
+            # sentence ends in a curly closing quote (\u201d), this
+            # loop failed to advance past it, so `start` landed ON the
+            # quote character instead of after it. The splice below
+            # then overwrote that quote AND the paragraph-break
+            # whitespace that followed it with the restored sentence
+            # directly, with nothing put back in their place — the
+            # visible symptom was two sentences merging with no space
+            # or line break between them ("...didn't.Built out...").
+            while start < len(fixed) and fixed[start] in "\"'\u2019\u201d) \n\t":
                 start += 1
-            end_match = re.search(r"[.!?]['\")]*", fixed[m.start():])
+            end_match = re.search(r"[.!?]['\"\u2019\u201d\)]*", fixed[m.start():])
             if not end_match:
                 continue
             end = m.start() + end_match.end()
