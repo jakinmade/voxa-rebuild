@@ -258,6 +258,13 @@ def restore_profile_if_available() -> bool:
         if not reference_statements and row.get("reference_statement"):
             reference_statements = {"professional": row["reference_statement"]}
         st.session_state["reference_statements"] = reference_statements
+        # Optional (12 Sept 2026, PR 5 of 5) — same safe pattern. A row
+        # saved before this feature existed simply won't have it, and
+        # _build_voice_dna's style_checklist param defaults to "" —
+        # zero construction-level guidance beyond anchors/numeric
+        # targets, same as every render before this feature existed.
+        if row.get("style_checklists"):
+            st.session_state["style_checklists"] = row["style_checklists"]
         # Optional — a row saved before this feature existed simply
         # won't have it, and a render proceeds exactly as it did
         # before (anchor sentences and numeric targets alone).
@@ -333,6 +340,13 @@ def save_profile_if_available() -> None:
             **({"professional": st.session_state["reference_statement"]}
                if st.session_state.get("reference_statement") else {}),
         },
+        # 12 Sept 2026 (PR 5 of 5) — see migrations/2026_09_12_add_
+        # style_checklists.sql. Same raw session_state passthrough as
+        # reference_statements above, no merge/computation here — the
+        # actual merge-in-place already happened in app.py's caller
+        # code (result.style_checklist_generated handling) before this
+        # save was triggered.
+        "style_checklists": st.session_state.get("style_checklists", {}),
         # Explicit, not left to the column's DEFAULT now() — that
         # default only fires on INSERT. This table is written via
         # upsert, and an upsert that hits the existing-row path is an

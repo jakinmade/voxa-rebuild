@@ -83,6 +83,7 @@ from prompts import (
     _apply_uk_english, _regex_sweep, _grammar_fix_pass,
     build_correction_prompt, merge_starter_evidence,
     build_voice_profile_summary_prompt, uses_em_dashes,
+    build_style_checklist_prompt,
     CORRECTION_TOOL, response_looks_contaminated,
     build_fabrication_correction_prompt,
 )
@@ -115,6 +116,15 @@ class RenderResult:
     # persist it (Streamlit: save_profile_if_available(); API: a
     # targeted profile update). None means nothing new to persist.
     voice_profile_summary_generated: str | None = None
+    # Set only when this call generated a NEW style checklist for the
+    # detected register (12 Sept 2026, PR 5 of 5) — same lazy-
+    # generation/caller-persists pattern as voice_profile_summary_
+    # generated above. Shape: {register: checklist_text}, a single-key
+    # dict ready to be merged into the profile's existing
+    # style_checklists without clobbering other registers' entries.
+    # None means nothing new to persist (already cached, or nothing
+    # to analyse yet).
+    style_checklist_generated: dict | None = None
     insertion_check: dict | None = None
     keep_contractions: bool | None = None
     keep_dashes: bool | None = None
@@ -181,6 +191,57 @@ def _generate_voice_profile_summary(corpus_text: str, api_key: str) -> str | Non
         return summary
     except Exception:
         log.error("voice_profile_summary_generation_failed", exc_info=True)
+        return None
+
+
+def _generate_style_checklist(sample_text: str, api_key: str) -> str | None:
+    """
+    One-time, per-register self-prompting analysis call — see
+    migrations/2026_09_12_add_style_checklists.sql and build_style_
+    checklist_prompt's own docstring for the full rationale. Modeled
+    directly on _generate_voice_profile_summary above: same shape,
+    same cost guardrails, same "quality enhancement, not required"
+    failure behaviour.
+
+    sample_text: must be register-matched real material (a
+    reference_statement entry), never generic calibration text — see
+    the caller (run_voice_render) for how that's enforced: this is
+    only ever invoked when a resolved reference_statement exists for
+    the detected register, so the analysis always describes that
+    register's construction habits specifically.
+
+    Cost guardrail: minimum viable max_tokens (150 — this only needs
+    to hold 2-4 sentences per build_style_checklist_prompt's own
+    output-length instruction), no auto-retry on failure, cached
+    rather than regenerated on every render (caller's responsibility —
+    see run_voice_render's lazy-generation call site below).
+
+    Returns None on any failure — a render with no cached checklist
+    falls back to exactly what already existed before this feature:
+    anchor sentences, numeric targets, and the general voice-profile
+    summary alone.
+    """
+    if not api_key or not sample_text or not sample_text.strip():
+        return None
+
+    import anthropic
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=150, temperature=0,
+            system=build_style_checklist_prompt(),
+            messages=[{"role": "user", "content": sample_text}],
+        )
+        checklist = response.content[0].text.strip()
+        # Same deterministic backstop the render output and the voice-
+        # profile summary both get — this is a synthesised description,
+        # not a copy of the person's own words, so keep_contractions=True
+        # for the same reason _generate_voice_profile_summary uses it.
+        checklist = _regex_sweep(checklist, keep_contractions=True)
+        log.info("style_checklist_generated", checklist_length=len(checklist))
+        return checklist
+    except Exception:
+        log.error("style_checklist_generation_failed", exc_info=True)
         return None
 
 
@@ -279,6 +340,7 @@ def run_voice_render(
     baseline_fingerprints_by_format: dict | None = None,
     reference_statement: str = "",
     reference_statements: dict | None = None,
+    style_checklists: dict | None = None,
     render_mode: str = "preserve",
     render_context: str = "",
     platform_format: str | None = None,
@@ -323,6 +385,18 @@ def run_voice_render(
     identical behaviour to before this feature — reference_statements
     defaulting to None makes step 4 of the fallback the only one ever
     reached in that case.
+
+    style_checklists: added 12 Sept 2026 (PR 5 of 5) — see migrations/
+    2026_09_12_add_style_checklists.sql. Dict of cached, register-
+    tagged sentence-construction descriptions (see build_style_
+    checklist_prompt). When the detected register has no cached entry
+    yet AND a resolved reference_statement exists for it, this call
+    generates one (a real API call, the self-prompting analysis step)
+    and returns it via RenderResult.style_checklist_generated for the
+    caller to persist — exactly the same lazy-generate-once-then-cache
+    pattern voice_profile_summary already uses. No reference_statement
+    for the detected register means nothing to analyse, so no call is
+    made and style_checklist_generated stays None.
     """
     if not api_key:
         return RenderResult(success=False, error="API key missing.")
@@ -392,9 +466,23 @@ def run_voice_render(
         if generated_summary:
             voice_profile_summary = generated_summary
 
+    # Lazy, per-register style-checklist generation (12 Sept 2026,
+    # PR 5 of 5) — same shape as the voice-profile-summary block
+    # above: only generated once per register per profile, only when
+    # there's real register-matched material to analyse. Caller
+    # persists via RenderResult.style_checklist_generated.
+    style_checklists = style_checklists or {}
+    resolved_style_checklist = style_checklists.get(detected_register, "")
+    generated_style_checklist = None
+    if not resolved_style_checklist and resolved_reference_statement:
+        generated_style_checklist = _generate_style_checklist(resolved_reference_statement, api_key)
+        if generated_style_checklist:
+            resolved_style_checklist = generated_style_checklist
+
     voice_dna = _build_voice_dna(
         observations, fingerprint_corpus or raw_text, baseline, ai_score,
         current_input_text=input_text, reference_statement=resolved_reference_statement,
+        style_checklist=resolved_style_checklist,
     )
     mode_instruction = apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
@@ -787,6 +875,7 @@ def run_voice_render(
             intent_mode=detected_mode,
             restructure_declined=restructure_declined,
             voice_profile_summary_generated=generated_summary,
+            style_checklist_generated=({detected_register: generated_style_checklist} if generated_style_checklist else None),
             insertion_check=insertion_check,
             keep_contractions=keep_contractions,
             keep_dashes=keep_dashes,
@@ -814,6 +903,7 @@ def run_voice_render(
         intent_mode=detected_mode,
         restructure_declined=restructure_declined,
         voice_profile_summary_generated=generated_summary,
+        style_checklist_generated=({detected_register: generated_style_checklist} if generated_style_checklist else None),
         insertion_check=None,
         keep_contractions=keep_contractions,
         keep_dashes=keep_dashes,

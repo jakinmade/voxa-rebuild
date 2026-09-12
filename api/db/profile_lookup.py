@@ -96,5 +96,13 @@ def get_profile_bundle(profile_id: str) -> dict | None:
         # own `reference_statements or {}` guard, same as it already
         # does for reference_statement above.
         "reference_statements": row.get("reference_statements"),
+        # 12 Sept 2026 (PR 5 of 5) — same optional-field pattern.
+        # fix.py passes this straight through to run_voice_render;
+        # not persisted back from the API path, matching the existing
+        # asymmetry voice_profile_summary_generated already has (see
+        # that field's own comment in render_pipeline.py — Streamlit
+        # persists via save_profile_if_available(), the API path does
+        # not persist lazy-generated fields at all).
+        "style_checklists": row.get("style_checklists"),
         "updated_at": row.get("updated_at"),
     }

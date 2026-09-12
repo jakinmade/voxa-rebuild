@@ -2605,6 +2605,7 @@ def _run_render(
     baseline_fingerprints_by_format = st.session_state.get("baseline_fingerprints_by_format")
     reference_statement = st.session_state.get("reference_statement", "")
     reference_statements = st.session_state.get("reference_statements", {})
+    style_checklists = st.session_state.get("style_checklists", {})
 
     _spinner_text = {
         "writing": "Writing as you...",
@@ -2638,6 +2639,7 @@ def _run_render(
             baseline_fingerprints_by_format=baseline_fingerprints_by_format,
             reference_statement=reference_statement,
             reference_statements=reference_statements,
+            style_checklists=style_checklists,
             render_mode=render_mode,
             render_context=render_context,
             platform_format=platform_format,
@@ -2663,6 +2665,17 @@ def _run_render(
     # instead of a side effect buried inside the render call itself.
     if result.voice_profile_summary_generated:
         st.session_state.voice_profile_summary = result.voice_profile_summary_generated
+        save_profile_if_available()
+
+    # New style checklist generated this call (12 Sept 2026, PR 5 of
+    # 5) — same pattern as voice_profile_summary_generated above,
+    # merged into the existing dict rather than replacing it so other
+    # registers' cached checklists aren't clobbered.
+    if result.style_checklist_generated:
+        st.session_state.style_checklists = {
+            **st.session_state.get("style_checklists", {}),
+            **result.style_checklist_generated,
+        }
         save_profile_if_available()
 
     st.session_state.intent_mode = result.intent_mode

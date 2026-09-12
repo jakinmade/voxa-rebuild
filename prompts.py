@@ -190,7 +190,7 @@ def apply_intent_mode(text: str, mode: str) -> str:
     }
     return mode_prompts.get(mode, mode_prompts["GET_IT_DONE"])
 def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | None = None, ai_score: float = 0.0,
-                      current_input_text: str = "", reference_statement: str = "") -> str:
+                      current_input_text: str = "", reference_statement: str = "", style_checklist: str = "") -> str:
     """
     Builds a rich, structured voice DNA string for the render prompt.
     Goes far beyond observation headlines — extracts structural metrics
@@ -230,6 +230,20 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     logic. Empty string (the default, and every profile that predates
     this feature or skipped the prompt) falls back to exactly the
     prior algorithmic-only behaviour.
+
+    style_checklist: added 12 Sept 2026 (PR 5 of 5, register-aware
+    voice fidelity build) — see migrations/2026_09_12_add_style_
+    checklists.sql and build_style_checklist_prompt's own docstring.
+    A cached, one-time, per-register natural-language description of
+    HOW this person constructs sentences at the clause level
+    (coordination vs subordination, where reason/exception clauses
+    sit, comma splices, fragments) — generated once by a separate
+    self-prompting LLM call and reused unchanged on every render in
+    that register, never regenerated fresh here. Empty string (the
+    default, and every profile that hasn't generated one yet for the
+    detected register) reproduces exactly the prior behaviour with no
+    construction-level guidance beyond what anchor sentences and
+    numeric targets already imply.
     """
     if not observations:
         return "No fingerprint available. Apply a plain, direct, compressed register. UK English. Short sentences."
@@ -375,6 +389,16 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
         lines.append("\nANCHOR SENTENCES — their most distinctive sentences (calibrate against these, do not copy):")
         for s in samples:
             lines.append(f'  "{s}"')
+
+    # Self-prompting style checklist — added 12 Sept 2026 (PR 5 of 5).
+    # Cached, generated once per profile per register — see this
+    # function's own docstring and build_style_checklist_prompt for
+    # the full rationale. Placed right after anchor sentences: both
+    # are about HOW this person actually writes, drawn from real
+    # material, as opposed to the numeric targets and general prose
+    # description elsewhere in this function.
+    if style_checklist:
+        lines.append(f"\nSENTENCE CONSTRUCTION (self-observed from their own writing):\n  {style_checklist}")
 
     # Vocabulary fingerprint — actual words, not polished synonyms
     if raw_text and len(raw_text.split()) >= 80:
@@ -1803,6 +1827,67 @@ def _grammar_fix_pass(text: str, client, locale: str = "uk", original_input_text
         messages=[{"role": "user", "content": text}],
     )
     return response.content[0].text.strip()
+
+
+def build_style_checklist_prompt() -> str:
+    """
+    System prompt for the one-time, per-register self-prompting style
+    analysis call — added 12 Sept 2026 (PR 5 of 5, register-aware voice
+    fidelity build). See migrations/2026_09_12_add_style_checklists.sql
+    for the caching/determinism rationale (run once per profile per
+    register, cache, reuse — never regenerated per render).
+
+    Deliberately narrow and non-overlapping with build_voice_profile_
+    summary_prompt above: that prompt already covers sentence rhythm,
+    tone, hedging, humour, recurring phrasing at a general level. This
+    one is scoped to ONE thing that prompt doesn't reach and the
+    numeric fingerprint (hedge_density, burstiness, etc.) can't
+    capture either: how this person actually CONSTRUCTS a sentence at
+    the clause level — coordination vs subordination, where a
+    reason/exception clause sits relative to the main clause, comma
+    splices vs full stops, sentence fragments. This is the gap a real
+    user conversation (12 Sept 2026) identified directly: existing
+    rewrites could hit every numeric target and still not sound like
+    the person, because clause construction is a different axis from
+    word choice, hedging rate, or sentence length.
+
+    Self-prompting technique — grounded in published research (LLM
+    authorship-impersonation literature): having the model itself
+    analyse real writing samples and generate its own natural-language
+    description of salient construction habits, then feeding that
+    description back to the SAME model at generation time, measurably
+    outperforms hand-coded declarative rules for capturing patterns
+    that are hard to specify in advance (exactly clause order and
+    coordination habits, which is why this technique was chosen over
+    hand-coding a parser for them).
+
+    Grounded in real, register-matched material only (the
+    reference_statement passed to this call) — never generic
+    calibration text — so the description it produces genuinely
+    reflects that platform's construction habits, not a blend across
+    registers with potentially different habits.
+    """
+    return (
+        "You are analysing a short sample of someone's own writing to describe, in "
+        "plain language, ONE specific thing: how they build sentences at the clause "
+        "level. Not tone, not vocabulary, not hedging, not humour — purely "
+        "construction mechanics.\n\n"
+        "Look for things like: do they link ideas with light coordination (and, but, "
+        "so) or heavier subordination (because, although, since, while)? When they "
+        "give a reason or an exception, does it come BEFORE the main point or "
+        "TRAIL AFTER it? Do independent clauses ever run together on just a comma "
+        "(a comma splice) as a genuine, consistent habit rather than an error? Do "
+        "they use sentence fragments deliberately? Do they stack multiple clauses "
+        "into one compressed sentence, or keep sentences short and separate?\n\n"
+        "Write 2-4 sentences, plain prose, no headers, no bullet points, no preamble. "
+        "Describe only patterns the sample actually demonstrates — do not invent a "
+        "habit the sample doesn't show evidence of, and do not pad with generic "
+        "advice that could apply to any writer. This will be given directly to "
+        "another instance of you at generation time as a fixed description of how "
+        "this person builds sentences — write it as an instruction to follow "
+        "('Links causes and exceptions after the main clause, not before.'), not "
+        "as a report."
+    )
 
 
 def build_voice_profile_summary_prompt() -> str:

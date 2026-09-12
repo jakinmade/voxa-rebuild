@@ -135,6 +135,41 @@ def test_voice_profile_summary_is_swept_through_the_same_deterministic_backstop(
 
 
 # ---------------------------------------------------------------------------
+# Call site 6: style checklist (render_pipeline.py, _generate_style_
+# checklist), added 12 Sept 2026 (PR 5 of 5, register-aware voice
+# fidelity build) — free-text by design (a natural-language description
+# of sentence-construction habits, not a decision), same shape as call
+# site 4 above and same guard: swept through the same deterministic
+# backstop render output gets. Also fully deterministic in WHEN it
+# runs (see run_voice_render): only ever called once per profile per
+# register — cached afterward, never regenerated per render — which is
+# the guardrail this whole feature was built around (12 Sept 2026
+# conversation: a fresh analysis call on every render could phrase its
+# own description differently each time, reopening exactly the kind of
+# render-to-render drift the deterministic engine is designed to
+# prevent).
+# ---------------------------------------------------------------------------
+
+def test_style_checklist_is_swept_through_the_same_deterministic_backstop():
+    window = _lines_around(RENDER_PIPELINE_PY, "system=build_style_checklist_prompt()")
+    assert "_regex_sweep(" in window, (
+        "Style checklist generation no longer swept through _regex_sweep "
+        "— free-text generation still needs the same deterministic "
+        "backstop render output and the voice profile summary both get."
+    )
+
+
+def test_style_checklist_generation_is_cached_not_regenerated_per_render():
+    window = _lines_around(RENDER_PIPELINE_PY, "generated_style_checklist = _generate_style_checklist(", before=5, after=5)
+    assert "not resolved_style_checklist" in window, (
+        "Style checklist generation no longer gated on 'no cached entry "
+        "yet' — this is the guard that keeps it a one-time, cached call "
+        "instead of a fresh (and therefore non-deterministic between "
+        "renders) analysis every time."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Call site 5: fabrication correction pass (_run_render, app.py), added
 # 5 Sept 2026 — schema-constrained like call site 2, but decides WHAT
 # to fix from deterministic evidence (get_fabricated_blocks, the exact
@@ -197,12 +232,12 @@ def test_known_llm_call_site_count_has_not_silently_grown():
     prompts_count = PROMPTS_PY.count("client.messages.create(")
     render_pipeline_count = RENDER_PIPELINE_PY.count("client.messages.create(")
     total = app_count + prompts_count + render_pipeline_count
-    assert total == 5, (
-        f"Expected 5 known client.messages.create() call sites (main render, "
+    assert total == 6, (
+        f"Expected 6 known client.messages.create() call sites (main render, "
         f"correction pass, grammar-fix pass, voice profile summary, "
-        f"fabrication correction pass — the first four now in "
-        f"render_pipeline.py, grammar-fix pass still in prompts.py, per the "
-        f"5 Sept 2026 _run_render extraction), found "
+        f"fabrication correction pass, style checklist — the first four now "
+        f"in render_pipeline.py, grammar-fix pass still in prompts.py, style "
+        f"checklist added 12 Sept 2026 in render_pipeline.py), found "
         f"{total}. If this is a deliberate new call site, add a test for its "
         f"guard above and update this count in the same change — that's the "
         f"whole point of this file."
