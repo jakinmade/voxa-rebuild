@@ -207,6 +207,21 @@ def test_my_voice_shows_reference_statement_prompt_when_unset():
     assert "Give Fix-it one real example to aim for" in expander_labels
 
 
+def test_reference_statement_panel_labels_the_input_box_explicitly():
+    """Real user finding (12 Sept 2026): the instructional paragraph
+    above the input reads as prominent block text, and the actual
+    paste_guard textarea is a visually separate custom component below
+    it — without a direct cue, a person can mistake the instructions
+    for the input area and conclude the field 'isn't editable' (it's
+    paste-blocked by design, not broken). This label closes that gap."""
+    at = AppTest.from_file(_APP_PATH, default_timeout=30)
+    _seed_established_profile(at)
+    at.run()
+    assert not at.exception
+    body = " ".join(m.value for m in at.markdown)
+    assert "Type your answer in the box below" in body
+
+
 def test_my_voice_shows_update_label_and_current_value_when_already_set():
     at = AppTest.from_file(_APP_PATH, default_timeout=30)
     _seed_established_profile(at)

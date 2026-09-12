@@ -1968,6 +1968,28 @@ def _reference_statement_panel():
                 f'Current: "{_safe_html(existing)}"</div>',
                 unsafe_allow_html=True,
             )
+        # Explicit label immediately above the input, added 12 Sept 2026
+        # — real user finding: the long instructional paragraph above
+        # reads as prominent, styled block-level text, and the actual
+        # input is a separate custom component (paste_guard, an
+        # embedded iframe) with visual spacing before it. Without a
+        # direct "type here" cue right next to the real box, a person
+        # can mistake the instructions above for the input area itself
+        # and conclude the field "isn't editable" — it's paste-blocked
+        # by design (see paste_guard's own docstring/index.html), not
+        # broken, but that's invisible unless you're already looking at
+        # the right element. Mirrors the tighter "Prompt X of Y" + hint
+        # pattern screen_sample2 already uses directly above its own
+        # paste_guard calls, which doesn't have this ambiguity because
+        # the label sits immediately adjacent with no long paragraph in
+        # between.
+        st.markdown(
+            '<div class="microcopy" style="margin-top:0.6rem;margin-bottom:0.2rem;'
+            'font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.05em;">'
+            "Type your answer in the box below"
+            '</div>',
+            unsafe_allow_html=True,
+        )
         # Explicit read-modify-write through its own session_state key,
         # same pattern screen_sample2 uses for its paste_guard fields
         # (completions[idx] = paste_guard(value=completions[idx], ...))
