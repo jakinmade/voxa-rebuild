@@ -23,7 +23,7 @@ recognize the curly quote character, so the splice consumed the quote
 AND the paragraph-break whitespace after it with nothing put back —
 producing two sentences merged with no space ("...didn't.Built out...").
 """
-from deterministic_fixers import _restore_dropped_subject_openers
+from deterministic_fixers import _restore_dropped_subject_openers, _restore_dropped_contractions
 
 
 def test_restores_a_single_dropped_subject_sentence_straight_quotes():
@@ -140,3 +140,97 @@ def test_multiple_dropped_subject_sentences_in_one_document_both_restored():
     assert "Built out for US Financial Services specifically, the state AI laws now live." in fixed
     assert "I'm curious" not in fixed
     assert "I built this out" not in fixed
+
+
+# ------------------------------------------------------------------
+# Article restoration — extended 12 Sept 2026, real recurrence
+# ------------------------------------------------------------------
+
+def test_restores_a_dropped_article_not_just_a_dropped_subject():
+    """Real production finding: SENTENCE COMPLETENESS explicitly covers
+    'a subject, article, or connective word' as one violation, but
+    _DROPPED_SUBJECT_INJECTIONS only ever covered subjects. 'Timing
+    feels right...' (dropped article, economy construction) rendered
+    as 'The timing feels right...' — confirmed live, same document as
+    the subject-restoration bugs above."""
+    original = "Timing feels right off the back of your Workflow Agent Manager post."
+    rewrite = "The timing feels right off the back of your Workflow Agent Manager post."
+    fixed, restored = _restore_dropped_subject_openers(rewrite, original)
+    assert fixed == original
+    assert restored == [original]
+
+
+def test_article_restoration_does_not_touch_a_sentence_that_genuinely_needs_one():
+    """A sentence that's ungrammatical without the article in the
+    ORIGINAL itself must not spuriously 'restore' anything — there's
+    nothing to restore since the original never had this sentence."""
+    original = "This report covers three regions."
+    rewrite = "This report covers three regions."
+    fixed, restored = _restore_dropped_subject_openers(rewrite, original)
+    assert fixed == rewrite
+    assert restored == []
+
+
+# ------------------------------------------------------------------
+# Contraction restoration — added 12 Sept 2026, real recurrence
+# ------------------------------------------------------------------
+
+def test_restores_a_dropped_contraction():
+    """Real production finding, twice now on the same document: 'It's
+    the deterministic proof layer...' rendered as 'It is the
+    deterministic proof layer...' despite the CONTRACTIONS instruction
+    being present and correct. No deterministic backstop existed for
+    this before this fix."""
+    original = "It's the deterministic proof layer underneath the governance moat point from our earlier thread."
+    rewrite = "It is the deterministic proof layer underneath the governance moat point from our earlier thread."
+    fixed, restored = _restore_dropped_contractions(rewrite, original)
+    assert fixed == original
+    assert restored == [original]
+
+
+def test_contraction_restoration_leaves_correctly_contracted_output_unchanged():
+    original = "It's the deterministic proof layer."
+    rewrite = "It's the deterministic proof layer."
+    fixed, restored = _restore_dropped_contractions(rewrite, original)
+    assert fixed == rewrite
+    assert restored == []
+
+
+def test_contraction_restoration_does_not_touch_a_possessive():
+    """'its' (no apostrophe, possessive) must never be mistaken for a
+    contraction — the whitelist only ever matches 'it's' (with
+    apostrophe), never bare 'its'."""
+    original = "The system checks its own output before returning."
+    rewrite = "The system checks its own output before returning."
+    fixed, restored = _restore_dropped_contractions(rewrite, original)
+    assert fixed == rewrite
+    assert restored == []
+
+
+def test_contraction_restoration_is_case_insensitive_but_preserves_output_case():
+    original = "That's the whole point of the exercise."
+    rewrite = "That is the whole point of the exercise."
+    fixed, restored = _restore_dropped_contractions(rewrite, original)
+    assert fixed == original
+
+
+def test_contraction_restoration_skips_when_rest_of_sentence_also_changed():
+    """Evidence-gated by design: if the rest of the sentence isn't
+    byte-identical to the original (beyond the one contraction), this
+    safely does nothing rather than guess at a partial match."""
+    original = "It's the deterministic proof layer underneath the point."
+    rewrite = "It is basically the proof layer underneath the point."
+    fixed, restored = _restore_dropped_contractions(rewrite, original)
+    assert fixed == rewrite
+    assert restored == []
+
+
+def test_multiple_dropped_contractions_across_different_sentences_both_restored():
+    original = "It's the proof layer. That's the whole point of the exercise."
+    rewrite = "It is the proof layer. That is the whole point of the exercise."
+    fixed, restored = _restore_dropped_contractions(rewrite, original)
+    assert len(restored) == 2
+    assert fixed == original
+
+
+

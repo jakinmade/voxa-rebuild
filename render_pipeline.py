@@ -93,6 +93,7 @@ from deterministic_fixers import (
     _fix_directive_ratio, _fix_modal_hedge, _fix_scaffolding_density,
     _check_uncorrected_insertions, _fix_entity_casing,
     _restore_dropped_subject_openers,
+    _restore_dropped_contractions,
     ownership_miss_is_content_driven, restore_fabricated_ownership_sentences,
     get_fabricated_blocks,
 )
@@ -550,6 +551,17 @@ def run_voice_render(
     if dropped_subject_restored:
         log.info("dropped_subject_openers_restored", restored=dropped_subject_restored)
 
+    # Added 12 Sept 2026 alongside the article-injection widening — no
+    # deterministic backstop existed for contraction expansion before
+    # this, only the pre-generation CONTRACTIONS instruction. Same
+    # placement as the subject/article restoration immediately above:
+    # right after entity-casing restoration, before insertion-check
+    # scoring runs. See _restore_dropped_contractions' own docstring
+    # for the full rationale.
+    clean, dropped_contractions_restored = _restore_dropped_contractions(clean, input_text)
+    if dropped_contractions_restored:
+        log.info("dropped_contractions_restored", restored=dropped_contractions_restored)
+
     initial_insertion_check = _check_uncorrected_insertions(input_text, clean)
     log.info(
         "initial_render_insertion_check",
@@ -846,6 +858,12 @@ def run_voice_render(
             log.info(
                 "dropped_subject_openers_restored_final_pass",
                 restored=final_dropped_subject_restored,
+            )
+        clean, final_dropped_contractions_restored = _restore_dropped_contractions(clean, input_text)
+        if final_dropped_contractions_restored:
+            log.info(
+                "dropped_contractions_restored_final_pass",
+                restored=final_dropped_contractions_restored,
             )
         insertion_check = _check_uncorrected_insertions(input_text, clean)
 
