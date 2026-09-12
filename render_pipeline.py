@@ -74,6 +74,8 @@ from voice_engine import (
     compute_burrows_delta,
     compute_sentence_economy,
     compute_passive_voice,
+    _classify_platform,
+    _select_reference_statement,
 )
 from prompts import (
     _build_voice_dna, _build_system_prompt,
@@ -276,6 +278,7 @@ def run_voice_render(
     starter_baseline: dict | None = None,
     baseline_fingerprints_by_format: dict | None = None,
     reference_statement: str = "",
+    reference_statements: dict | None = None,
     render_mode: str = "preserve",
     render_context: str = "",
     platform_format: str | None = None,
@@ -307,6 +310,19 @@ def run_voice_render(
     for why that separation matters. Default "" (every caller that
     doesn't pass it, and every profile that predates this feature)
     reproduces the prior anchor-selection behaviour exactly.
+
+    reference_statements: added 12 Sept 2026 — see migrations/2026_09_12_
+    add_reference_statements_multi_register.sql. Dict of register-tagged
+    samples (professional/email/casual). When present, this is what
+    actually feeds _build_voice_dna — _select_reference_statement picks
+    the entry matching _classify_platform's read of input_text, falling
+    back through 'professional' / any populated entry / the legacy
+    reference_statement string above / "" in that order. A caller that
+    only has the legacy single value (or an old profile with nothing in
+    the new column) can still just pass reference_statement and get
+    identical behaviour to before this feature — reference_statements
+    defaulting to None makes step 4 of the fallback the only one ever
+    reached in that case.
     """
     if not api_key:
         return RenderResult(success=False, error="API key missing.")
@@ -329,9 +345,14 @@ def run_voice_render(
     import anthropic
 
     detected_mode = _detect_mode(input_text)
+    detected_register = _classify_platform(input_text)
+    resolved_reference_statement = _select_reference_statement(
+        reference_statements, detected_register, reference_statement,
+    )
     log.info(
         "render_start", input_words=len(input_text.split()),
         is_refinement=is_refinement, detected_mode=detected_mode,
+        detected_register=detected_register,
     )
 
     # Recomputed fresh, not read from a cache — see module docstring.
@@ -373,7 +394,7 @@ def run_voice_render(
 
     voice_dna = _build_voice_dna(
         observations, fingerprint_corpus or raw_text, baseline, ai_score,
-        current_input_text=input_text, reference_statement=reference_statement,
+        current_input_text=input_text, reference_statement=resolved_reference_statement,
     )
     mode_instruction = apply_intent_mode(input_text, detected_mode)
     word_count_input = len(input_text.split())
