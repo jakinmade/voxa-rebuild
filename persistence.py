@@ -243,6 +243,21 @@ def restore_profile_if_available() -> bool:
         # it always has (see VOICOVA_Reference_Statement_Design.docx).
         if row.get("reference_statement"):
             st.session_state["reference_statement"] = row["reference_statement"]
+        # Optional (12 Sept 2026) — multi-register reference statements.
+        # See migrations/2026_09_12_add_reference_statements_multi_register.sql.
+        # reference_statements is the source of truth going forward;
+        # the single legacy reference_statement column above is kept
+        # for backward compatibility only. If a profile has the new
+        # column populated, use it. If not (every profile that predates
+        # this feature, or only ever used the old single-sample panel),
+        # synthesize a "professional" entry from the legacy value so
+        # register-aware code added in this feature branch has
+        # something to select even for old rows — this is an in-memory
+        # fallback only, it does not write back to the row.
+        reference_statements = row.get("reference_statements") or {}
+        if not reference_statements and row.get("reference_statement"):
+            reference_statements = {"professional": row["reference_statement"]}
+        st.session_state["reference_statements"] = reference_statements
         # Optional — a row saved before this feature existed simply
         # won't have it, and a render proceeds exactly as it did
         # before (anchor sentences and numeric targets alone).
@@ -298,7 +313,26 @@ def save_profile_if_available() -> None:
         # compute_baseline_metrics/merge step here — this field is
         # never part of the scored baseline, only the generation-time
         # anchor-sentence pool (prompts.py's _build_voice_dna).
+        # Kept for backward compatibility only — see
+        # reference_statements below, the new source of truth.
         "reference_statement": st.session_state.get("reference_statement"),
+        # 12 Sept 2026 — multi-register reference statements. See
+        # migrations/2026_09_12_add_reference_statements_multi_register.sql.
+        # Dual-written alongside the legacy single column above: the
+        # existing single-sample UI panel (_reference_statement_panel
+        # in app.py) still only sets st.session_state.reference_statement
+        # directly, so this mirrors that single save into the
+        # "professional" register key of the new column, giving
+        # register-aware code a real value to read without requiring
+        # the UI panel to be rebuilt in this same PR. A profile that
+        # already has other register keys saved (once the UI supports
+        # it) keeps them — this only ever touches the "professional"
+        # key, never clobbers the whole dict.
+        "reference_statements": {
+            **st.session_state.get("reference_statements", {}),
+            **({"professional": st.session_state["reference_statement"]}
+               if st.session_state.get("reference_statement") else {}),
+        },
         # Explicit, not left to the column's DEFAULT now() — that
         # default only fires on INSERT. This table is written via
         # upsert, and an upsert that hits the existing-row path is an

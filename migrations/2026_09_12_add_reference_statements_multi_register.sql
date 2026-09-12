@@ -1,0 +1,46 @@
+-- Migration: multi-register reference statements (12 Sept 2026).
+--
+-- WHY: the 8 Sept reference_statement column stores exactly ONE
+-- register-matched exemplar per profile, framed around a single
+-- target register ("professional LinkedIn/business writing" per
+-- VOICOVA_Reference_Statement_Design.docx). Real usage is a
+-- ghostwriter/copywriter writing FOR a target audience that varies
+-- by platform and piece — a LinkedIn post, a business email, an
+-- internal Slack message, and a personal note are genuinely
+-- different registers for the same person, not one voice. Calibrating
+-- every render off a single stored sample means anything outside that
+-- one register gets judged against the wrong baseline.
+--
+-- This column stores a small, fixed set of register-tagged samples
+-- instead of one: {"professional": "...", "email": "...",
+-- "casual": "...", "personal": "..."}. Keys are a closed set matching
+-- the register detector being added in the next PR — never
+-- free-text keys, so lookup stays deterministic.
+--
+-- Deliberately NEVER read by compute_baseline_metrics or included in
+-- fingerprint_corpus (render_pipeline.py) — same isolation the 8 Sept
+-- column already established, unchanged here. This column feeds ONLY
+-- the register-aware anchor-sentence/calibration selection being
+-- added in this feature branch.
+--
+-- Backward compatibility: the existing reference_statement text
+-- column is left in place, untouched, and not backfilled by this
+-- migration — persistence.py's read path (updated in this same PR)
+-- checks reference_statements first and falls back to the legacy
+-- single column under the "professional" key only if the new column
+-- is empty for that profile. This keeps every existing profile's
+-- single sample working exactly as before with zero data migration
+-- risk, while new writes go to the new column going forward.
+--
+-- Same additive pattern as every prior column on this table — a new,
+-- nullable column, every existing row and every existing read of
+-- every other column on this table completely unaffected. NULL/empty
+-- object = feature not yet used by this profile, the correct default
+-- state, not an error.
+--
+-- Apply once via the Supabase SQL editor (or Supabase MCP
+-- apply_migration) against the live project. Idempotent — safe to
+-- re-run (ADD COLUMN IF NOT EXISTS).
+
+alter table public.voice_profiles
+    add column if not exists reference_statements jsonb default '{}'::jsonb;
