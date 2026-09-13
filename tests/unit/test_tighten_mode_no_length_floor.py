@@ -41,24 +41,30 @@ def test_default_mode_is_get_it_done_and_gets_no_floor():
     assert "at least 200 words" not in prompt
 
 
-def test_get_it_done_rule_8_forbids_rewording_kept_material():
-    """Real-render bug, same session: removing the length floor let
-    the model reword a kept sentence's grammatical mood ('Curious if
-    X' became 'Did you X?', dropping 'Curious' entirely) — Content
-    Lock correctly flagged this as a dropped fact and an invented
-    sentence, but the generation instruction itself needed tightening
-    to forbid this class of change, not just rely on downstream
-    detection."""
+def test_get_it_done_rule_8_permits_restructuring_but_locks_content():
+    """SUPERSEDED, same session: the original fix for this real bug
+    ('Curious if X' became 'Did you X?', dropping 'Curious') banned ALL
+    rewording/restructuring ("deletion only"). That was itself an
+    overcorrection — the user explicitly asked for restructuring to be
+    genuinely permitted (matching their calibrated sentence
+    construction, e.g. blunter pivots, fragments, statement<->question
+    recasts) as long as no content (facts, claims, ideas, commitments)
+    is added or dropped. Content Lock's existing fabrication/dropped-
+    fact detection remains the safety net for that distinction, same
+    as it already correctly flagged the original 'Curious' incident —
+    the fix here is generation-side permission, not detection-side
+    strictness."""
     prompt = _build_system_prompt(
         voice_dna="dummy", mode_instruction="Tighten it.",
         word_count_input=200, ai_score=0.0, mode="GET_IT_DONE",
     )
-    assert "deletion only" in prompt.lower() or "DELETION ONLY" in prompt
-    assert "may not reword" in prompt.lower() or "not reword, rephrase" in prompt.lower()
+    assert "form is free" in prompt.lower() or "FORM is free" in prompt
+    assert "restructuring is expected" in prompt.lower() or "restructuring, not inventing" in prompt.lower()
+    assert "never" in prompt.lower() and "new claim" in prompt.lower()
 
 
-def test_get_it_done_mode_instruction_no_longer_says_rewrite():
+def test_get_it_done_mode_instruction_permits_restructuring():
     from prompts import apply_intent_mode
     instruction = apply_intent_mode("some text", "GET_IT_DONE")
-    assert not instruction.startswith("Rewrite this text")
-    assert "deletion only" in instruction.lower()
+    assert "restructur" in instruction.lower()
+    assert "content is fixed" in instruction.lower()
