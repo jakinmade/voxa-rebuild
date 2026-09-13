@@ -492,8 +492,29 @@ def run_voice_render(
         (uses_contractions(fingerprint_corpus) if fingerprint_corpus else False)
         or uses_contractions(input_text)
     )
+    # 13 Sept 2026: mirror keep_contractions' OR structure above, which
+    # this previously did not. uses_em_dashes' min_count=2 habit-bar
+    # (see its docstring) is the right test for "should the model be
+    # free to introduce a NEW dash that isn't already in the input" —
+    # but it was also being used to decide whether to strip a dash
+    # that's already sitting in the actual text being rewritten this
+    # render, which is a different question with a different answer:
+    # a dash the user already typed needs no proof of habit to survive
+    # being polished, the same way an already-present contraction or
+    # function word doesn't. Real-render bug: "Scott — following up"
+    # (one em dash, first time in this profile's evidence) had its
+    # dash converted to a comma because combined corpus+input evidence
+    # was 1, below the 2-occurrence bar. Corpus-only signal keeps the
+    # stricter default min_count=2 (unchanged, still a real habit test
+    # when the current input itself has none); current input evidence
+    # now needs only 1, since presence in what's actually being
+    # rewritten isn't the same claim as "this is a consistent habit."
     _dash_evidence = f"{fingerprint_corpus} {input_text}" if fingerprint_corpus else input_text
-    keep_dashes = uses_em_dashes(_dash_evidence)
+    keep_dashes = (
+        (uses_em_dashes(fingerprint_corpus) if fingerprint_corpus else False)
+        or uses_em_dashes(input_text, min_count=1)
+        or uses_em_dashes(_dash_evidence)
+    )
 
     input_metrics_signal = compute_baseline_metrics(input_text)
     input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0

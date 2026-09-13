@@ -287,18 +287,25 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
             for s in density["peak_density_sentences"]:
                 lines.append(f'  "{s}"')
 
-    # Em dash usage in source writing. Tightened 4 Sept 2026 to match
-    # prompts.uses_em_dashes' 2+ occurrence bar (product decision: a
-    # single dash is thin evidence of a real habit, not proof of one) -
-    # kept as a local re.findall count here rather than importing
-    # uses_em_dashes to avoid a circular import (this function lives in
-    # the same module uses_em_dashes does), same pattern this block
-    # already used before today.
+    # Em dash usage in source writing. 13 Sept 2026: mirror the same
+    # keep_dashes fix applied in render_pipeline.py (see its comment) —
+    # a dash already present in the actual current-render input needs
+    # no 2+ "habit" threshold to survive being polished; that bar is
+    # for whether corpus-only history justifies letting the model
+    # introduce a NEW dash the input doesn't have. Previously this
+    # block counted dashes across raw_text+current_input_text combined
+    # and required >=2 total, so a single dash in the input alone
+    # (calibration had none) still failed the bar and got instructed
+    # away — the exact real-render bug ("Scott — following up" becoming
+    # "Scott, following up"). Kept as a local re.findall count rather
+    # than importing uses_em_dashes to avoid a circular import (this
+    # function lives in the same module uses_em_dashes does).
+    em_dashes_in_current_input = len(re.findall(r"[—–\u2014\u2013]", current_input_text)) if current_input_text else 0
     em_dashes_in_source = len(re.findall(r"[—–\u2014\u2013]", structural_text))
-    if em_dashes_in_source < 2:
-        lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
-    else:
+    if em_dashes_in_current_input >= 1 or em_dashes_in_source >= 2:
         lines.append("PUNCTUATION: uses em dashes — this is part of their voice, preserve them where the input has them, don't strip them out")
+    else:
+        lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
 
     # Contractions — added 4 Sept 2026. Real-render finding: _regex_
     # sweep's keep_contractions gate can only PROTECT a contraction the
