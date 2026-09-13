@@ -1483,11 +1483,31 @@ def _score_ai_signal(text: str, user_uses_em_dashes: bool = False) -> float:
         score += 0.10
 
     return min(1.0, score)
-def _extract_function_patterns(text: str) -> dict:
+def _extract_function_patterns(text: str, current_text: str = "") -> dict:
     """
     Extracts the user's unconscious function word and construction patterns.
     These are the connective tissue of their writing — the words they reach
     for without thinking. Impossible to fake. First to be erased by AI.
+
+    current_text: the actual text being rewritten THIS render. Added
+    13 Sept 2026 after a real-render bug: 'preferred_function_words'
+    was computed from `text` (the onboarding calibration corpus) alone
+    and fed to the renderer as "use these naturally where they fit."
+    That's an INSERTION instruction, not a suppression one — unlike
+    the em-dash/contraction fix (4 Sept), simply unioning calibration
+    text with current_text does not fix it, since a word from
+    calibration remains present in the union even when today's input
+    doesn't use it at all. Confirmed live: calibration containing
+    'whilst' caused a render to silently change the user's actual
+    "while" to "whilst". Fix: preferred_function_words is now
+    filtered to only words that ALSO appear in current_text, so the
+    model is never told to use a word absent from what's actually
+    being rewritten. avoided_ai_connectors is a suppression signal
+    ("never introduce these") and is intentionally left sourced from
+    the full corpus — that direction is safe regardless of whether
+    today's input happens to contain them. current_text defaults to
+    "" so every existing caller/test that doesn't pass it keeps the
+    prior (corpus-only) behaviour unchanged.
     """
     import re
     from collections import Counter
@@ -1495,6 +1515,7 @@ def _extract_function_patterns(text: str) -> dict:
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip() and len(s.split()) >= 3]
     words = text.lower().split()
     word_counts = Counter(words)
+    current_word_counts = Counter(current_text.lower().split()) if current_text else None
 
     # 1. Function word preferences
     candidate_function_words = [
@@ -1510,6 +1531,11 @@ def _extract_function_patterns(text: str) -> dict:
         'frankly', 'simply', 'consequently', 'nonetheless',
     }
     user_function_words = [(fw, word_counts[fw]) for fw in candidate_function_words if word_counts.get(fw, 0) > 0]
+    if current_word_counts is not None:
+        # Insertion instruction — only surface a word if today's actual
+        # input evidences it too. Never recommend a word purely on the
+        # strength of historical calibration (see docstring above).
+        user_function_words = [(fw, c) for fw, c in user_function_words if current_word_counts.get(fw, 0) > 0]
     user_function_words.sort(key=lambda x: x[1], reverse=True)
     preferred = [fw for fw, _ in user_function_words[:8]]
     avoided_ai = [fw for fw in ai_defaults if word_counts.get(fw, 0) == 0]
@@ -1784,7 +1810,7 @@ def _score_thought_density(text: str) -> dict:
         "peak_density_sentences": peak_sentences,
         "density_instruction": instruction,
     }
-def _extract_vocabulary_fingerprint(text: str) -> dict:
+def _extract_vocabulary_fingerprint(text: str, current_text: str = "") -> dict:
     """
     Extracts the user's actual vocabulary — the words they reach for without thinking.
     Not the most polished words. The most frequent content words.
@@ -1792,6 +1818,17 @@ def _extract_vocabulary_fingerprint(text: str) -> dict:
 
     Also identifies AI-default substitutions — words the user never writes
     that AI reaches for instead.
+
+    current_text: the actual text being rewritten THIS render. Added
+    13 Sept 2026, same root cause and fix shape as
+    _extract_function_patterns' current_text param (see its docstring):
+    'top_words' is an INSERTION instruction ("use these where they
+    fit"), so it must never surface a word absent from what's actually
+    being rewritten just because it appeared in the onboarding
+    calibration sample. avoided_ai_words is a suppression signal and
+    is intentionally left sourced from the full corpus, same reasoning
+    as avoided_ai_connectors. current_text defaults to "" so existing
+    callers/tests that don't pass it keep prior behaviour.
     """
     import re
     from collections import Counter
@@ -1818,6 +1855,11 @@ def _extract_vocabulary_fingerprint(text: str) -> dict:
 
     # Top 40 most frequent content words — these are their vocabulary fingerprint
     top_words = [word for word, count in word_freq.most_common(40) if count >= 1]
+    if current_text:
+        # Insertion instruction — only recommend a word if today's actual
+        # input evidences it too (see docstring).
+        current_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", current_text.lower()))
+        top_words = [w for w in top_words if w in current_words]
 
     # AI-default substitutions — words AI reaches for that this user avoids
     # Detected by absence from corpus + being common AI vocabulary

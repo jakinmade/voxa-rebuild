@@ -283,7 +283,7 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
         if density["density_instruction"]:
             lines.append(f"\n{density['density_instruction']}")
         if density["peak_density_sentences"]:
-            lines.append("DENSITY EXAMPLES — sentences where multiple ideas compress into one:")
+            lines.append("DENSITY EXAMPLES — sentences where multiple ideas compress into one (structure only, do not copy their exact wording):")
             for s in density["peak_density_sentences"]:
                 lines.append(f'  "{s}"')
 
@@ -402,7 +402,7 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
 
     # Vocabulary fingerprint — actual words, not polished synonyms
     if raw_text and len(raw_text.split()) >= 80:
-        vocab = _extract_vocabulary_fingerprint(raw_text)
+        vocab = _extract_vocabulary_fingerprint(raw_text, current_text=current_input_text)
         vocab_block = _format_vocabulary_fingerprint(vocab)
         if vocab_block:
             lines.append(vocab_block)
@@ -410,7 +410,7 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     # Function patterns — connective tissue AI strips first
     # Detect input genre to suppress email closers in non-email renders
     if raw_text and len(raw_text.split()) >= 100:
-        patterns = _extract_function_patterns(raw_text)
+        patterns = _extract_function_patterns(raw_text, current_text=current_input_text)
         # Detect genre of the INPUT being rendered (not the corpus)
         # Use the shared email-signal regex (voice_engine._EMAIL_SIGNALS,
         # added 12 Sept 2026 for _classify_platform) rather than a second,
