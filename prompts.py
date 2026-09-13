@@ -287,43 +287,19 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
             for s in density["peak_density_sentences"]:
                 lines.append(f'  "{s}"')
 
-    # Em dash usage in source writing. 13 Sept 2026: mirror the same
-    # keep_dashes fix applied in render_pipeline.py (see its comment) —
-    # a dash already present in the actual current-render input needs
-    # no 2+ "habit" threshold to survive being polished; that bar is
-    # for whether corpus-only history justifies letting the model
-    # introduce a NEW dash the input doesn't have. Previously this
-    # block counted dashes across raw_text+current_input_text combined
-    # and required >=2 total, so a single dash in the input alone
-    # (calibration had none) still failed the bar and got instructed
-    # away — the exact real-render bug ("Scott — following up" becoming
-    # "Scott, following up"). Kept as a local re.findall count rather
-    # than importing uses_em_dashes to avoid a circular import (this
-    # function lives in the same module uses_em_dashes does).
-    #
-    # Second real-render bug, same session: the first fix above used
-    # one liberal instruction ("this is part of their voice, use them
-    # naturally") for BOTH the genuine-habit case (corpus alone shows
-    # 2+, safe to let the model use dashes freely) and the single-
-    # occurrence case (this render's input happens to have exactly
-    # one). The model read "use them naturally" as license to convert
-    # OTHER commas into dashes too — one real dash in the input came
-    # back as six in the output. These need different instructions:
-    # genuine habit earns free use; a single in-render occurrence only
-    # earns exact preservation of what's already there, not permission
-    # to add more.
+    # Em dash usage in source writing. 13 Sept 2026, later same
+    # session: explicit user statement — "we don't use em dashes" —
+    # overrides the whole preserve-if-present mechanism built earlier
+    # tonight. Always instruct against em dashes now, regardless of
+    # whether one appears in the current input or calibration corpus;
+    # a dash in the input isn't treated as evidence of real voice for
+    # this person. em_dashes_in_current_input/em_dashes_in_raw kept as
+    # local variables (unused in the decision below) rather than
+    # deleted, since a future person's profile may genuinely have a
+    # confirmed habit worth revisiting this for.
     em_dashes_in_current_input = len(re.findall(r"[—–\u2014\u2013]", current_input_text)) if current_input_text else 0
     em_dashes_in_raw = len(re.findall(r"[—–\u2014\u2013]", raw_text)) if raw_text else 0
-    if em_dashes_in_raw >= 2:
-        lines.append("PUNCTUATION: uses em dashes — this is part of their voice, use them naturally throughout")
-    elif em_dashes_in_current_input >= 1:
-        lines.append(
-            f"PUNCTUATION: the input contains {em_dashes_in_current_input} em dash(es) — "
-            f"preserve exactly those, do not add any more, and do not convert other "
-            f"commas or joining words into new em dashes elsewhere in the rewrite"
-        )
-    else:
-        lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
+    lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any, and convert any that appear in the input to a comma or period")
 
     # Contractions — added 4 Sept 2026. Real-render finding: _regex_
     # sweep's keep_contractions gate can only PROTECT a contraction the

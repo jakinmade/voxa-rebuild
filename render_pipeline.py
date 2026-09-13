@@ -492,39 +492,23 @@ def run_voice_render(
         (uses_contractions(fingerprint_corpus) if fingerprint_corpus else False)
         or uses_contractions(input_text)
     )
-    # 13 Sept 2026: mirror keep_contractions' OR structure above, which
-    # this previously did not. uses_em_dashes' min_count=2 habit-bar
-    # (see its docstring) is the right test for "should the model be
-    # free to introduce a NEW dash that isn't already in the input" —
-    # but it was also being used to decide whether to strip a dash
-    # that's already sitting in the actual text being rewritten this
-    # render, which is a different question with a different answer:
-    # a dash the user already typed needs no proof of habit to survive
-    # being polished, the same way an already-present contraction or
-    # function word doesn't. Real-render bug: "Scott — following up"
-    # (one em dash, first time in this profile's evidence) had its
-    # dash converted to a comma because combined corpus+input evidence
-    # was 1, below the 2-occurrence bar. Corpus-only signal keeps the
-    # stricter default min_count=2 (unchanged, still a real habit test
-    # when the current input itself has none); current input evidence
-    # now needs only 1, since presence in what's actually being
-    # rewritten isn't the same claim as "this is a consistent habit."
-    _dash_evidence = f"{fingerprint_corpus} {input_text}" if fingerprint_corpus else input_text
-    keep_dashes = (
-        (uses_em_dashes(fingerprint_corpus) if fingerprint_corpus else False)
-        or uses_em_dashes(input_text, min_count=1)
-        or uses_em_dashes(_dash_evidence)
-    )
-    # max_dashes: None (unlimited) only for a genuine established habit
-    # (corpus alone shows 2+ — the model earns free use of dashes).
-    # Otherwise, when keep_dashes is True purely because this render's
-    # input happens to contain one, cap survivors at exactly that
-    # count — deterministic safety net alongside the PUNCTUATION
-    # instruction fix in _build_voice_dna (see its comment), since
-    # generation isn't reliably obedient to "preserve exactly N, don't
-    # add more" on its own.
-    _genuine_dash_habit = uses_em_dashes(fingerprint_corpus) if fingerprint_corpus else False
-    max_dashes = None if _genuine_dash_habit else len(re.findall(r"[—–\u2014\u2013]", input_text))
+    # 13 Sept 2026, later same session: explicit user statement — "we
+    # don't use em dashes" — overrides all of the above. Everything
+    # from the two commits earlier tonight (keep_dashes triggering on
+    # a single in-input occurrence, the max_dashes cap, the scoring
+    # exemption) was built on the premise that a dash genuinely present
+    # in the current input reflects the person's real voice and should
+    # survive. That premise is now explicitly wrong for this person:
+    # per their own statement, an em dash appearing in their input
+    # (e.g. from autocorrect/smart-punctuation, not deliberate style)
+    # is not their voice and should always be converted, with no
+    # exception for presence-in-input or genuine historical habit.
+    # keep_dashes is hardcoded False; max_dashes is unused in that path
+    # (kept as dead-but-harmless infrastructure below in case a future
+    # profile genuinely does have a real, confirmed dash habit) so the
+    # sweep always converts every dash to a comma or period.
+    keep_dashes = False
+    max_dashes = 0
 
     input_metrics_signal = compute_baseline_metrics(input_text)
     input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
