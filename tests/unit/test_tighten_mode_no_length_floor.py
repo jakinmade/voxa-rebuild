@@ -59,7 +59,7 @@ def test_get_it_done_rule_8_permits_restructuring_but_locks_content():
         word_count_input=200, ai_score=0.0, mode="GET_IT_DONE",
     )
     assert "form is free" in prompt.lower() or "FORM is free" in prompt
-    assert "restructuring is expected" in prompt.lower() or "restructuring, not inventing" in prompt.lower()
+    assert "restructuring is not inventing" in prompt.lower() or "restructuring, not inventing" in prompt.lower()
     assert "never" in prompt.lower() and "new claim" in prompt.lower()
 
 
