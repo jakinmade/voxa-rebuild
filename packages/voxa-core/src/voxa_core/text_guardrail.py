@@ -258,7 +258,13 @@ def score_ai_tells(text: str, original_input_text: str = "") -> dict:
             kept.append(m.group(1) if m.lastindex else m.group(0))
         return kept
 
-    em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
+    # 13 Sept 2026: mirror the same fix applied to voice_engine.py's
+    # score_ai_tells (this package's not-yet-live counterpart of it) —
+    # only excess em dashes beyond what's genuinely in
+    # original_input_text count as an AI-tell hit. See that module's
+    # docstring for the real-render regression this fixes.
+    original_em_dashes = len(re.findall(r"[\u2012\u2013\u2014\u2015]", original_input_text))
+    em_dash_hits = max(0, len(re.findall(r"[\u2012\u2013\u2014\u2015]", text)) - original_em_dashes)
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
     shield_hits = _matches_excluding_genuine(_PLAUSIBILITY_SHIELD_PHRASES)

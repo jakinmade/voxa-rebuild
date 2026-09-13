@@ -515,6 +515,16 @@ def run_voice_render(
         or uses_em_dashes(input_text, min_count=1)
         or uses_em_dashes(_dash_evidence)
     )
+    # max_dashes: None (unlimited) only for a genuine established habit
+    # (corpus alone shows 2+ — the model earns free use of dashes).
+    # Otherwise, when keep_dashes is True purely because this render's
+    # input happens to contain one, cap survivors at exactly that
+    # count — deterministic safety net alongside the PUNCTUATION
+    # instruction fix in _build_voice_dna (see its comment), since
+    # generation isn't reliably obedient to "preserve exactly N, don't
+    # add more" on its own.
+    _genuine_dash_habit = uses_em_dashes(fingerprint_corpus) if fingerprint_corpus else False
+    max_dashes = None if _genuine_dash_habit else len(re.findall(r"[—–\u2014\u2013]", input_text))
 
     input_metrics_signal = compute_baseline_metrics(input_text)
     input_has_opinion_content = input_metrics_signal["first_person_ratio"] > 0
@@ -539,11 +549,11 @@ def run_voice_render(
             system=system, messages=[{"role": "user", "content": input_text}],
         )
         clean = response.content[0].text
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes, max_dashes=max_dashes)
         if locale == "uk":
             clean = _apply_uk_english(clean)
         clean = _grammar_fix_pass(clean, client, locale=locale, original_input_text=input_text)
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes, max_dashes=max_dashes)
     except Exception as exc:
         log.error("render_failed", reason="llm_call_exception", stage="initial_render", exc_info=True)
         # DIAG (7 Sept 2026): structlog's exc_info=True line above is
@@ -655,7 +665,7 @@ def run_voice_render(
             directive_ratio=directive_fixed, scaffolding_density=scaffolding_fixed,
         )
 
-        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+        clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes, max_dashes=max_dashes)
         if locale == "uk":
             clean = _apply_uk_english(clean)
         delta = score_render_delta(baseline, clean)
@@ -719,7 +729,7 @@ def run_voice_render(
                 if corrected is None:
                     log.error("correction_pass_failed_both_attempts")
                     corrected = pre_llm_correction
-                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+                corrected = _regex_sweep(corrected, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes, max_dashes=max_dashes)
                 if locale == "uk":
                     corrected = _apply_uk_english(corrected)
                 clean = corrected
@@ -799,7 +809,7 @@ def run_voice_render(
             if "scaffolding_density" in still_missed:
                 d = delta["scaffolding_density"]
                 clean, _ = _fix_scaffolding_density(clean, d["baseline"], d["output"])
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes, max_dashes=max_dashes)
             if locale == "uk":
                 clean = _apply_uk_english(clean)
             delta = score_render_delta(baseline, clean)
@@ -812,7 +822,7 @@ def run_voice_render(
 
         ai_tells = score_ai_tells(clean, original_input_text=input_text, calibration_text=fingerprint_corpus or "")
         if not ai_tells["clean"]:
-            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes)
+            clean = _regex_sweep(clean, keep_contractions=keep_contractions, original_input_text=input_text, keep_dashes=keep_dashes, max_dashes=max_dashes)
             ai_tells = score_ai_tells(clean, original_input_text=input_text, calibration_text=fingerprint_corpus or "")
 
         if not input_has_opinion_content and delta.get("first_person_ratio", {}).get("verdict") == "MISSED":

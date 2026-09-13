@@ -4179,10 +4179,17 @@ def score_ai_tells(text: str, original_input_text: str = "", calibration_text: s
     appears verbatim (case-insensitive) in original_input_text is
     excluded from flagging: same principle as the ownership fixer's
     own original-input safety check in deterministic_fixers.py, now
-    applied here too. Em dash / spaced-hyphen checks are NOT exempted
-    this way — those enforce VOICOVA's own house style regardless of
-    the person's usual habits, a deliberate product rule, not an
-    AI-detection heuristic, so there is no "genuine" exception for them.
+    applied here too. Spaced-hyphen checks are NOT exempted this way —
+    a spaced hyphen used as a dash substitute enforces VOICOVA's own
+    house style regardless of the person's usual habits, a deliberate
+    product rule, not an AI-detection heuristic. Em dash checks WERE
+    this absolute too until 13 Sept 2026, when that turned out to be
+    the direct cause of a real false-positive regression (a genuine
+    dash the person actually typed, correctly preserved by a same-day
+    fix elsewhere, was still hard-failed here) — em dash counting is
+    now a COUNT-based exemption instead (see em_dash_hits below):
+    dashes genuinely present in original_input_text don't count,
+    only the excess beyond that does.
 
     calibration_text: the person's onboarding calibration corpus,
     added 4 Sept 2026 — same false-positive class as original_input_
@@ -4233,7 +4240,27 @@ def score_ai_tells(text: str, original_input_text: str = "", calibration_text: s
             kept.append(m.group(1) if m.lastindex else m.group(0))
         return kept
 
-    em_dash_hits = len(re.findall(r"[\u2012\u2013\u2014\u2015]", text))
+    # Em dashes: hard-fail policy is "there should be none the person
+    # didn't write" — NOT "there should be none, period." Fixed
+    # 13 Sept 2026: this previously counted every surviving em dash as
+    # a hit unconditionally (see this function's own docstring at the
+    # time: "a single one surviving is enough to fail"), even when
+    # that exact dash was already present in the person's own
+    # original_input_text — directly contradicting the separate
+    # keep_dashes mechanism in render_pipeline.py/prompts.py, which
+    # (correctly) instructs generation to preserve a dash that's
+    # genuinely in the input. A raw character-presence check can't
+    # exempt this the way phrase-level checks above do (every em dash
+    # looks identical, so "does the input contain one" would trivially
+    # exempt an invented one too) — instead, only the COUNT beyond what
+    # genuinely exists in original_input_text is flagged. Confirmed
+    # live: "Scott — following up..." (one genuine dash) came back with
+    # six in the output after the model over-applied the "preserve
+    # dashes" instruction to unrelated commas — this exemption still
+    # correctly flags those 5 excess/invented ones as a real AI-tell
+    # hit, while no longer flagging the one the person actually wrote.
+    original_em_dashes = len(re.findall(r"[\u2012\u2013\u2014\u2015]", original_input_text))
+    em_dash_hits = max(0, len(re.findall(r"[\u2012\u2013\u2014\u2015]", text)) - original_em_dashes)
     spaced_hyphen_hits = len(_SPACED_HYPHEN_DASH_PATTERN.findall(text))
     phrase_hits = _matches_excluding_genuine(_AI_TELL_PHRASES)
     # Pattern-level exemption, same reasoning as _FRAGMENT_EMPHASIS_

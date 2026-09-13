@@ -75,16 +75,26 @@ def test_default_behaviour_unchanged_when_original_input_text_omitted():
     assert with_default["clean"] is False
 
 
-def test_em_dash_check_is_never_exempted_by_original_input():
-    """Em dashes and spaced-hyphen substitutes enforce VOICOVA's own
-    house style, not an AI-detection heuristic -- these must stay
-    absolute even if the person's own original genuinely used an em
-    dash themselves."""
+def test_em_dash_genuinely_in_original_is_exempted_not_hard_failed():
+    """Policy reversed 13 Sept 2026, superseding this test's original
+    18 Aug assertion. The old rule ("em dashes are VOICOVA's own house
+    style, absolute, no exception even for the person's own genuine
+    dash") directly caused a real-render regression the same session
+    this test was updated: a genuine dash the person actually typed
+    ("Scott — following up...") survived correctly (a separate fix,
+    see render_pipeline.py's keep_dashes), and was then hard-failed
+    anyway by this exact check, producing a false "REVIEW REQUIRED /
+    Risk High" verdict on an unedited, faithful render. A dash that's
+    genuinely in original_input_text is no longer an AI tell by
+    definition — it's what the person wrote. Excess/invented dashes
+    beyond what's genuinely in the input are still flagged in full
+    (see test_score_ai_tells_flags_only_excess_dashes in
+    tests/unit/test_dash_overgeneration_regression.py)."""
     original = "This is my point \u2014 stated plainly, as I always write it."
     render = "This is my point \u2014 stated plainly."
     result = ve.score_ai_tells(render, original_input_text=original)
-    assert result["clean"] is False
-    assert result["em_dash_count"] == 1
+    assert result["clean"] is True
+    assert result["em_dash_count"] == 0
 
 
 def test_exemption_is_case_insensitive():

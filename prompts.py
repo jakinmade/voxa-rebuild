@@ -300,10 +300,28 @@ def _build_voice_dna(observations: list[dict], raw_text: str, baseline: dict | N
     # "Scott, following up"). Kept as a local re.findall count rather
     # than importing uses_em_dashes to avoid a circular import (this
     # function lives in the same module uses_em_dashes does).
+    #
+    # Second real-render bug, same session: the first fix above used
+    # one liberal instruction ("this is part of their voice, use them
+    # naturally") for BOTH the genuine-habit case (corpus alone shows
+    # 2+, safe to let the model use dashes freely) and the single-
+    # occurrence case (this render's input happens to have exactly
+    # one). The model read "use them naturally" as license to convert
+    # OTHER commas into dashes too — one real dash in the input came
+    # back as six in the output. These need different instructions:
+    # genuine habit earns free use; a single in-render occurrence only
+    # earns exact preservation of what's already there, not permission
+    # to add more.
     em_dashes_in_current_input = len(re.findall(r"[—–\u2014\u2013]", current_input_text)) if current_input_text else 0
-    em_dashes_in_source = len(re.findall(r"[—–\u2014\u2013]", structural_text))
-    if em_dashes_in_current_input >= 1 or em_dashes_in_source >= 2:
-        lines.append("PUNCTUATION: uses em dashes — this is part of their voice, preserve them where the input has them, don't strip them out")
+    em_dashes_in_raw = len(re.findall(r"[—–\u2014\u2013]", raw_text)) if raw_text else 0
+    if em_dashes_in_raw >= 2:
+        lines.append("PUNCTUATION: uses em dashes — this is part of their voice, use them naturally throughout")
+    elif em_dashes_in_current_input >= 1:
+        lines.append(
+            f"PUNCTUATION: the input contains {em_dashes_in_current_input} em dash(es) — "
+            f"preserve exactly those, do not add any more, and do not convert other "
+            f"commas or joining words into new em dashes elsewhere in the rewrite"
+        )
     else:
         lines.append("PUNCTUATION: no em dashes in their writing — do not introduce any")
 
@@ -1036,24 +1054,51 @@ def uses_em_dashes(text: str, min_count: int = 2) -> bool:
     return len(_DASH_VARIANTS_PATTERN.findall(text)) >= min_count
 
 
-def _split_dashes_deterministic(text: str, keep_dashes: bool = False) -> str:
-    if keep_dashes:
+def _split_dashes_deterministic(text: str, keep_dashes: bool = False, max_dashes: int | None = None) -> str:
+    """
+    max_dashes: added 13 Sept 2026, deterministic safety net for the
+    single-occurrence case (see the PUNCTUATION block in
+    _build_voice_dna). keep_dashes=True with max_dashes=None means
+    unlimited — a genuine established habit, every dash passes through
+    untouched, same as before this parameter existed. keep_dashes=True
+    with an int caps how many dashes survive: the first max_dashes
+    occurrences (reading order) are kept exactly as-is, and any beyond
+    that are converted using the identical transformation the
+    keep_dashes=False path below already applies. Generation isn't
+    reliably obedient to "preserve exactly N, don't add more" on its
+    own — confirmed live: a single genuine dash in the input came back
+    as six in the output — so this guarantees the cap deterministically
+    regardless of what the model does.
+    """
+    if keep_dashes and max_dashes is None:
         return text
     matches = list(_DASH_VARIANTS_PATTERN.finditer(text))
     if not matches:
+        return text
+
+    convert_from = max_dashes if (keep_dashes and max_dashes is not None) else 0
+    if convert_from >= len(matches):
         return text
 
     result = []
     last_end = 0
     capitalize_next = False
 
-    for m in matches:
+    for i, m in enumerate(matches):
         start, end = m.start(), m.end()
-        segment = text[last_end:start].rstrip()
+        convert = i >= convert_from
+        segment = text[last_end:start]
+        if convert:
+            segment = segment.rstrip()
         if capitalize_next and segment:
             segment = segment[0].upper() + segment[1:]
         result.append(segment)
         capitalize_next = False
+
+        if not convert:
+            result.append(text[start:end])
+            last_end = end
+            continue
 
         global_before = text[:start].rstrip()
         prev_boundary = max(
@@ -1236,7 +1281,7 @@ def _conjugate_verb(m):
 
 
 def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text: str = "",
-                  keep_dashes: bool = False) -> str:
+                  keep_dashes: bool = False, max_dashes: int | None = None) -> str:
     """
     Deterministic guardrail sweep — runs on every render output.
     No API call. No Claude involvement. Code enforces these rules.
@@ -1291,7 +1336,7 @@ def _regex_sweep(text: str, keep_contractions: bool = False, original_input_text
     import re
 
     # 1. Em dashes — split or join, never a spaced-hyphen substitute
-    text = _split_dashes_deterministic(text, keep_dashes=keep_dashes)
+    text = _split_dashes_deterministic(text, keep_dashes=keep_dashes, max_dashes=max_dashes)
     # Belt and braces — any remaining dash variant the splitter missed
     # falls back to a comma join, not " - " (that reintroduces the tell).
     # Skipped when keep_dashes is set - the person's own voice uses
