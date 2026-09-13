@@ -39,3 +39,26 @@ def test_default_mode_is_get_it_done_and_gets_no_floor():
         word_count_input=200, ai_score=0.0,
     )
     assert "at least 200 words" not in prompt
+
+
+def test_get_it_done_rule_8_forbids_rewording_kept_material():
+    """Real-render bug, same session: removing the length floor let
+    the model reword a kept sentence's grammatical mood ('Curious if
+    X' became 'Did you X?', dropping 'Curious' entirely) — Content
+    Lock correctly flagged this as a dropped fact and an invented
+    sentence, but the generation instruction itself needed tightening
+    to forbid this class of change, not just rely on downstream
+    detection."""
+    prompt = _build_system_prompt(
+        voice_dna="dummy", mode_instruction="Tighten it.",
+        word_count_input=200, ai_score=0.0, mode="GET_IT_DONE",
+    )
+    assert "deletion only" in prompt.lower() or "DELETION ONLY" in prompt
+    assert "may not reword" in prompt.lower() or "not reword, rephrase" in prompt.lower()
+
+
+def test_get_it_done_mode_instruction_no_longer_says_rewrite():
+    from prompts import apply_intent_mode
+    instruction = apply_intent_mode("some text", "GET_IT_DONE")
+    assert not instruction.startswith("Rewrite this text")
+    assert "deletion only" in instruction.lower()

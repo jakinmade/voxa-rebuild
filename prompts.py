@@ -167,9 +167,12 @@ def apply_intent_mode(text: str, mode: str) -> str:
     """Applies intent mode task instruction to the render prompt."""
     mode_prompts = {
         "GET_IT_DONE": (
-            "Rewrite this text. Tighten it. Remove anything that doesn't earn its place. "
-            "Preserve the writer's voice exactly: their directness, their cadence, their register. "
-            "Do not add warmth, hedging, or polish that isn't already there."
+            "Tighten this text by deletion only: cut words, phrases, or sentences that don't earn "
+            "their place. Do not reword, rephrase, or restructure any sentence you keep — kept "
+            "material survives verbatim, same wording, same grammatical mood (a statement stays a "
+            "statement, a question stays a question). Preserve the writer's voice exactly: their "
+            "directness, their cadence, their register. Do not add warmth, hedging, or polish that "
+            "isn't already there."
         ),
         "WRITE_SOMETHING": (
             "Help compose this as original content. "
@@ -669,12 +672,18 @@ def _build_system_prompt(
         f"6. {'UK' if locale == 'uk' else 'US'} English throughout.\n"
         "7. Every paragraph in the input gets a paragraph in the output. Do not compress into a summary.\n"
         + (
-            "8. This is a tightening pass: cut redundant words, phrases, or sentences that don't "
-            "earn their place. There is no minimum word count — a shorter result that says the same "
-            "thing is the goal, not a failure. Rule 7 (every paragraph preserved, no summarising) is "
-            "still the safeguard against over-compression: cut fat within a paragraph, don't cut whole "
-            "paragraphs or ideas. Do not introduce a new claim, opinion, or idea that is not stated or "
-            "directly implied by the input.\n"
+            "8. This is a tightening pass by DELETION ONLY: you may remove entire words, phrases, "
+            "or sentences that add nothing. You may NOT reword, rephrase, or restructure anything "
+            "you keep — every sentence, clause, or phrase that survives must appear with its "
+            "original wording and grammatical mood exactly as written (a statement must stay a "
+            "statement, a question must stay a question; do not turn 'Curious if X' into 'Did you "
+            "X?' or similarly recast a sentence, even if the recast version is shorter or reads "
+            "more naturally — that is rewriting, not cutting, and is not permitted here). There is "
+            "no minimum word count — a shorter result that keeps its surviving sentences verbatim "
+            "is the goal, not a failure. Rule 7 (every paragraph preserved, no summarising) is "
+            "still the safeguard against over-compression: cut fat within a paragraph, don't cut "
+            "whole paragraphs or ideas. Do not introduce a new claim, opinion, or idea that is not "
+            "stated or directly implied by the input.\n"
             if mode == "GET_IT_DONE" else
             f"8. Output must be at least {word_count_input} words. The input is {word_count_input} words. "
             "Match or exceed it. If you run short, add specificity and texture to points already in the "
