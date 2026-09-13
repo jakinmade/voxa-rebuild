@@ -595,6 +595,7 @@ def _build_system_prompt(
     voice_profile_summary: str = "",
     platform_format: str | None = None,
     locale: str = "uk",
+    mode: str = "GET_IT_DONE",
 ) -> str:
     """
     Builds the full system prompt.
@@ -629,6 +630,28 @@ def _build_system_prompt(
     time, not just at the correction-pass stage, is correct: a public
     social post should never open addressed to a private individual.
     See rule 10's own inline comment for the incident this fixes.
+
+    mode: added 13 Sept 2026. Real-render bug: rule 8 below (the
+    word-count floor) was unconditional across every intent mode,
+    including GET_IT_DONE — whose own mode_instruction explicitly says
+    "Tighten it. Remove anything that doesn't earn its place." A floor
+    requiring the output to match or exceed the input's word count
+    structurally cannot coexist with an instruction to cut filler; the
+    two are opposite goals over the same axis. Confirmed as the likely
+    cause of a real render coming back nearly identical to its input
+    (a well-drafted email with genuinely little to cut, but the model
+    had no room to try even where it could have): with rule 8 in
+    force, cutting anything makes the output too short, and rule 8
+    explicitly forbids padding to compensate ("do not pad with
+    filler") — the only way to satisfy both is to change nothing.
+    GET_IT_DONE now gets a rule 8 that permits genuine shortening
+    (paragraph-preservation, rule 7, remains the safeguard against
+    over-compression); every other mode keeps the floor, since
+    WRITE_SOMETHING/THINK_IT_THROUGH/HELP_ME_UNDERSTAND are explicitly
+    expansive by design and a floor makes sense there. Defaults to
+    "GET_IT_DONE" (matching apply_intent_mode's own default) so any
+    caller not yet passing this explicitly keeps that mode's corrected
+    behaviour rather than silently reverting to the old floor.
     """
 
     base_rules = (
@@ -645,12 +668,21 @@ def _build_system_prompt(
         "5. No preamble. No explanation. Return only the rewritten text.\n"
         f"6. {'UK' if locale == 'uk' else 'US'} English throughout.\n"
         "7. Every paragraph in the input gets a paragraph in the output. Do not compress into a summary.\n"
-        f"8. Output must be at least {word_count_input} words. The input is {word_count_input} words. "
-        "Match or exceed it. If you run short, add specificity and texture to points already in the "
-        "input - more detail on what is already there. Do not pad with filler, and do not introduce "
-        "a new claim, opinion, or idea that is not stated or directly implied by the input, even to "
-        "hit the word count."
-        "\n9. Do not invent content. You may split one long sentence into two or three shorter ones "
+        + (
+            "8. This is a tightening pass: cut redundant words, phrases, or sentences that don't "
+            "earn their place. There is no minimum word count — a shorter result that says the same "
+            "thing is the goal, not a failure. Rule 7 (every paragraph preserved, no summarising) is "
+            "still the safeguard against over-compression: cut fat within a paragraph, don't cut whole "
+            "paragraphs or ideas. Do not introduce a new claim, opinion, or idea that is not stated or "
+            "directly implied by the input.\n"
+            if mode == "GET_IT_DONE" else
+            f"8. Output must be at least {word_count_input} words. The input is {word_count_input} words. "
+            "Match or exceed it. If you run short, add specificity and texture to points already in the "
+            "input - more detail on what is already there. Do not pad with filler, and do not introduce "
+            "a new claim, opinion, or idea that is not stated or directly implied by the input, even to "
+            "hit the word count."
+        )
+        + "\n9. Do not invent content. You may split one long sentence into two or three shorter ones "
         "to match sentence-rhythm targets - that is allowed and often required, but ONLY at a comma "
         "immediately followed by a coordinating conjunction (and / but / so / because) that already "
         "starts a full clause with its own subject and verb - the same clause already reads as a "

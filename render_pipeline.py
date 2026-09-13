@@ -520,7 +520,7 @@ def run_voice_render(
         input_text=input_text, render_context=render_context,
         voice_profile_summary=voice_profile_summary or "",
         platform_format=platform_format,
-        locale=locale,
+        locale=locale, mode=detected_mode,
     )
 
     client = anthropic.Anthropic(api_key=api_key)
