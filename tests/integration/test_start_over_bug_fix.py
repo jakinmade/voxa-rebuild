@@ -206,3 +206,89 @@ def test_fresh_calibration_clears_the_skip_restore_flag():
     assert st.session_state.get("baseline_fingerprint"), (
         "Sanity check: the sample should have actually built a baseline"
     )
+
+
+def test_reset_all_sets_refresh_survival_query_param():
+    """Regression for the 14 Sept 2026 fix: _skip_profile_restore alone
+    doesn't survive a plain browser refresh mid-calibration (session_
+    state is wiped along with it), which silently let the old profile
+    snap back with no visible sign anything reverted. reset_all() must
+    also set st.query_params["calibrating"], which lives in the URL
+    and does survive a refresh - see reset_all()'s docstring and the
+    top-level restore check in app.py."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    import streamlit as st
+    from storage import reset_all, init_state
+
+    st.session_state.clear()
+    init_state()
+    st.query_params.clear()
+
+    reset_all()
+
+    assert st.session_state.get("_skip_profile_restore") is True
+    assert st.query_params.get("calibrating") == "1", (
+        "reset_all() must set the query-param backstop, not just the "
+        "session_state flag, or a mid-calibration refresh silently "
+        "restores the old profile again"
+    )
+
+
+def test_refresh_survival_query_param_outlives_a_session_state_wipe():
+    """The actual failure mode, modelled directly: a browser refresh
+    clears st.session_state but NOT the URL's query params. Confirms
+    the backstop set by reset_all() is still readable after exactly
+    the kind of wipe a refresh causes - if this ever stopped being
+    true, the whole fix would be silently inert."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    import streamlit as st
+    from storage import reset_all, init_state
+
+    st.session_state.clear()
+    init_state()
+    st.query_params.clear()
+
+    reset_all()
+    assert st.query_params.get("calibrating") == "1"
+
+    # Simulate a refresh: session_state wiped, query_params untouched
+    # (a refresh keeps the URL; it's session_state that's server-side
+    # and tied to the old script run).
+    st.session_state.clear()
+
+    assert st.query_params.get("calibrating") == "1", (
+        "query_params must survive a session_state wipe - this is the "
+        "entire point of the fix"
+    )
+
+
+def test_fresh_calibration_clears_the_query_param_too():
+    """Companion to test_fresh_calibration_clears_the_skip_restore_flag:
+    _add_writing_sample_to_fingerprint must clear BOTH the session_
+    state flag and the query_params backstop once fresh calibration
+    data actually lands, or a stale "calibrating=1" left in the URL
+    would keep suppressing restore on every later visit via that same
+    link/tab."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    import streamlit as st
+    import app as voicova_app
+    from storage import init_state
+
+    st.session_state.clear()
+    init_state()
+    st.session_state["_skip_profile_restore"] = True
+    st.query_params["calibrating"] = "1"
+
+    voicova_app._add_writing_sample_to_fingerprint(
+        "I think we should move fast on this and I want the team focused."
+    )
+
+    assert not st.session_state.get("_skip_profile_restore")
+    assert not st.query_params.get("calibrating"), (
+        "The query-param backstop must be cleared at the same choke "
+        "point as the session_state flag, or it lingers in the URL "
+        "and keeps suppressing restore after calibration is done"
+    )

@@ -1192,7 +1192,22 @@ init_state()
 # Cleared automatically the moment fresh calibration data is actually
 # added (_add_writing_sample_to_fingerprint), not consumed here - it
 # needs to survive every intermediate rerun across Screens 1-3.
-if not st.session_state.get("_skip_profile_restore") and restore_profile_if_available():
+#
+# query_params.get("calibrating") (14 Sept 2026 fix): the session_state
+# flag above doesn't survive a plain browser refresh mid-calibration -
+# session_state is wiped along with it, and this restore call still
+# runs unconditionally, silently pulling the old profile back with no
+# visible sign anything reverted (confirmed live via direct DB
+# inspection). reset_all() now also sets this URL query param, which
+# DOES survive a refresh, as a backstop for exactly that case. Same
+# top-level query-param pattern already used for payment/view/restore
+# below. Cleared at the same choke point as the session_state flag,
+# see _add_writing_sample_to_fingerprint.
+if (
+    not st.session_state.get("_skip_profile_restore")
+    and not st.query_params.get("calibrating")
+    and restore_profile_if_available()
+):
     st.session_state.screen = 4
     if not st.session_state.get("_returning_user_sidebar"):
         st.session_state["_returning_user_sidebar"] = True
@@ -1749,6 +1764,14 @@ def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = 
     # Harmless no-op when the flag was never set (the normal
     # Learn-from-edit case on an already-restored profile).
     st.session_state.pop("_skip_profile_restore", None)
+    # 14 Sept 2026 fix: same choke point clears the query_params
+    # refresh-survival backstop (see reset_all() and the top-level
+    # restore check). Guarded by "in" first, not just a bare pop/del,
+    # because st.query_params raises on deleting an absent key rather
+    # than no-op'ing like dict.pop(..., None) - and this path fires on
+    # every Learn-from-edit save too, where the param was never set.
+    if "calibrating" in st.query_params:
+        del st.query_params["calibrating"]
     if platform_format:
         by_format = st.session_state.get("baseline_fingerprints_by_format") or {}
         by_format[platform_format] = _merge_baseline(
