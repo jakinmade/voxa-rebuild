@@ -92,17 +92,36 @@ def reset_all():
     completes and saves, same fail-safe spirit as the rest of this
     module.
 
-    Known, accepted limitation: this flag lives only in
-    st.session_state, not any durable store. If someone starts a
-    fresh calibration and abandons the browser tab entirely before
-    finishing it, a later visit's fresh session will auto-restore the
-    old profile again - the safe fallback (worst case, they click
-    "Start over" again), not a broken state."""
+    14 Sept 2026 fix: the accepted limitation below turned out to bite
+    on a much shorter timescale than "abandons the browser tab
+    entirely" - a plain mid-calibration refresh (e.g. to recover a
+    collapsed sidebar) also wipes st.session_state, and with it this
+    flag, silently. Because restore_profile_if_available() runs
+    unconditionally on every page load, that refresh alone was enough
+    to snap the OLD profile straight back with zero visible sign
+    anything reverted - confirmed live via direct DB inspection: the
+    stored baseline_fingerprint/raw_text were still the pre-reset
+    sample after a same-day Start Over + refresh. Fixed by mirroring
+    the flag into st.query_params (same top-level query-param pattern
+    already used for payment/view/restore in app.py, which DOES
+    survive a refresh, since it lives in the URL, not server-side
+    session state) alongside the session_state flag. Session_state
+    flag kept too, deliberately: it's what actually gates the restore
+    check on every rerun without needing to touch the URL each time;
+    query_params is purely the refresh-survival backstop and is only
+    consulted as a fallback.
+
+    Old accepted limitation (still true, just narrower now): this
+    still only protects against refresh/reload, not a fully abandoned
+    tab that comes back as a brand new browser session days later -
+    that later visit will still auto-restore the old profile, and the
+    fallback is still "click Start over again," not a broken state."""
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     init_state()
     st.session_state.screen = 1
     st.session_state["_skip_profile_restore"] = True
+    st.query_params["calibrating"] = "1"
 
 
 def generate_receipt(session_start: str, word_count: int) -> dict:
