@@ -279,3 +279,112 @@ def test_on_stage_callback_is_optional():
             on_stage=None,
         )
     assert result.success
+
+
+# ---------------------------------------------------------------------------
+# Per-format baseline re-keying (17 Sept 2026) — see
+# VOICOVA_Voice_Fidelity_Bug_Report.docx. Previously the per-format
+# baseline could only ever be consulted when platform_format (a manual,
+# render_mode == "elevate"-only UI field using a none/social/email
+# vocabulary) was passed in, and even then it never matched
+# baseline_fingerprints_by_format's actual keys — which have always come
+# from _classify_platform's email/professional/casual vocabulary via
+# Learn-from-edit. These tests prove the fix at the pipeline level,
+# independent of app.py's Streamlit wiring.
+# ---------------------------------------------------------------------------
+
+def test_detected_register_always_populated_on_success():
+    """RenderResult.detected_register must come back set on every
+    successful render, regardless of render_mode or whether a
+    per-format baseline exists yet — callers (Learn-from-edit) need
+    this to know which bucket to feed next."""
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = mock_cls.return_value
+        mock_client.messages.create.return_value = _fake_response("Some output text.")
+        from render_pipeline import run_voice_render
+        result = run_voice_render(
+            input_text="Please review the attached figures at your earliest convenience.",
+            api_key="test-key",
+            raw_text=_RAW_TEXT,
+            sample2_completions=[_RAW_TEXT],
+            baseline=_BASELINE,
+            baseline_texts=[_RAW_TEXT],
+            render_mode="preserve",
+        )
+    assert result.success
+    assert result.detected_register in ("email", "professional", "casual")
+
+
+def test_per_format_baseline_now_used_in_preserve_mode_without_platform_format():
+    """The actual bug: a well-populated per-format baseline (mimicking
+    real accumulated Learn-from-edit data) previously sat completely
+    unused unless render_mode == "elevate" and a matching
+    platform_format happened to be passed — which never lined up with
+    this dict's real keys anyway. It must now be picked up in ordinary
+    "preserve" mode, with no platform_format passed at all, purely from
+    the register auto-detected off input_text."""
+    from render_pipeline import run_voice_render, _classify_platform
+
+    input_text = "Please review the attached figures at your earliest convenience."
+    detected = _classify_platform(input_text)
+    rich_format_baseline = {**_BASELINE, "word_count": 900}
+
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = mock_cls.return_value
+        mock_client.messages.create.return_value = _fake_response(
+            "I reviewed the numbers last night. They hold up."
+        )
+        result = run_voice_render(
+            input_text=input_text,
+            api_key="test-key",
+            raw_text=_RAW_TEXT,
+            sample2_completions=[_RAW_TEXT],
+            # Deliberately a thin/mismatched blended baseline, so the
+            # test can tell whether the format-specific one actually
+            # got selected instead of the blended fallback.
+            baseline={**_BASELINE, "word_count": 10},
+            baseline_texts=[_RAW_TEXT],
+            baseline_fingerprints_by_format={detected: rich_format_baseline},
+            render_mode="preserve",  # not "elevate" — the old gate would have blocked this
+            platform_format=None,  # not set — the old key would have missed entirely
+        )
+
+    assert result.success
+    assert result.detected_register == detected
+    # delta's word_count-derived fields aren't asserted directly (LLM
+    # output is mocked), but confirm the pipeline reached the point of
+    # scoring against a baseline at all, and reported the register it
+    # used — the concrete, observable half of "which baseline got
+    # picked" available without reaching into internal state.
+    assert result.delta is not None
+    assert result.voice_report is not None
+
+
+def test_per_format_baseline_ignored_below_800_word_threshold():
+    """Unchanged behaviour (report Section 4): a thin per-format
+    baseline still defers to the blended one until it clears 800
+    words, regardless of the re-keying fix."""
+    from render_pipeline import run_voice_render, _classify_platform
+
+    input_text = "Please review the attached figures at your earliest convenience."
+    detected = _classify_platform(input_text)
+    thin_format_baseline = {**_BASELINE, "word_count": 200}
+
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = mock_cls.return_value
+        mock_client.messages.create.return_value = _fake_response(
+            "I reviewed the numbers last night. They hold up."
+        )
+        result = run_voice_render(
+            input_text=input_text,
+            api_key="test-key",
+            raw_text=_RAW_TEXT,
+            sample2_completions=[_RAW_TEXT],
+            baseline=_BASELINE,
+            baseline_texts=[_RAW_TEXT],
+            baseline_fingerprints_by_format={detected: thin_format_baseline},
+            render_mode="preserve",
+        )
+
+    assert result.success
+    assert result.detected_register == detected

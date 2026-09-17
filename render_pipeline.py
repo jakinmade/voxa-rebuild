@@ -112,6 +112,17 @@ class RenderResult:
     output_text: str | None = None
     intent_mode: str | None = None
     restructure_declined: bool = False
+    # Always set (never lazy/generated-only, unlike the two fields
+    # below) — the email/professional/casual register _classify_platform
+    # detected for input_text this render. Callers use this as the
+    # single source of truth key for anything register-scoped (the
+    # per-format baseline, Learn-from-edit accumulation) instead of
+    # the separate, UI-driven platform_format parameter, which controls
+    # output restructuring only and uses a different, narrower
+    # vocabulary (none/social/email) for a different purpose. See the
+    # VOICOVA_Voice_Fidelity_Bug_Report.docx fix (17 Sept 2026) for
+    # why these two were previously and wrongly conflated.
+    detected_register: str | None = None
     # Set only when this call generated a NEW voice-profile summary
     # (the lazy-generation path) — the caller decides how/whether to
     # persist it (Streamlit: save_profile_if_available(); API: a
@@ -447,13 +458,22 @@ def run_voice_render(
     fingerprint_samples = [compute_baseline_metrics(t) for t in baseline_texts] if baseline_texts else []
     dimension_stability = compute_dimension_stability(fingerprint_samples) if fingerprint_samples else None
 
-    # Per-register baseline (30 Aug 2026): unchanged logic, just reads
-    # a parameter instead of session_state.
-    if platform_format:
-        by_format = baseline_fingerprints_by_format or {}
-        format_baseline = by_format.get(platform_format)
-        if format_baseline and format_baseline.get("word_count", 0) >= 800:
-            baseline = format_baseline
+    # Per-register baseline (30 Aug 2026; re-keyed 17 Sept 2026 — see
+    # VOICOVA_Voice_Fidelity_Bug_Report.docx). Previously keyed on
+    # platform_format, the manual UI field that only exists in
+    # render_mode == "elevate" and uses a narrower, mismatched
+    # vocabulary (none/social/email vs. this classifier's
+    # email/professional/casual) — so this safety net could never
+    # activate outside elevate mode, and even then rarely matched.
+    # Now keyed on detected_register, computed unconditionally above
+    # from the actual input text, exactly the same vocabulary already
+    # used for style_checklists and reference_statements elsewhere in
+    # this function. detected_register is never empty (_classify_platform
+    # always returns a real register), so this now runs on every render.
+    by_format = baseline_fingerprints_by_format or {}
+    format_baseline = by_format.get(detected_register)
+    if format_baseline and format_baseline.get("word_count", 0) >= 800:
+        baseline = format_baseline
 
     fingerprint_corpus = raw_text + " " + " ".join(sample2_completions or [])
     fingerprint_corpus = fingerprint_corpus.strip()
@@ -937,6 +957,7 @@ def run_voice_render(
             output_text=clean,
             intent_mode=detected_mode,
             restructure_declined=restructure_declined,
+            detected_register=detected_register,
             voice_profile_summary_generated=generated_summary,
             style_checklist_generated=({detected_register: generated_style_checklist} if generated_style_checklist else None),
             insertion_check=insertion_check,
@@ -965,6 +986,7 @@ def run_voice_render(
         output_text=clean,
         intent_mode=detected_mode,
         restructure_declined=restructure_declined,
+        detected_register=detected_register,
         voice_profile_summary_generated=generated_summary,
         style_checklist_generated=({detected_register: generated_style_checklist} if generated_style_checklist else None),
         insertion_check=None,
