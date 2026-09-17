@@ -787,19 +787,25 @@ def test_learn_from_edit_button_shown_and_adds_sample_when_edited():
 
 
 # ---------------------------------------------------------------------------
-# Per-register compounding baseline (30 Aug 2026) — Learn-from-edit, driven
-# through the real UI, must feed the per-format baseline when the edited
-# render targeted a specific platform_format, and must NOT create one when
+# Per-register compounding baseline (30 Aug 2026; re-keyed 17 Sept 2026 —
+# see VOICOVA_Voice_Fidelity_Bug_Report.docx) — Learn-from-edit, driven
+# through the real UI, must feed the per-format baseline when the render
+# it's learning from had a detected register, and must NOT create one when
 # it didn't (regression check on the additive design).
 # ---------------------------------------------------------------------------
 
-def test_learn_from_edit_populates_per_format_baseline_when_platform_format_set():
+def test_learn_from_edit_populates_per_format_baseline_when_register_detected():
     at = AppTest.from_file(_APP_PATH)
     at.session_state["screen"] = 1
     at.run()
     output_text = "This is the original rendered text, untouched."
     output_key = _seed_rendered_output(at, output_text)
-    at.session_state["platform_format_input"] = "email"
+    # 17 Sept 2026 re-keying fix: the per-format bucket is now keyed on
+    # the register the render was actually detected/scored against
+    # (render_detected_register), not the separate, elevate-mode-only
+    # platform_format UI field — see
+    # VOICOVA_Voice_Fidelity_Bug_Report.docx.
+    at.session_state["render_detected_register"] = "email"
     at.run()
 
     edited_text = (
@@ -826,13 +832,13 @@ def test_learn_from_edit_populates_per_format_baseline_when_platform_format_set(
     assert at.session_state["baseline_fingerprint"]["word_count"] >= len(edited_text.split())
 
 
-def test_learn_from_edit_creates_no_per_format_baseline_when_platform_format_unset():
+def test_learn_from_edit_creates_no_per_format_baseline_when_register_unset():
     at = AppTest.from_file(_APP_PATH)
     at.session_state["screen"] = 1
     at.run()
     output_text = "This is the original rendered text, untouched."
     output_key = _seed_rendered_output(at, output_text)
-    at.session_state["platform_format_input"] = None
+    at.session_state["render_detected_register"] = None
     at.run()
 
     edited_text = (

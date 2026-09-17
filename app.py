@@ -1722,7 +1722,7 @@ def render_alert(message: str, kind: str = "info"):
     )
 
 
-def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = None) -> None:
+def _add_writing_sample_to_fingerprint(text: str, register: str | None = None) -> None:
     """
     The complete "strengthen the baseline with one more genuine
     writing sample" sequence — extracted 29 Aug 2026 from inside
@@ -1739,19 +1739,32 @@ def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = 
     strengthened profile via save_profile_if_available() (a safe
     no-op if no baseline exists yet).
 
-    platform_format (30 Aug 2026): optional, "social" | "email" | None.
+    register (30 Aug 2026, re-keyed 17 Sept 2026): optional,
+    "email" | "professional" | "casual" | None — a _classify_platform
+    register, NOT the platform_format UI field (see
+    VOICOVA_Voice_Fidelity_Bug_Report.docx). Originally this parameter
+    was called platform_format and took the manual, elevate-mode-only
+    UI selection (none/social/email); that field only ever exists in
+    one render mode and uses a different vocabulary than the register
+    classifier, so the per-format bucket it fed was effectively always
+    empty. Callers now pass st.session_state.render_detected_register
+    (the actual register _classify_platform detected for the render
+    this sample came from), so the bucket populates on every
+    Learn-from-edit regardless of render_mode.
+
     When given, ALSO merges this sample into a second, independent
-    compounding baseline keyed by format —
-    st.session_state.baseline_fingerprints_by_format[platform_format]
+    compounding baseline keyed by register —
+    st.session_state.baseline_fingerprints_by_format[register]
     — built with the same _merge_baseline logic as the blended
-    baseline below, so a person's email voice and social voice
+    baseline below, so a person's email voice and business voice
     compound separately instead of being flattened into one register.
     Purely additive: the existing blended baseline_fingerprint is
     still merged exactly as before regardless of this parameter, and
     every existing caller/reader of it is unaffected. Onboarding
-    samples (Screen 1/3) don't have a platform_format and correctly
-    pass None here — only Learn-from-edit samples, which know which
-    register the render targeted, populate the per-format baseline.
+    samples (Screen 1/3) don't have a known render register and
+    correctly pass None here — only Learn-from-edit samples, which
+    know which register the render targeted, populate the per-format
+    baseline.
     """
     new_metrics = compute_baseline_metrics(text)
     st.session_state.baseline_fingerprint = _merge_baseline(
@@ -1772,10 +1785,10 @@ def _add_writing_sample_to_fingerprint(text: str, platform_format: str | None = 
     # every Learn-from-edit save too, where the param was never set.
     if "calibrating" in st.query_params:
         del st.query_params["calibrating"]
-    if platform_format:
+    if register:
         by_format = st.session_state.get("baseline_fingerprints_by_format") or {}
-        by_format[platform_format] = _merge_baseline(
-            by_format.get(platform_format), new_metrics
+        by_format[register] = _merge_baseline(
+            by_format.get(register), new_metrics
         )
         st.session_state.baseline_fingerprints_by_format = by_format
     st.session_state.cumulative_words += len(text.split())
@@ -2738,6 +2751,12 @@ def _run_render(
     st.session_state.voice_report = result.voice_report
     st.session_state.render_id = result.render_id
     st.session_state.render_completed_at = result.render_completed_at
+    # 17 Sept 2026 fix (VOICOVA_Voice_Fidelity_Bug_Report.docx): the
+    # register this render was actually detected/scored against,
+    # stashed so a later Learn-from-edit click on this same output can
+    # bucket its sample under the right per-format baseline key. See
+    # _add_writing_sample_to_fingerprint's docstring.
+    st.session_state.render_detected_register = result.detected_register
 
     if baseline:
         write_render_history(
@@ -3979,7 +3998,7 @@ Show the per-dimension breakdown
                             st.session_state.correction_evidence = history
                         _add_writing_sample_to_fingerprint(
                             _edited_output,
-                            platform_format=st.session_state.get("platform_format_input"),
+                            register=st.session_state.get("render_detected_register"),
                         )
                         render_alert(
                             "Added. Your edit now helps strengthen your voice baseline.",
